@@ -15,9 +15,10 @@ const Header = ({ cartItems = 0 }: HeaderProps) => {
           {/* Logo */}
           <div className="flex items-center space-x-2">
             <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">MR</span>
+              <span className="text-white font-bold text-sm">T</span>
             </div>
-            <span className="text-xl font-bold text-gray-900">MobileRepair</span>
+            <span className="text-xl font-bold text-gray-900">Tryodo</span>
+            <span className="text-sm text-gray-500 hidden sm:block">Electronics Marketplace</span>
           </div>
 
           {/* Desktop Navigation */}

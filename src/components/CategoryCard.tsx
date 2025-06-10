@@ -23,7 +23,11 @@ const CategoryCard = ({ title, description, icon: Icon, gradient, onClick }: Cat
       </div>
       
       <h3 className="text-lg font-bold text-white mb-2">{title}</h3>
-      <p className="text-white/80 text-sm">{description}</p>
+      <p className="text-white/80 text-sm mb-4">{description}</p>
+      
+      <div className="flex items-center justify-between">
+        <span className="text-white/90 text-sm font-medium">Shop Now →</span>
+      </div>
       
       {/* Decorative elements */}
       <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full transform translate-x-10 -translate-y-10"></div>
