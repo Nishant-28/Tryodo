@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { Monitor, Battery, Smartphone, Shield, Filter, Sort, Search, Star, Zap, Clock } from 'lucide-react';
+import { Monitor, Battery, Smartphone, Shield, Filter, ArrowUpDown, Search, Star, Zap, Clock } from 'lucide-react';
 import Header from '@/components/Header';
 import CategoryCard from '@/components/CategoryCard';
 import PhoneSearch from '@/components/PhoneSearch';
@@ -317,7 +316,7 @@ const Order = () => {
 
                 {/* Sort By */}
                 <div className="flex items-center space-x-2">
-                  <Sort className="h-4 w-4 text-gray-400" />
+                  <ArrowUpDown className="h-4 w-4 text-gray-400" />
                   <select
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value)}
