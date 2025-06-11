@@ -5,6 +5,17 @@ import CategoryCard from '@/components/CategoryCard';
 import PhoneSearch from '@/components/PhoneSearch';
 import VendorCard from '@/components/VendorCard';
 import { Button } from '@/components/ui/button';
+import Cart from '@/components/Cart';
+import OrderTracking from '@/components/OrderTracking';
+
+interface CartItem {
+  id: string;
+  name: string;
+  vendor: string;
+  price: number;
+  quantity: number;
+  image?: string;
+}
 
 const categories = [
   {
@@ -132,7 +143,16 @@ const mockVendors = [
 const Order = () => {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedPhone, setSelectedPhone] = useState<{brand: string, model: string} | null>(null);
-  const [cartItems, setCartItems] = useState(0);
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [isCartOpen, setIsCartOpen] = useState(false);
+  const [showOrderTracking, setShowOrderTracking] = useState(false);
+  const [trackedOrder, setTrackedOrder] = useState({
+    orderId: 'TRX789012345',
+    currentStatus: 'shipped',
+    estimatedDelivery: 'Today, 06:00 PM',
+    vendor: 'Rohan Communication',
+    deliveryBoy: 'Rajesh Kumar'
+  });
   const [sortBy, setSortBy] = useState('price');
   const [filterByStock, setFilterByStock] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -145,9 +165,33 @@ const Order = () => {
     setSelectedPhone({ brand, model });
   };
 
-  const handleAddToCart = (vendorId: string, optionId: string) => {
-    setCartItems(prev => prev + 1);
-    console.log(`Added item ${optionId} from vendor ${vendorId} to cart`);
+  const handleAddToCart = (itemToAdd: { id: string; name: string; price: number; vendor: string }) => {
+    setCartItems((prevItems) => {
+      const existingItem = prevItems.find((item) => item.id === itemToAdd.id);
+      if (existingItem) {
+        return prevItems.map((item) =>
+          item.id === itemToAdd.id ? { ...item, quantity: item.quantity + 1 } : item
+        );
+      } else {
+        return [...prevItems, { ...itemToAdd, quantity: 1 }];
+      }
+    });
+    setIsCartOpen(true);
+  };
+
+  const handleUpdateQuantity = (id: string, quantity: number) => {
+    setCartItems((prevItems) => {
+      if (quantity <= 0) {
+        return prevItems.filter((item) => item.id !== id);
+      }
+      return prevItems.map((item) =>
+        item.id === id ? { ...item, quantity } : item
+      );
+    });
+  };
+
+  const handleRemoveItem = (id: string) => {
+    setCartItems((prevItems) => prevItems.filter((item) => item.id !== id));
   };
 
   const resetFlow = () => {
@@ -184,7 +228,7 @@ const Order = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header cartItems={cartItems} />
+      <Header cartItems={cartItems.length} onCartClick={() => setIsCartOpen(true)} />
       
       <main className="container mx-auto px-4 py-8">
         {/* Enhanced Header */}
@@ -213,6 +257,28 @@ const Order = () => {
             </div>
           </div>
         </div>
+
+        {/* Order Tracking Button */}
+        <div className="flex justify-center mb-8">
+          <Button onClick={() => setShowOrderTracking(true)} className="bg-purple-600 hover:bg-purple-700 text-white">
+            Track Your Order
+          </Button>
+        </div>
+
+        {/* Order Tracking Modal/Component */}
+        {showOrderTracking && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+            <div className="bg-white rounded-lg p-6 max-w-2xl w-full relative">
+              <button
+                onClick={() => setShowOrderTracking(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-800"
+              >
+                X
+              </button>
+              <OrderTracking {...trackedOrder} />
+            </div>
+          </div>
+        )}
 
         {!selectedCategory ? (
           /* Enhanced Category Selection */
@@ -365,7 +431,12 @@ const Order = () => {
                   <VendorCard
                     key={vendor.id}
                     vendor={vendor}
-                    onAddToCart={handleAddToCart}
+                    onAddToCart={(optionId) => handleAddToCart({
+                      id: `${vendor.id}-${optionId}`,
+                      name: `${selectedPhone.brand} ${selectedPhone.model} ${vendor.options.find(opt => opt.id === optionId)?.name}`,
+                      price: vendor.options.find(opt => opt.id === optionId)?.price || 0,
+                      vendor: vendor.name
+                    })}
                   />
                 ))
               ) : (
@@ -414,6 +485,13 @@ const Order = () => {
           </div>
         )}
       </main>
+      <Cart
+        isOpen={isCartOpen}
+        onClose={() => setIsCartOpen(false)}
+        items={cartItems}
+        onUpdateQuantity={handleUpdateQuantity}
+        onRemoveItem={handleRemoveItem}
+      />
     </div>
   );
 };

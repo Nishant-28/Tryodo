@@ -1,91 +1,86 @@
 import React, { useState, useEffect } from 'react';
 import { User, Building, Store, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth, UserRole } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
-const Login = () => {
-  const [userType, setUserType] = useState<UserRole>('customer');
+const Signup = () => {
+  const [searchParams] = useSearchParams();
+  const [userType, setUserType] = useState<UserRole>((searchParams.get('role') as UserRole) || 'customer');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [formData, setFormData] = useState({
+    fullName: '',
     email: '',
-    password: ''
+    password: '',
+    confirmPassword: ''
   });
   
-  const { signIn, loading, user, profile } = useAuth();
+  const { signUp, loading, user } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
 
   // Redirect if already logged in
   useEffect(() => {
-    if (user && profile) {
-      const from = location.state?.from?.pathname;
-      
-      // If user came from a specific page, try to redirect there
-      // but only if they have access to that page
-      if (from) {
-        const roleRedirects = {
-          customer: ['/'],
-          vendor: ['/vendor-dashboard'],
-          admin: ['/admin-dashboard'],
-        };
-        
-        // Check if the "from" path is allowed for this role
-        const allowedPaths = roleRedirects[profile.role];
-        const isAllowed = allowedPaths.some(path => from.startsWith(path));
-        
-        if (isAllowed) {
-          navigate(from, { replace: true });
-          return;
-        }
-      }
-      
-      // Default redirect based on role
-      const defaultRedirects = {
+    if (user) {
+      const roleRedirects = {
         customer: '/',
         vendor: '/vendor-dashboard',
         admin: '/admin-dashboard',
       };
-      
-      navigate(defaultRedirects[profile.role], { replace: true });
+      navigate(roleRedirects[userType], { replace: true });
     }
-  }, [user, profile, navigate, location]);
+  }, [user, navigate, userType]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.email || !formData.password) {
-      toast.error('Please fill in all fields');
+    if (!formData.email || !formData.password || !formData.confirmPassword) {
+      toast.error('Please fill in all required fields');
       return;
     }
 
-    const result = await signIn(formData.email, formData.password, userType);
+    if (formData.password !== formData.confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+
+    if (formData.password.length < 6) {
+      toast.error('Password must be at least 6 characters long');
+      return;
+    }
+
+    const result = await signUp(
+      formData.email, 
+      formData.password, 
+      userType, 
+      formData.fullName || undefined
+    );
     
     if (result.success) {
-      toast.success('Login successful!');
-      // Navigation will be handled by the useEffect above
+      toast.success('Registration successful! Please check your email to confirm your account.');
+      navigate('/login');
     } else {
-      toast.error(result.error || 'Login failed');
+      toast.error(result.error || 'Registration failed');
     }
   };
 
   const userTypeConfig = {
     customer: {
-      title: 'Customer Login',
-      subtitle: 'Access your account to shop mobile parts',
+      title: 'Customer Registration',
+      subtitle: 'Create your account to shop mobile parts',
       icon: User,
       color: 'from-blue-600 to-blue-800'
     },
     vendor: {
-      title: 'Vendor Login',
-      subtitle: 'Manage your inventory and orders',
+      title: 'Vendor Registration',
+      subtitle: 'Join as a vendor to sell your products',
       icon: Store,
       color: 'from-green-600 to-green-800'
     },
     admin: {
-      title: 'Admin Login',
-      subtitle: 'Access company dashboard and analytics',
+      title: 'Admin Registration',
+      subtitle: 'Register for administrative access',
       icon: Building,
       color: 'from-purple-600 to-purple-800'
     }
@@ -111,7 +106,6 @@ const Login = () => {
                       ? `bg-gradient-to-br ${config.color} text-white shadow-md`
                       : 'text-gray-600 hover:bg-gray-100'
                   }`}
-                  disabled={loading}
                 >
                   <Icon className="h-5 w-5 mb-1" />
                   <span className="text-xs font-medium capitalize">{type}</span>
@@ -120,7 +114,7 @@ const Login = () => {
             })}
           </div>
 
-          {/* Login Form */}
+          {/* Registration Form */}
           <div className="bg-white rounded-2xl shadow-lg p-8">
             <div className="text-center mb-8">
               <div className={`w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br ${currentConfig.color} flex items-center justify-center`}>
@@ -132,8 +126,23 @@ const Login = () => {
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
+                <label htmlFor="fullName" className="block text-sm font-medium text-gray-700 mb-2">
+                  Full Name (Optional)
+                </label>
+                <input
+                  type="text"
+                  id="fullName"
+                  value={formData.fullName}
+                  onChange={(e) => setFormData(prev => ({ ...prev, fullName: e.target.value }))}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Enter your full name"
+                  disabled={loading}
+                />
+              </div>
+
+              <div>
                 <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-                  Email Address
+                  Email Address *
                 </label>
                 <input
                   type="email"
@@ -149,7 +158,7 @@ const Login = () => {
 
               <div>
                 <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                  Password
+                  Password *
                 </label>
                 <div className="relative">
                   <input
@@ -171,23 +180,53 @@ const Login = () => {
                     {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                   </button>
                 </div>
+                <p className="text-xs text-gray-500 mt-1">Minimum 6 characters</p>
               </div>
 
-              <div className="flex items-center justify-between">
-                <label className="flex items-center">
+              <div>
+                <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-2">
+                  Confirm Password *
+                </label>
+                <div className="relative">
                   <input
-                    type="checkbox"
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    id="confirmPassword"
+                    required
+                    value={formData.confirmPassword}
+                    onChange={(e) => setFormData(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-12"
+                    placeholder="Confirm your password"
                     disabled={loading}
                   />
-                  <span className="ml-2 text-sm text-gray-600">Remember me</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    disabled={loading}
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="terms"
+                  required
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  disabled={loading}
+                />
+                <label htmlFor="terms" className="ml-2 text-sm text-gray-600">
+                  I agree to the{' '}
+                  <Link to="/terms" className="text-blue-600 hover:text-blue-800">
+                    Terms of Service
+                  </Link>{' '}
+                  and{' '}
+                  <Link to="/privacy" className="text-blue-600 hover:text-blue-800">
+                    Privacy Policy
+                  </Link>
                 </label>
-                <Link 
-                  to="/forgot-password" 
-                  className="text-sm text-blue-600 hover:text-blue-800"
-                >
-                  Forgot password?
-                </Link>
               </div>
 
               <Button
@@ -195,18 +234,18 @@ const Login = () => {
                 className={`w-full bg-gradient-to-r ${currentConfig.color} hover:opacity-90 text-white py-3`}
                 disabled={loading}
               >
-                {loading ? 'Signing in...' : 'Sign In'}
+                {loading ? 'Creating Account...' : 'Create Account'}
               </Button>
             </form>
 
             <div className="mt-6 text-center">
               <p className="text-gray-600">
-                Don't have an account?{' '}
+                Already have an account?{' '}
                 <Link 
-                  to={`/signup?role=${userType}`} 
+                  to={`/login`} 
                   className="text-blue-600 hover:text-blue-800 font-medium"
                 >
-                  Sign up as {userType}
+                  Sign in
                 </Link>
               </p>
             </div>
@@ -217,4 +256,4 @@ const Login = () => {
   );
 };
 
-export default Login;
+export default Signup; 

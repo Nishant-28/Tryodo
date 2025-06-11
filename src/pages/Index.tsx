@@ -1,12 +1,53 @@
-
 import React, { useState, useEffect } from 'react';
 import { ArrowRight, Shield, Truck, Star, Monitor, Battery, Smartphone, Clock, Users, MapPin, Zap, Award, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Header from '@/components/Header';
+import Cart from '@/components/Cart';
+import { supabase } from '@/lib/supabase';
+
+interface CartItem {
+  id: string;
+  name: string;
+  vendor: string;
+  price: number;
+  quantity: number;
+  image?: string;
+}
+
+interface Product {
+  id: string;
+  name: string;
+  price: number;
+  discount?: string;
+  image?: string;
+}
 
 const Index = () => {
   const [currentTestimonial, setCurrentTestimonial] = useState(0);
   const [stats, setStats] = useState({ orders: 0, customers: 0, vendors: 0 });
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [isCartOpen, setIsCartOpen] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchProducts = async () => {
+      const { data, error } = await supabase.from('products').select('*');
+
+      if (error) {
+        console.error('Error fetching products:', error);
+        setError(error.message);
+        setLoadingProducts(false);
+        return;
+      }
+
+      setProducts(data || []);
+      setLoadingProducts(false);
+    };
+
+    fetchProducts();
+  }, []);
 
   // Animate stats on page load
   useEffect(() => {
@@ -64,16 +105,45 @@ const Index = () => {
     }
   ];
 
-  const trendingProducts = [
-    { name: "iPhone 14 Display", price: "₹8,500", discount: "15% off", image: "📱" },
-    { name: "Samsung Galaxy Battery", price: "₹2,200", discount: "20% off", image: "🔋" },
-    { name: "OnePlus Camera Module", price: "₹3,800", discount: "10% off", image: "📷" },
-    { name: "Xiaomi Charging Port", price: "₹1,500", discount: "25% off", image: "⚡" }
+  const trendingProducts = [ // This will be replaced by fetched products
+    { id: "1", name: "iPhone 14 Display", price: 8500, discount: "15% off", image: "📱" },
+    { id: "2", name: "Samsung Galaxy Battery", price: 2200, discount: "20% off", image: "🔋" },
+    { id: "3", name: "OnePlus Camera Module", price: 3800, discount: "10% off", image: "📷" },
+    { id: "4", name: "Xiaomi Charging Port", price: 1500, discount: "25% off", image: "⚡" }
   ];
+
+  const handleAddToCart = (product: { id: string; name: string; price: number; image: string }) => {
+    setCartItems((prevItems) => {
+      const existingItem = prevItems.find((item) => item.id === product.id);
+      if (existingItem) {
+        return prevItems.map((item) =>
+          item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+        );
+      } else {
+        return [...prevItems, { ...product, quantity: 1, vendor: "Various Vendors" }];
+      }
+    });
+    setIsCartOpen(true);
+  };
+
+  const handleUpdateQuantity = (id: string, quantity: number) => {
+    setCartItems((prevItems) => {
+      if (quantity <= 0) {
+        return prevItems.filter((item) => item.id !== id);
+      }
+      return prevItems.map((item) =>
+        item.id === id ? { ...item, quantity } : item
+      );
+    });
+  };
+
+  const handleRemoveItem = (id: string) => {
+    setCartItems((prevItems) => prevItems.filter((item) => item.id !== id));
+  };
 
   return (
     <div className="min-h-screen bg-white">
-      <Header />
+      <Header cartItems={cartItems.length} onCartClick={() => setIsCartOpen(true)} />
       
       {/* Hero Section */}
       <section className="relative overflow-hidden bg-gradient-to-br from-blue-600 via-purple-600 to-indigo-800">
@@ -152,18 +222,28 @@ const Index = () => {
             <TrendingUp className="h-8 w-8 text-orange-500" />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {trendingProducts.map((product, index) => (
-              <div key={index} className="bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-shadow group cursor-pointer">
-                <div className="text-4xl mb-4">{product.image}</div>
-                <h3 className="font-bold text-gray-900 mb-2 group-hover:text-blue-600 transition-colors">{product.name}</h3>
-                <div className="flex items-center justify-between">
-                  <span className="text-lg font-bold text-green-600">{product.price}</span>
-                  <span className="bg-red-100 text-red-600 text-xs px-2 py-1 rounded-full">{product.discount}</span>
+          {loadingProducts ? (
+            <p>Loading products...</p>
+          ) : error ? (
+            <p>Error: {error}</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {products.map((product) => (
+                <div 
+                  key={product.id} 
+                  className="bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-shadow group cursor-pointer"
+                  onClick={() => handleAddToCart(product)}
+                >
+                  <div className="text-4xl mb-4">{product.image}</div>
+                  <h3 className="font-bold text-gray-900 mb-2 group-hover:text-blue-600 transition-colors">{product.name}</h3>
+                  <div className="flex items-center justify-between">
+                    <span className="text-lg font-bold text-green-600">₹{product.price.toLocaleString()}</span>
+                    {product.discount && <span className="bg-red-100 text-red-600 text-xs px-2 py-1 rounded-full">{product.discount}</span>}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
@@ -370,22 +450,22 @@ const Index = () => {
             </div>
             
             <div>
-              <h4 className="font-semibold mb-4">Support</h4>
-              <ul className="space-y-2 text-gray-400">
-                <li>Help Center</li>
-                <li>Track Order</li>
-                <li>Returns</li>
-                <li>Contact Us</li>
+              <h3 className="text-lg font-semibold mb-4 text-gray-900">Quick Links</h3>
+              <ul>
+                <li><a href="/" className="hover:text-blue-600 transition-colors">Home</a></li>
+                <li><a href="/order" className="hover:text-blue-600 transition-colors">Order</a></li>
+                <li><a href="/about" className="hover:text-blue-600 transition-colors">About Us</a></li>
+                <li><a href="/contact" className="hover:text-blue-600 transition-colors">Contact</a></li>
+                <li><a href="/Login" className="hover:text-blue-600 transition-colors">Login</a></li>
               </ul>
             </div>
             
             <div>
-              <h4 className="font-semibold mb-4">Company</h4>
-              <ul className="space-y-2 text-gray-400">
-                <li>About Us</li>
-                <li>Careers</li>
-                <li>Privacy Policy</li>
-                <li>Terms of Service</li>
+              <h3 className="text-lg font-semibold mb-4 text-gray-900">Support</h3>
+              <ul>
+                <li><a href="/contact" className="hover:text-blue-600 transition-colors">Help Center</a></li>
+                <li><a href="/order" className="hover:text-blue-600 transition-colors">Track Order</a></li>
+                <li><a href="/Login" className="hover:text-blue-600 transition-colors">Login</a></li>
               </ul>
             </div>
           </div>
@@ -395,6 +475,14 @@ const Index = () => {
           </div>
         </div>
       </footer>
+
+      <Cart
+        isOpen={isCartOpen}
+        onClose={() => setIsCartOpen(false)}
+        items={cartItems}
+        onUpdateQuantity={handleUpdateQuantity}
+        onRemoveItem={handleRemoveItem}
+      />
     </div>
   );
 };

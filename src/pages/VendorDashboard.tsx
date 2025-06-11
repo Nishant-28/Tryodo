@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Package, TrendingUp, ShoppingCart, Users, Plus, Eye, Edit, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Header from '@/components/Header';
@@ -15,6 +16,7 @@ interface Product {
 }
 
 const VendorDashboard = () => {
+  const navigate = useNavigate();
   const [products] = useState<Product[]>([
     {
       id: '1',
@@ -110,7 +112,10 @@ const VendorDashboard = () => {
           <div className="p-6 border-b border-gray-200">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-gray-900">Product Inventory</h2>
-              <Button className="bg-blue-600 hover:bg-blue-700">
+              <Button 
+                className="bg-blue-600 hover:bg-blue-700"
+                onClick={() => navigate('/vendor/add-product')}
+              >
                 <Plus className="h-4 w-4 mr-2" />
                 Add Product
               </Button>

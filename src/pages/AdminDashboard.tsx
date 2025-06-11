@@ -1,9 +1,13 @@
 
 import React, { useState } from 'react';
-import { Users, Store, ShoppingBag, TrendingUp, DollarSign, Package } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Users, Store, ShoppingBag, TrendingUp, DollarSign, Package, Smartphone, Settings, ArrowRight } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import Header from '@/components/Header';
 
 const AdminDashboard = () => {
+  const navigate = useNavigate();
   const [timeRange, setTimeRange] = useState('7d');
 
   const stats = {
@@ -31,7 +35,7 @@ const AdminDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header />
+      <Header onCartClick={() => {}} />
       
       <main className="container mx-auto px-4 py-8">
         <div className="flex items-center justify-between mb-8">
@@ -112,6 +116,69 @@ const AdminDashboard = () => {
               <Package className="h-8 w-8 text-indigo-600" />
             </div>
           </div>
+        </div>
+
+        {/* Management Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+          <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/admin/models')}>
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="h-5 w-5 text-blue-600" />
+                  Manage Models
+                </div>
+                <ArrowRight className="h-4 w-4 text-gray-400" />
+              </CardTitle>
+              <CardDescription>
+                Add, edit, and manage phone models for all brands
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600">
+                Control the phone models available in the marketplace
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-md transition-shadow cursor-pointer opacity-50">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Store className="h-5 w-5 text-green-600" />
+                  Manage Vendors
+                </div>
+                <ArrowRight className="h-4 w-4 text-gray-400" />
+              </CardTitle>
+              <CardDescription>
+                Approve and manage vendor accounts
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600">
+                Review vendor applications and manage approvals
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-md transition-shadow cursor-pointer opacity-50">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Package className="h-5 w-5 text-purple-600" />
+                  Manage Categories
+                </div>
+                <ArrowRight className="h-4 w-4 text-gray-400" />
+              </CardTitle>
+              <CardDescription>
+                Organize product categories and quality types
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600">
+                Control product categories and their quality options
+              </p>
+            </CardContent>
+          </Card>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
