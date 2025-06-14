@@ -5,18 +5,27 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import EnvironmentCheck from "@/components/EnvironmentCheck";
 import Index from "./pages/Index";
 import Order from "./pages/Order";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
+import ResetPassword from "./pages/ResetPassword";
+
 import VendorDashboard from "./pages/VendorDashboard";
 import AddProduct from "./pages/AddProduct";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminModelsManagement from "./pages/AdminModelsManagement";
+import AdminCategoriesManagement from "./pages/AdminCategoriesManagement";
+import AdminQualitiesManagement from "./pages/AdminQualitiesManagement";
 import UserProfilePage from "./pages/UserProfilePage";
 import NotFound from "./pages/NotFound";
 import About from "./pages/About";
 import Contact from "./pages/Contact";
+import AuthDebug from "./components/AuthDebug";
+import Checkout from "./pages/Checkout";
+import OrderSuccess from "./pages/OrderSuccess";
+import MyOrders from "./pages/MyOrders";
 
 const queryClient = new QueryClient();
 
@@ -25,6 +34,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      <EnvironmentCheck />
       <AuthProvider>
         <BrowserRouter
           future={{
@@ -36,8 +46,14 @@ const App = () => (
             {/* Public routes - no authentication required */}
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />
+            <Route path="/auth-debug" element={<AuthDebug />} />
+            
+            {/* Role-specific login routes */}
+            <Route path="/vendor-login" element={<Login />} />
+            <Route path="/admin-login" element={<Login />} />
 
             {/* Customer-only routes */}
             <Route 
@@ -61,6 +77,30 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['customer']}>
                   <UserProfilePage />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/checkout" 
+              element={
+                <ProtectedRoute allowedRoles={['customer']}>
+                  <Checkout />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/order-success" 
+              element={
+                <ProtectedRoute allowedRoles={['customer']}>
+                  <OrderSuccess />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/my-orders" 
+              element={
+                <ProtectedRoute allowedRoles={['customer']}>
+                  <MyOrders />
                 </ProtectedRoute>
               } 
             />
@@ -97,6 +137,22 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <AdminModelsManagement />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/admin/categories" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AdminCategoriesManagement />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/admin/qualities" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AdminQualitiesManagement />
                 </ProtectedRoute>
               } 
             />

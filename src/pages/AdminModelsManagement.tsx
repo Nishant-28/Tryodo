@@ -23,8 +23,8 @@ interface Brand {
 interface Model {
   id: string;
   brand_id: string;
-  name: string;
-  full_name: string;
+  model_name: string;
+  model_number?: string;
   release_year?: number;
   is_active: boolean;
   created_at: string;
@@ -34,8 +34,8 @@ interface Model {
 
 interface NewModelForm {
   brand_id: string;
-  name: string;
-  full_name: string;
+  model_name: string;
+  model_number: string;
   release_year: string;
 }
 
@@ -56,8 +56,8 @@ const AdminModelsManagement = () => {
   // Form state
   const [newModel, setNewModel] = useState<NewModelForm>({
     brand_id: '',
-    name: '',
-    full_name: '',
+    model_name: '',
+    model_number: '',
     release_year: new Date().getFullYear().toString()
   });
 
@@ -100,7 +100,7 @@ const AdminModelsManagement = () => {
       // Load models with brand information
       console.log('Loading models...');
       const { data: modelsData, error: modelsError } = await supabase
-        .from('models')
+        .from('smartphone_models')
         .select(`
           *,
           brands(name)
@@ -115,7 +115,7 @@ const AdminModelsManagement = () => {
         
         // If the join fails, try loading models without brands
         const { data: simpleModelsData, error: simpleError } = await supabase
-          .from('models')
+          .from('smartphone_models')
           .select('*')
           .order('created_at', { ascending: false });
         
@@ -175,8 +175,8 @@ const AdminModelsManagement = () => {
     // Filter by search term
     if (searchTerm) {
       filtered = filtered.filter(model =>
-        model.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        model.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        model.model_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        model.model_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         model.brand_name?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
@@ -193,8 +193,8 @@ const AdminModelsManagement = () => {
     const errors: string[] = [];
     
     if (!newModel.brand_id) errors.push('Please select a brand');
-    if (!newModel.name.trim()) errors.push('Please enter model name');
-    if (!newModel.full_name.trim()) errors.push('Please enter full model name');
+    if (!newModel.model_name.trim()) errors.push('Please enter model name');
+    if (!newModel.model_number.trim()) errors.push('Please enter full model name');
     if (newModel.release_year && (isNaN(Number(newModel.release_year)) || Number(newModel.release_year) < 1990 || Number(newModel.release_year) > new Date().getFullYear() + 2)) {
       errors.push('Please enter a valid release year');
     }
@@ -218,14 +218,14 @@ const AdminModelsManagement = () => {
       
       const modelData = {
         brand_id: newModel.brand_id,
-        name: newModel.name.trim(),
-        full_name: newModel.full_name.trim(),
+        model_name: newModel.model_name.trim(),
+        model_number: newModel.model_number.trim(),
         release_year: newModel.release_year ? parseInt(newModel.release_year) : null,
         is_active: true
       };
 
       const { data, error } = await supabase
-        .from('models')
+        .from('smartphone_models')
         .insert(modelData)
         .select(`
           *,
@@ -251,8 +251,8 @@ const AdminModelsManagement = () => {
       // Reset form and close dialog
       setNewModel({
         brand_id: '',
-        name: '',
-        full_name: '',
+        model_name: '',
+        model_number: '',
         release_year: new Date().getFullYear().toString()
       });
       setIsAddDialogOpen(false);
@@ -298,7 +298,7 @@ const AdminModelsManagement = () => {
       }
 
       const { error } = await supabase
-        .from('models')
+        .from('smartphone_models')
         .delete()
         .eq('id', modelId);
 
@@ -329,7 +329,7 @@ const AdminModelsManagement = () => {
       setLoading(true);
       
       const { error } = await supabase
-        .from('models')
+        .from('smartphone_models')
         .update({ is_active: !currentStatus })
         .eq('id', modelId);
 
@@ -509,8 +509,8 @@ const AdminModelsManagement = () => {
                       <Input
                         id="modelName"
                         placeholder="e.g., iPhone 15 Pro"
-                        value={newModel.name}
-                        onChange={(e) => setNewModel(prev => ({ ...prev, name: e.target.value }))}
+                        value={newModel.model_name}
+                        onChange={(e) => setNewModel(prev => ({ ...prev, model_name: e.target.value }))}
                       />
                     </div>
                     
@@ -519,8 +519,8 @@ const AdminModelsManagement = () => {
                       <Input
                         id="fullName"
                         placeholder="e.g., Apple iPhone 15 Pro"
-                        value={newModel.full_name}
-                        onChange={(e) => setNewModel(prev => ({ ...prev, full_name: e.target.value }))}
+                        value={newModel.model_number}
+                        onChange={(e) => setNewModel(prev => ({ ...prev, model_number: e.target.value }))}
                       />
                     </div>
                     
@@ -622,8 +622,8 @@ const AdminModelsManagement = () => {
                       <tr key={model.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div>
-                            <div className="text-sm font-medium text-gray-900">{model.full_name}</div>
-                            <div className="text-sm text-gray-500">{model.name}</div>
+                            <div className="text-sm font-medium text-gray-900">{model.model_number || 'Unknown Model'}</div>
+                            <div className="text-sm text-gray-500">{model.model_name}</div>
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -671,14 +671,14 @@ const AdminModelsManagement = () => {
                                     Delete Model
                                   </AlertDialogTitle>
                                   <AlertDialogDescription>
-                                    Are you sure you want to delete "{model.full_name}"? This action cannot be undone.
+                                    Are you sure you want to delete "{model.model_number}"? This action cannot be undone.
                                     {'\n\n'}Note: You can only delete models that are not being used by any vendors.
                                   </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                   <AlertDialogCancel>Cancel</AlertDialogCancel>
                                   <AlertDialogAction
-                                    onClick={() => handleDeleteModel(model.id, model.full_name)}
+                                    onClick={() => handleDeleteModel(model.id, model.model_number || 'Unknown Model')}
                                     className="bg-red-600 hover:bg-red-700"
                                   >
                                     Delete

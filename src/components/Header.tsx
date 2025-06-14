@@ -1,9 +1,10 @@
 import React from 'react';
-import { Search, ShoppingCart, User, Menu, LogOut, Settings, Shield, Store, Building, UserCircle } from 'lucide-react';
+import { Search, ShoppingCart, User, Menu, LogOut, Settings, Shield, Store, Building, UserCircle, Bug, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { forceAuthReset } from '@/lib/supabase';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,10 +25,13 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
 
   const handleSignOut = async () => {
     try {
+      console.log('🚪 Header: Initiating sign out...');
       await signOut();
       toast.success('Signed out successfully');
-      navigate('/login');
+      console.log('🚪 Header: Sign out complete, navigating to login');
+      navigate('/login', { replace: true });
     } catch (error) {
+      console.error('❌ Header: Sign out error:', error);
       toast.error('Failed to sign out');
     }
   };
@@ -111,6 +115,9 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
                 <Link to="/order" className="text-gray-700 hover:text-blue-600 transition-colors font-medium">
                   Order
                 </Link>
+                <Link to="/my-orders" className="text-gray-700 hover:text-blue-600 transition-colors font-medium">
+                  My Orders
+                </Link>
                 <Link to="/about" className="text-gray-700 hover:text-blue-600 transition-colors font-medium">
                   About
                 </Link>
@@ -179,6 +186,12 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
                         </Link>
                       </DropdownMenuItem>
                       <DropdownMenuItem asChild>
+                        <Link to="/my-orders" className="flex items-center">
+                          <Package className="mr-2 h-4 w-4" />
+                          My Orders
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
                         <Link to="/profile" className="flex items-center">
                           <Settings className="mr-2 h-4 w-4" />
                           Settings
@@ -210,6 +223,20 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
                     <LogOut className="mr-2 h-4 w-4" />
                     Sign Out
                   </DropdownMenuItem>
+                  
+                  {/* Debug option in development */}
+                  {process.env.NODE_ENV === 'development' && (
+                    <DropdownMenuItem 
+                      onClick={() => {
+                        console.log('🔧 Force auth reset triggered');
+                        forceAuthReset();
+                      }} 
+                      className="text-orange-600"
+                    >
+                      <Bug className="mr-2 h-4 w-4" />
+                      Force Reset Auth
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -230,6 +257,9 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
                       <Link to="/order">Order</Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link to="/my-orders">My Orders</Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
                       <Link to="/about">About</Link>

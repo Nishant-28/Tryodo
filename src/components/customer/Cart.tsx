@@ -1,15 +1,18 @@
-
 import React, { useState } from 'react';
 import { X, Minus, Plus, ShoppingBag, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useNavigate } from 'react-router-dom';
 
 interface CartItem {
   id: string;
   name: string;
   vendor: string;
+  vendorId: string;
   price: number;
   quantity: number;
   image?: string;
+  deliveryTime: number;
+  warranty: number;
 }
 
 interface CartProps {
@@ -21,6 +24,7 @@ interface CartProps {
 }
 
 const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem }: CartProps) => {
+  const navigate = useNavigate();
   const total = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
   if (!isOpen) return null;
@@ -101,7 +105,18 @@ const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem }: CartPr
                 <span>₹{total.toLocaleString()}</span>
               </div>
               
-              <Button className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
+              <Button 
+                className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+                onClick={() => {
+                  console.log('Cart: Proceeding to checkout with items:', items);
+                  // Store cart items in localStorage and navigate to checkout
+                  localStorage.setItem('cartItems', JSON.stringify(items));
+                  console.log('Cart: Items stored in localStorage');
+                  onClose(); // Close the cart
+                  console.log('Cart: Navigating to checkout');
+                  navigate('/checkout', { state: { cartItems: items } });
+                }}
+              >
                 Proceed to Checkout
               </Button>
             </div>

@@ -1,499 +1,1052 @@
-import React, { useState } from 'react';
-import { Monitor, Battery, Smartphone, Shield, Filter, ArrowUpDown, Search, Star, Zap, Clock } from 'lucide-react';
-import Header from '@/components/Header';
-import CategoryCard from '@/components/CategoryCard';
-import PhoneSearch from '@/components/PhoneSearch';
-import VendorCard from '@/components/VendorCard';
+import React, { useState, useEffect } from 'react';
+import { Search, ShoppingCart, Star, Verified, Clock, Package, ChevronRight, ArrowLeft, Filter, SortAsc, Shield, Truck, Tag, Heart, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import Cart from '@/components/Cart';
-import OrderTracking from '@/components/OrderTracking';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import Header from '@/components/Header';
+import Footer from '@/components/Footer';
+import Cart from '@/components/customer/Cart';
+import { supabase } from '@/lib/supabase';
+
+// Types
+interface Category {
+  id: string;
+  name: string;
+  description: string | null;
+  icon: string | null;
+  gradient: string | null;
+  is_active: boolean;
+  sort_order: number;
+}
+
+interface Brand {
+  id: string;
+  name: string;
+  logo_url: string | null;
+  is_active: boolean;
+}
+
+interface Model {
+  id: string;
+  brand_id: string;
+  model_name: string;
+  model_number: string | null;
+  release_year: number | null;
+  is_active: boolean;
+  base_price: number | null;
+  specifications: any | null;
+  official_images: string[] | null;
+  description: string | null;
+}
+
+interface Vendor {
+  id: string;
+  business_name: string;
+  rating: number;
+  total_reviews: number;
+  response_time_hours: number;
+  is_verified: boolean;
+  business_city: string | null;
+  business_state: string | null;
+}
+
+interface QualityCategory {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
+interface VendorProduct {
+  id: string;
+  vendor_id: string;
+  model_id: string;
+  category_id: string;
+  quality_type_id: string;
+  price: number;
+  original_price: number | null;
+  warranty_months: number;
+  stock_quantity: number;
+  is_in_stock: boolean;
+  delivery_time_days: number;
+  product_images: string[] | null;
+  vendor: Vendor;
+  quality: QualityCategory;
+}
 
 interface CartItem {
   id: string;
   name: string;
   vendor: string;
+  vendorId: string;
   price: number;
   quantity: number;
   image?: string;
+  deliveryTime: number;
+  warranty: number;
 }
 
-const categories = [
-  {
-    id: 'display',
-    title: 'Mobile Display',
-    description: 'LCD, OLED, and AMOLED screens',
-    icon: Monitor,
-    gradient: 'bg-gradient-to-br from-blue-600 to-blue-800',
-    count: '2000+ products'
-  },
-  {
-    id: 'battery',
-    title: 'Battery',
-    description: 'Original and compatible batteries',
-    icon: Battery,
-    gradient: 'bg-gradient-to-br from-green-600 to-green-800',
-    count: '1500+ products'
-  },
-  {
-    id: 'parts',
-    title: 'Mobile Parts',
-    description: 'Speakers, cameras, and more',
-    icon: Smartphone,
-    gradient: 'bg-gradient-to-br from-purple-600 to-purple-800',
-    count: '3000+ products'
-  },
-  {
-    id: 'glass',
-    title: 'Tempered Glass',
-    description: 'Screen protectors and covers',
-    icon: Shield,
-    gradient: 'bg-gradient-to-br from-orange-600 to-orange-800',
-    count: '800+ products'
-  }
-];
-
-const mockVendors = [
+// Add mock data at the top of the file after imports
+const MOCK_CATEGORIES: Category[] = [
   {
     id: '1',
-    name: 'Rohan Communication',
-    rating: 4.8,
-    reviews: 324,
-    location: 'Electronics Market, Delhi',
-    responseTime: '2 mins',
-    verified: true,
-    options: [
-      {
-        id: '1a',
-        name: 'Original Display',
-        price: 8500,
-        originalPrice: 10000,
-        quality: 'Original',
-        warranty: '6 months',
-        deliveryTime: '2-3 days',
-        inStock: true,
-        fastDelivery: true
-      },
-      {
-        id: '1b',
-        name: 'OEM Display',
-        price: 5500,
-        quality: 'OEM',
-        warranty: '3 months',
-        deliveryTime: '1-2 days',
-        inStock: true,
-        fastDelivery: false
-      }
-    ]
+    name: 'Smartphone Parts',
+    description: 'Displays, batteries, cameras and other phone components',
+    icon: '📱',
+    gradient: 'bg-gradient-to-br from-blue-50 to-indigo-100',
+    is_active: true,
+    sort_order: 1
   },
   {
-    id: '2',
-    name: 'Dhanesh Electronics',
-    rating: 4.6,
-    reviews: 187,
-    location: 'Nehru Place, Delhi',
-    responseTime: '5 mins',
-    verified: true,
-    options: [
-      {
-        id: '2a',
-        name: 'Premium Display',
-        price: 7800,
-        quality: 'AAA+',
-        warranty: '4 months',
-        deliveryTime: '1-2 days',
-        inStock: true,
-        fastDelivery: true
-      },
-      {
-        id: '2b',
-        name: 'Standard Display',
-        price: 4500,
-        quality: 'AA',
-        warranty: '2 months',
-        deliveryTime: 'Same day',
-        inStock: false,
-        fastDelivery: true
-      }
-    ]
+    id: '2', 
+    name: 'Accessories',
+    description: 'Cases, chargers, headphones and mobile accessories',
+    icon: '🎧',
+    gradient: 'bg-gradient-to-br from-purple-50 to-pink-100',
+    is_active: true,
+    sort_order: 2
   },
   {
     id: '3',
-    name: 'TechMart Solutions',
-    rating: 4.9,
-    reviews: 456,
-    location: 'CP Market, Delhi',
-    responseTime: '1 min',
-    verified: true,
-    options: [
-      {
-        id: '3a',
-        name: 'Flagship Display',
-        price: 9200,
-        originalPrice: 11000,
-        quality: 'Original+',
-        warranty: '12 months',
-        deliveryTime: '3-4 days',
-        inStock: true,
-        fastDelivery: false
-      }
-    ]
+    name: 'Repair Tools',
+    description: 'Professional tools for smartphone repair and maintenance',
+    icon: '🔧',
+    gradient: 'bg-gradient-to-br from-green-50 to-emerald-100',
+    is_active: true,
+    sort_order: 3
   }
 ];
 
+const MOCK_BRANDS: Brand[] = [
+  {
+    id: 'apple-1',
+    name: 'Apple',
+    logo_url: 'https://upload.wikimedia.org/wikipedia/commons/f/fa/Apple_logo_black.svg',
+    is_active: true
+  },
+  {
+    id: 'samsung-1',
+    name: 'Samsung', 
+    logo_url: 'https://upload.wikimedia.org/wikipedia/commons/2/24/Samsung_Logo.svg',
+    is_active: true
+  },
+  {
+    id: 'xiaomi-1',
+    name: 'Xiaomi',
+    logo_url: null,
+    is_active: true
+  },
+  {
+    id: 'oneplus-1',
+    name: 'OnePlus',
+    logo_url: null,
+    is_active: true
+  },
+  {
+    id: 'google-1',
+    name: 'Google',
+    logo_url: null,
+    is_active: true
+  }
+];
+
+const MOCK_MODELS: { [brandId: string]: Model[] } = {
+  'apple-1': [
+    {
+      id: 'iphone-15-pro',
+      brand_id: 'apple-1',
+      model_name: 'iPhone 15 Pro',
+      model_number: 'A3101',
+      release_year: 2023,
+      is_active: true,
+      base_price: 134900,
+      specifications: null,
+      official_images: null,
+      description: 'Latest iPhone with titanium design'
+    },
+    {
+      id: 'iphone-15',
+      brand_id: 'apple-1', 
+      model_name: 'iPhone 15',
+      model_number: 'A3089',
+      release_year: 2023,
+      is_active: true,
+      base_price: 79900,
+      specifications: null,
+      official_images: null,
+      description: 'iPhone 15 with USB-C'
+    },
+    {
+      id: 'iphone-14',
+      brand_id: 'apple-1',
+      model_name: 'iPhone 14',
+      model_number: 'A2649',
+      release_year: 2022,
+      is_active: true,
+      base_price: 69900,
+      specifications: null,
+      official_images: null,
+      description: 'iPhone 14 with improved cameras'
+    }
+  ],
+  'samsung-1': [
+    {
+      id: 'galaxy-s24-ultra',
+      brand_id: 'samsung-1',
+      model_name: 'Galaxy S24 Ultra',
+      model_number: 'SM-S928B',
+      release_year: 2024,
+      is_active: true,
+      base_price: 129999,
+      specifications: null,
+      official_images: null,
+      description: 'Premium Galaxy with S Pen'
+    },
+    {
+      id: 'galaxy-s24',
+      brand_id: 'samsung-1',
+      model_name: 'Galaxy S24',
+      model_number: 'SM-S921B',
+      release_year: 2024,
+      is_active: true,
+      base_price: 79999,
+      specifications: null,
+      official_images: null,
+      description: 'Flagship Galaxy smartphone'
+    }
+  ]
+};
+
+const MOCK_VENDOR_PRODUCTS: VendorProduct[] = [
+  {
+    id: 'prod-1',
+    vendor_id: 'vendor-1',
+    model_id: 'iphone-15-pro',
+    category_id: '1',
+    quality_type_id: 'quality-1',
+    price: 5999,
+    original_price: 7999,
+    warranty_months: 12,
+    stock_quantity: 15,
+    is_in_stock: true,
+    delivery_time_days: 2,
+    product_images: null,
+    vendor: {
+      id: 'vendor-1',
+      business_name: 'TechParts Pro',
+      rating: 4.8,
+      total_reviews: 1247,
+      response_time_hours: 2,
+      is_verified: true,
+      business_city: 'Mumbai',
+      business_state: 'Maharashtra'
+    },
+    quality: {
+      id: 'quality-1',
+      name: 'Original',
+      description: 'Genuine OEM parts with warranty'
+    }
+  },
+  {
+    id: 'prod-2',
+    vendor_id: 'vendor-2',
+    model_id: 'iphone-15-pro',
+    category_id: '1',
+    quality_type_id: 'quality-2',
+    price: 3999,
+    original_price: 4999,
+    warranty_months: 6,
+    stock_quantity: 8,
+    is_in_stock: true,
+    delivery_time_days: 3,
+    product_images: null,
+    vendor: {
+      id: 'vendor-2',
+      business_name: 'Mobile Hub',
+      rating: 4.5,
+      total_reviews: 892,
+      response_time_hours: 4,
+      is_verified: true,
+      business_city: 'Delhi',
+      business_state: 'Delhi'
+    },
+    quality: {
+      id: 'quality-2',
+      name: 'Premium Copy',
+      description: 'High-quality aftermarket parts'
+    }
+  },
+  {
+    id: 'prod-3',
+    vendor_id: 'vendor-3',
+    model_id: 'iphone-15-pro',
+    category_id: '1',
+    quality_type_id: 'quality-3',
+    price: 2499,
+    original_price: null,
+    warranty_months: 3,
+    stock_quantity: 25,
+    is_in_stock: true,
+    delivery_time_days: 5,
+    product_images: null,
+    vendor: {
+      id: 'vendor-3',
+      business_name: 'Budget Electronics',
+      rating: 4.2,
+      total_reviews: 456,
+      response_time_hours: 6,
+      is_verified: false,
+      business_city: 'Bangalore',
+      business_state: 'Karnataka'
+    },
+    quality: {
+      id: 'quality-3',
+      name: 'Standard',
+      description: 'Good quality replacement parts'
+    }
+  }
+];
+
+// API Functions
+const fetchCategories = async (): Promise<Category[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('categories')
+      .select('*')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true });
+    
+    if (error) throw error;
+    return data && data.length > 0 ? data : MOCK_CATEGORIES;
+  } catch (error) {
+    console.warn('Using mock categories:', error);
+    return MOCK_CATEGORIES;
+  }
+};
+
+const fetchBrands = async (categoryId?: string): Promise<Brand[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('brands')
+      .select('*')
+      .eq('is_active', true)
+      .order('name', { ascending: true });
+    
+    if (error) throw error;
+    return data && data.length > 0 ? data : MOCK_BRANDS;
+  } catch (error) {
+    console.warn('Using mock brands:', error);
+    return MOCK_BRANDS;
+  }
+};
+
+const fetchModels = async (brandId: string): Promise<Model[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('smartphone_models')
+      .select('*')
+      .eq('brand_id', brandId)
+      .eq('is_active', true)
+      .order('model_name', { ascending: true });
+    
+    if (error) throw error;
+    return data && data.length > 0 ? data : (MOCK_MODELS[brandId] || []);
+  } catch (error) {
+    console.warn('Using mock models:', error);
+    return MOCK_MODELS[brandId] || [];
+  }
+};
+
+const fetchVendorProducts = async (modelId: string, categoryId: string): Promise<VendorProduct[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_products')
+      .select(`
+        *,
+        vendor:vendor_id!inner (
+          id,
+          business_name,
+          rating,
+          total_reviews,
+          response_time_hours,
+          is_verified,
+          business_city,
+          business_state
+        ),
+        quality:quality_type_id!inner (
+          id,
+          name,
+          description
+        )
+      `)
+      .eq('model_id', modelId)
+      .eq('category_id', categoryId)
+      .eq('is_active', true)
+      .order('price', { ascending: true });
+    
+    if (error) throw error;
+    return data && data.length > 0 ? data : MOCK_VENDOR_PRODUCTS.filter(p => p.model_id === modelId);
+  } catch (error) {
+    console.warn('Using mock vendor products:', error);
+    return MOCK_VENDOR_PRODUCTS.filter(p => p.model_id === modelId);
+  }
+};
+
 const Order = () => {
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [selectedPhone, setSelectedPhone] = useState<{brand: string, model: string} | null>(null);
+  // State management
+  const [step, setStep] = useState<'categories' | 'brands' | 'models' | 'products'>('categories');
+  const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
+  const [selectedBrand, setSelectedBrand] = useState<Brand | null>(null);
+  const [selectedModel, setSelectedModel] = useState<Model | null>(null);
+  
+  // Data states
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [models, setModels] = useState<Model[]>([]);
+  const [vendorProducts, setVendorProducts] = useState<VendorProduct[]>([]);
+  
+  // UI states
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState<'price' | 'rating' | 'reviews'>('price');
+  const [filterStock, setFilterStock] = useState<'all' | 'in-stock'>('all');
+  
+  // Cart states
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const [showOrderTracking, setShowOrderTracking] = useState(false);
-  const [trackedOrder, setTrackedOrder] = useState({
-    orderId: 'TRX789012345',
-    currentStatus: 'shipped',
-    estimatedDelivery: 'Today, 06:00 PM',
-    vendor: 'Rohan Communication',
-    deliveryBoy: 'Rajesh Kumar'
-  });
-  const [sortBy, setSortBy] = useState('price');
-  const [filterByStock, setFilterByStock] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
 
-  const handleCategorySelect = (categoryId: string) => {
-    setSelectedCategory(categoryId);
+  // Load initial data
+  useEffect(() => {
+    loadCategories();
+  }, []);
+
+  const loadCategories = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchCategories();
+      setCategories(data);
+    } catch (err) {
+      setError('Failed to load categories. Please try again.');
+      console.error('Error loading categories:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handlePhoneSearch = (brand: string, model: string) => {
-    setSelectedPhone({ brand, model });
+  const loadBrands = async (categoryId: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchBrands(categoryId);
+      setBrands(data);
+      setStep('brands');
+    } catch (err) {
+      setError('Failed to load brands. Please try again.');
+      console.error('Error loading brands:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleAddToCart = (itemToAdd: { id: string; name: string; price: number; vendor: string }) => {
-    setCartItems((prevItems) => {
-      const existingItem = prevItems.find((item) => item.id === itemToAdd.id);
-      if (existingItem) {
-        return prevItems.map((item) =>
-          item.id === itemToAdd.id ? { ...item, quantity: item.quantity + 1 } : item
+  const loadModels = async (brandId: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchModels(brandId);
+      setModels(data);
+      setStep('models');
+    } catch (err) {
+      setError('Failed to load models. Please try again.');
+      console.error('Error loading models:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadVendorProducts = async (modelId: string, categoryId: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchVendorProducts(modelId, categoryId);
+      setVendorProducts(data);
+      setStep('products');
+    } catch (err) {
+      setError('Failed to load products. Please try again.');
+      console.error('Error loading vendor products:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter and sort functions
+  const getFilteredData = () => {
+    let filtered = [];
+    
+    switch (step) {
+      case 'categories':
+        filtered = categories.filter(cat => 
+          cat.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (cat.description && cat.description.toLowerCase().includes(searchTerm.toLowerCase()))
         );
-      } else {
-        return [...prevItems, { ...itemToAdd, quantity: 1 }];
-      }
-    });
-    setIsCartOpen(true);
+        break;
+      case 'brands':
+        filtered = brands.filter(brand => 
+          brand.name.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+        break;
+      case 'models':
+        filtered = models.filter(model => 
+          model.model_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (model.model_number && model.model_number.toLowerCase().includes(searchTerm.toLowerCase()))
+        );
+        break;
+      case 'products':
+        filtered = vendorProducts.filter(product => {
+          const matchesSearch = product.vendor.business_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                              product.quality.name.toLowerCase().includes(searchTerm.toLowerCase());
+          const matchesStock = filterStock === 'all' || (filterStock === 'in-stock' && product.is_in_stock);
+          return matchesSearch && matchesStock;
+        });
+        
+        // Sort products
+        filtered.sort((a, b) => {
+          switch (sortBy) {
+            case 'price':
+              return a.price - b.price;
+            case 'rating':
+              return b.vendor.rating - a.vendor.rating;
+            case 'reviews':
+              return b.vendor.total_reviews - a.vendor.total_reviews;
+            default:
+              return 0;
+          }
+        });
+        break;
+    }
+    
+    return filtered;
   };
 
-  const handleUpdateQuantity = (id: string, quantity: number) => {
-    setCartItems((prevItems) => {
-      if (quantity <= 0) {
-        return prevItems.filter((item) => item.id !== id);
-      }
-      return prevItems.map((item) =>
+  // Cart functions
+  const addToCart = (product: VendorProduct) => {
+    const cartItem: CartItem = {
+      id: product.id,
+      name: `${selectedModel?.model_name} - ${product.quality.name}`,
+      vendor: product.vendor.business_name,
+      vendorId: product.vendor_id,
+      price: product.price,
+      quantity: 1,
+      image: product.product_images?.[0],
+      deliveryTime: product.delivery_time_days,
+      warranty: product.warranty_months
+    };
+
+    const existingItem = cartItems.find(item => item.id === cartItem.id);
+    if (existingItem) {
+      updateCartQuantity(cartItem.id, existingItem.quantity + 1);
+    } else {
+      setCartItems([...cartItems, cartItem]);
+    }
+  };
+
+  const updateCartQuantity = (id: string, quantity: number) => {
+    if (quantity <= 0) {
+      removeFromCart(id);
+    } else {
+      setCartItems(items => items.map(item => 
         item.id === id ? { ...item, quantity } : item
-      );
-    });
+      ));
+    }
   };
 
-  const handleRemoveItem = (id: string) => {
-    setCartItems((prevItems) => prevItems.filter((item) => item.id !== id));
+  const removeFromCart = (id: string) => {
+    setCartItems(items => items.filter(item => item.id !== id));
   };
 
-  const resetFlow = () => {
+  // Navigation functions
+  const goBack = () => {
+    setSearchTerm('');
+    switch (step) {
+      case 'brands':
+        setStep('categories');
+        setSelectedCategory(null);
+        break;
+      case 'models':
+        setStep('brands');
+        setSelectedBrand(null);
+        break;
+      case 'products':
+        setStep('models');
+        setSelectedModel(null);
+        break;
+    }
+  };
+
+  const resetToCategories = () => {
+    setStep('categories');
     setSelectedCategory(null);
-    setSelectedPhone(null);
+    setSelectedBrand(null);
+    setSelectedModel(null);
+    setSearchTerm('');
   };
 
-  // Filter and sort vendors
-  const filteredVendors = mockVendors
-    .filter(vendor => {
-      if (searchQuery) {
-        return vendor.name.toLowerCase().includes(searchQuery.toLowerCase());
-      }
-      return true;
-    })
-    .filter(vendor => {
-      if (filterByStock) {
-        return vendor.options.some(option => option.inStock);
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      switch (sortBy) {
-        case 'price':
-          return Math.min(...a.options.map(o => o.price)) - Math.min(...b.options.map(o => o.price));
-        case 'rating':
-          return b.rating - a.rating;
-        case 'reviews':
-          return b.reviews - a.reviews;
-        default:
-          return 0;
-      }
-    });
+  // Get quality color coding
+  const getQualityColor = (qualityName: string) => {
+    const name = qualityName.toLowerCase();
+    if (name.includes('premium') || name.includes('a+')) return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+    if (name.includes('good') || name.includes('b+')) return 'bg-blue-100 text-blue-800 border-blue-200';
+    if (name.includes('fair') || name.includes('c+')) return 'bg-green-100 text-green-800 border-green-200';
+    return 'bg-gray-100 text-gray-800 border-gray-200';
+  };
+
+  // Render functions
+  const renderBreadcrumb = () => (
+    <Breadcrumb className="mb-6">
+      <BreadcrumbList>
+        <BreadcrumbItem>
+          <BreadcrumbLink onClick={resetToCategories} className="cursor-pointer">
+            Categories
+          </BreadcrumbLink>
+        </BreadcrumbItem>
+        {selectedCategory && (
+          <>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              {step === 'brands' ? (
+                <BreadcrumbPage>{selectedCategory.name}</BreadcrumbPage>
+              ) : (
+                <BreadcrumbLink 
+                  onClick={() => {
+                    setStep('brands');
+                    setSelectedBrand(null);
+                    setSelectedModel(null);
+                  }}
+                  className="cursor-pointer"
+                >
+                  {selectedCategory.name}
+                </BreadcrumbLink>
+              )}
+            </BreadcrumbItem>
+          </>
+        )}
+        {selectedBrand && (
+          <>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              {step === 'models' ? (
+                <BreadcrumbPage>{selectedBrand.name}</BreadcrumbPage>
+              ) : (
+                <BreadcrumbLink 
+                  onClick={() => {
+                    setStep('models');
+                    setSelectedModel(null);
+                  }}
+                  className="cursor-pointer"
+                >
+                  {selectedBrand.name}
+                </BreadcrumbLink>
+              )}
+            </BreadcrumbItem>
+          </>
+        )}
+        {selectedModel && (
+          <>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{selectedModel.model_name}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </>
+        )}
+      </BreadcrumbList>
+    </Breadcrumb>
+  );
+
+  const renderSearchAndFilters = () => (
+    <div className="mb-6 space-y-4">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+        <Input
+          placeholder={`Search ${step}...`}
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="pl-10"
+        />
+      </div>
+      
+      {step === 'products' && (
+        <div className="flex flex-wrap gap-4">
+          <Select value={sortBy} onValueChange={(value: 'price' | 'rating' | 'reviews') => setSortBy(value)}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="price">Price (Low to High)</SelectItem>
+              <SelectItem value="rating">Rating (High to Low)</SelectItem>
+              <SelectItem value="reviews">Reviews (Most to Least)</SelectItem>
+            </SelectContent>
+          </Select>
+          
+          <Select value={filterStock} onValueChange={(value: 'all' | 'in-stock') => setFilterStock(value)}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Filter by stock" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Products</SelectItem>
+              <SelectItem value="in-stock">In Stock Only</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderCategories = () => {
+    const filteredCategories = getFilteredData() as Category[];
+    
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredCategories.map((category) => (
+          <Card 
+            key={category.id}
+            className="cursor-pointer hover:shadow-lg transition-all duration-200 border-2 hover:border-blue-300"
+            onClick={() => {
+              setSelectedCategory(category);
+              loadBrands(category.id);
+            }}
+          >
+            <CardHeader className={`${category.gradient || 'bg-gradient-to-br from-blue-50 to-purple-50'} rounded-t-lg`}>
+              <CardTitle className="flex items-center space-x-3">
+                {category.icon && (
+                  <div className="text-2xl">{category.icon}</div>
+                )}
+                <span>{category.name}</span>
+              </CardTitle>
+              {category.description && (
+                <CardDescription className="text-gray-600">
+                  {category.description}
+                </CardDescription>
+              )}
+            </CardHeader>
+            <CardContent className="pt-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">Explore products</span>
+                <ChevronRight className="h-4 w-4 text-gray-400" />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
+  };
+
+  const renderBrands = () => {
+    const filteredBrands = getFilteredData() as Brand[];
+    
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {filteredBrands.map((brand) => (
+          <Card 
+            key={brand.id}
+            className="cursor-pointer hover:shadow-lg transition-all duration-200 border-2 hover:border-blue-300"
+            onClick={() => {
+              setSelectedBrand(brand);
+              loadModels(brand.id);
+            }}
+          >
+            <CardContent className="p-6 text-center">
+              {brand.logo_url ? (
+                <img 
+                  src={brand.logo_url} 
+                  alt={brand.name}
+                  className="w-16 h-16 mx-auto mb-4 object-contain"
+                />
+              ) : (
+                <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-lg flex items-center justify-center">
+                  <span className="text-2xl font-bold text-gray-400">
+                    {brand.name.charAt(0)}
+                  </span>
+                </div>
+              )}
+              <h3 className="font-semibold text-gray-900">{brand.name}</h3>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
+  };
+
+  const renderModels = () => {
+    const filteredModels = getFilteredData() as Model[];
+    
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {filteredModels.map((model) => (
+          <Card 
+            key={model.id}
+            className="cursor-pointer hover:shadow-lg transition-all duration-200 border-2 hover:border-blue-300"
+            onClick={() => {
+              setSelectedModel(model);
+              loadVendorProducts(model.id, selectedCategory!.id);
+            }}
+          >
+            <CardContent className="p-6">
+              <h3 className="font-semibold text-gray-900 mb-2">{model.model_name}</h3>
+              <div className="space-y-1">
+                {model.model_number && (
+                  <p className="text-sm text-gray-600">Model: {model.model_number}</p>
+                )}
+                {model.release_year && (
+                  <p className="text-sm text-gray-600">Year: {model.release_year}</p>
+                )}
+                {model.base_price && (
+                  <p className="text-sm text-gray-600">Starting from: ₹{model.base_price.toLocaleString()}</p>
+                )}
+                <div className="flex items-center justify-between pt-2">
+                  <Badge variant="outline">Available</Badge>
+                  <ChevronRight className="h-4 w-4 text-gray-400" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
+  };
+
+  const renderVendorProducts = () => {
+    const filteredProducts = getFilteredData() as VendorProduct[];
+    
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredProducts.map((product) => (
+          <Card key={product.id} className="hover:shadow-lg transition-all duration-200">
+            <CardContent className="p-6">
+              <div className="space-y-4">
+                {/* Vendor Info */}
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="font-semibold text-gray-900 flex items-center space-x-2">
+                      <span>{product.vendor.business_name}</span>
+                      {product.vendor.is_verified && (
+                        <Verified className="h-4 w-4 text-blue-500" />
+                      )}
+                    </h3>
+                    <div className="flex items-center space-x-2 mt-1">
+                      <div className="flex items-center">
+                        <Star className="h-4 w-4 text-yellow-400 fill-current" />
+                        <span className="text-sm text-gray-600 ml-1">
+                          {product.vendor.rating.toFixed(1)} ({product.vendor.total_reviews})
+                        </span>
+                      </div>
+                    </div>
+                    {product.vendor.business_city && (
+                      <p className="text-sm text-gray-500">
+                        {product.vendor.business_city}, {product.vendor.business_state}
+                      </p>
+                    )}
+                  </div>
+                  <Badge 
+                    className={getQualityColor(product.quality.name)}
+                    variant="outline"
+                  >
+                    {product.quality.name}
+                  </Badge>
+                </div>
+
+                {/* Price and Discount */}
+                <div className="space-y-1">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-2xl font-bold text-gray-900">
+                      ₹{product.price.toLocaleString()}
+                    </span>
+                    {product.original_price && product.original_price > product.price && (
+                      <>
+                        <span className="text-sm text-gray-500 line-through">
+                          ₹{product.original_price.toLocaleString()}
+                        </span>
+                        <Badge variant="destructive" className="text-xs">
+                          {Math.round(((product.original_price - product.price) / product.original_price) * 100)}% OFF
+                        </Badge>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Product Details */}
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="flex items-center space-x-1">
+                    <Package className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600">
+                      {product.warranty_months}M Warranty
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <Clock className="h-4 w-4 text-gray-400" />
+                    <span className="text-gray-600">
+                      {product.delivery_time_days}D Delivery
+                    </span>
+                  </div>
+                </div>
+
+                {/* Stock Status */}
+                <div className="flex items-center justify-between">
+                  <Badge 
+                    variant={product.is_in_stock ? "default" : "destructive"}
+                    className="text-xs"
+                  >
+                    {product.is_in_stock ? `In Stock (${product.stock_quantity})` : 'Out of Stock'}
+                  </Badge>
+                  <span className="text-xs text-gray-500">
+                    Responds in {product.vendor.response_time_hours}h
+                  </span>
+                </div>
+
+                {/* Add to Cart Button */}
+                <Button 
+                  onClick={() => addToCart(product)}
+                  disabled={!product.is_in_stock}
+                  className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+                >
+                  Add to Cart
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
+  };
+
+  const renderLoadingSkeletons = () => (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {[...Array(6)].map((_, i) => (
+        <Card key={i}>
+          <CardContent className="p-6">
+            <Skeleton className="h-4 w-3/4 mb-4" />
+            <Skeleton className="h-3 w-1/2 mb-2" />
+            <Skeleton className="h-3 w-2/3" />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+
+  const renderStepContent = () => {
+    if (loading) return renderLoadingSkeletons();
+    
+    const filteredData = getFilteredData();
+    
+    if (filteredData.length === 0) {
+      return (
+        <div className="text-center py-12">
+          <div className="text-gray-400 mb-4">
+            {step === 'categories' && <Package className="h-12 w-12 mx-auto" />}
+            {step === 'brands' && <Search className="h-12 w-12 mx-auto" />}
+            {step === 'models' && <Search className="h-12 w-12 mx-auto" />}
+            {step === 'products' && <ShoppingCart className="h-12 w-12 mx-auto" />}
+          </div>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">
+            No {step} found
+          </h3>
+          <p className="text-gray-500">
+            {searchTerm ? 'Try adjusting your search criteria.' : `No ${step} available at the moment.`}
+          </p>
+        </div>
+      );
+    }
+
+    switch (step) {
+      case 'categories':
+        return renderCategories();
+      case 'brands':
+        return renderBrands();
+      case 'models':
+        return renderModels();
+      case 'products':
+        return renderVendorProducts();
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header cartItems={cartItems.length} onCartClick={() => setIsCartOpen(true)} />
+      <Header 
+        cartItems={cartItems.length} 
+        onCartClick={() => setIsCartOpen(true)} 
+      />
       
       <main className="container mx-auto px-4 py-8">
-        {/* Enhanced Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">
-            Order Mobile Parts
-          </h1>
-          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            Compare prices from verified vendors, get instant quotes, and enjoy fast delivery 
-            with quality guarantee on all products.
-          </p>
-          
-          {/* Quick Stats */}
-          <div className="flex justify-center items-center space-x-8 mt-6 text-sm text-gray-600">
-            <div className="flex items-center">
-              <Star className="h-4 w-4 text-yellow-500 mr-1" />
-              <span>4.8 avg rating</span>
-            </div>
-            <div className="flex items-center">
-              <Zap className="h-4 w-4 text-green-500 mr-1" />
-              <span>2hr delivery</span>
-            </div>
-            <div className="flex items-center">
-              <Shield className="h-4 w-4 text-blue-500 mr-1" />
-              <span>Quality guaranteed</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Order Tracking Button */}
-        <div className="flex justify-center mb-8">
-          <Button onClick={() => setShowOrderTracking(true)} className="bg-purple-600 hover:bg-purple-700 text-white">
-            Track Your Order
-          </Button>
-        </div>
-
-        {/* Order Tracking Modal/Component */}
-        {showOrderTracking && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-            <div className="bg-white rounded-lg p-6 max-w-2xl w-full relative">
-              <button
-                onClick={() => setShowOrderTracking(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-800"
-              >
-                X
-              </button>
-              <OrderTracking {...trackedOrder} />
-            </div>
-          </div>
-        )}
-
-        {!selectedCategory ? (
-          /* Enhanced Category Selection */
-          <div>
-            <div className="text-center mb-8">
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">Choose a Category</h2>
-              <p className="text-gray-600">Select the type of mobile part you need</p>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {categories.map((category) => (
-                <div key={category.id} className="relative">
-                  <CategoryCard
-                    title={category.title}
-                    description={category.description}
-                    icon={category.icon}
-                    gradient={category.gradient}
-                    onClick={() => handleCategorySelect(category.id)}
-                  />
-                  <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm rounded-full px-2 py-1">
-                    <span className="text-xs font-medium text-gray-700">{category.count}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : !selectedPhone ? (
-          /* Enhanced Phone Selection */
-          <div className="max-w-2xl mx-auto">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900">
-                  Select Your Phone Model
-                </h2>
-                <p className="text-gray-600">
-                  Choose your device to see compatible {categories.find(c => c.id === selectedCategory)?.title.toLowerCase()}
-                </p>
-              </div>
-              <button 
-                onClick={resetFlow}
-                className="text-blue-600 hover:text-blue-800 font-medium"
-              >
-                ← Back to Categories
-              </button>
-            </div>
-            
-            {/* Category reminder */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-              <div className="flex items-center">
-                {React.createElement(categories.find(c => c.id === selectedCategory)?.icon || Monitor, { 
-                  className: "h-5 w-5 text-blue-600 mr-2" 
-                })}
-                <span className="text-blue-800 font-medium">
-                  Looking for: {categories.find(c => c.id === selectedCategory)?.title}
-                </span>
-              </div>
-            </div>
-            
-            <PhoneSearch onSearch={handlePhoneSearch} />
-          </div>
-        ) : (
-          /* Enhanced Vendor Selection */
-          <div>
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900">
-                  {selectedPhone.brand} {selectedPhone.model} - {categories.find(c => c.id === selectedCategory)?.title}
-                </h2>
-                <p className="text-gray-600">Compare prices and choose the best option for you</p>
-              </div>
-              <div className="flex items-center space-x-4">
-                <button 
-                  onClick={() => setSelectedPhone(null)}
-                  className="text-blue-600 hover:text-blue-800 font-medium"
+        {/* Header Section */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-4">
+              {step !== 'categories' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={goBack}
+                  className="flex items-center space-x-2"
                 >
-                  Change Phone
-                </button>
-                <button 
-                  onClick={resetFlow}
-                  className="text-gray-600 hover:text-gray-800 font-medium"
-                >
-                  Change Category
-                </button>
-              </div>
-            </div>
-
-            {/* Advanced Filters and Search */}
-            <div className="bg-white rounded-lg p-4 mb-6 shadow-sm border">
-              <div className="flex flex-col md:flex-row gap-4 items-center">
-                {/* Search */}
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search vendors..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                </div>
-
-                {/* Sort By */}
-                <div className="flex items-center space-x-2">
-                  <ArrowUpDown className="h-4 w-4 text-gray-400" />
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="price">Price: Low to High</option>
-                    <option value="rating">Highest Rated</option>
-                    <option value="reviews">Most Reviews</option>
-                  </select>
-                </div>
-
-                {/* In Stock Filter */}
-                <div className="flex items-center space-x-2">
-                  <Filter className="h-4 w-4 text-gray-400" />
-                  <label className="flex items-center space-x-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={filterByStock}
-                      onChange={(e) => setFilterByStock(e.target.checked)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-sm text-gray-700">In Stock Only</span>
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            {/* Results Count */}
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-gray-600">
-                Showing {filteredVendors.length} vendor{filteredVendors.length !== 1 ? 's' : ''} 
-                {searchQuery && ` for "${searchQuery}"`}
-              </p>
-              
-              {/* Quick delivery filter */}
-              <div className="flex items-center space-x-2 text-sm">
-                <Clock className="h-4 w-4 text-green-500" />
-                <span className="text-gray-600">Same day delivery available</span>
-              </div>
-            </div>
-
-            {/* Enhanced Vendor Cards */}
-            <div className="grid gap-6 max-w-4xl mx-auto">
-              {filteredVendors.length > 0 ? (
-                filteredVendors.map((vendor) => (
-                  <VendorCard
-                    key={vendor.id}
-                    vendor={vendor}
-                    onAddToCart={(optionId) => handleAddToCart({
-                      id: `${vendor.id}-${optionId}`,
-                      name: `${selectedPhone.brand} ${selectedPhone.model} ${vendor.options.find(opt => opt.id === optionId)?.name}`,
-                      price: vendor.options.find(opt => opt.id === optionId)?.price || 0,
-                      vendor: vendor.name
-                    })}
-                  />
-                ))
-              ) : (
-                <div className="text-center py-12">
-                  <div className="text-gray-400 mb-4">
-                    <Search className="h-12 w-12 mx-auto mb-4" />
-                  </div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No vendors found</h3>
-                  <p className="text-gray-600 mb-4">Try adjusting your filters or search terms</p>
-                  <Button 
-                    onClick={() => {
-                      setSearchQuery('');
-                      setFilterByStock(false);
-                    }}
-                    variant="outline"
-                  >
-                    Clear Filters
-                  </Button>
-                </div>
+                  <ArrowLeft className="h-4 w-4" />
+                  <span>Back</span>
+                </Button>
               )}
+              <h1 className="text-3xl font-bold text-gray-900">
+                {step === 'categories' && 'Choose a Category'}
+                {step === 'brands' && `Brands in ${selectedCategory?.name}`}
+                {step === 'models' && `${selectedBrand?.name} Models`}
+                {step === 'products' && `${selectedModel?.model_name} Options`}
+              </h1>
             </div>
-
-            {/* Trust indicators */}
-            <div className="mt-8 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg p-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-4 text-center">
-                Why Shop with Tryodo?
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-                <div className="flex flex-col items-center">
-                  <Shield className="h-8 w-8 text-blue-600 mb-2" />
-                  <span className="font-medium">Quality Guaranteed</span>
-                  <span className="text-sm text-gray-600">All parts verified</span>
-                </div>
-                <div className="flex flex-col items-center">
-                  <Zap className="h-8 w-8 text-green-600 mb-2" />
-                  <span className="font-medium">Fast Delivery</span>
-                  <span className="text-sm text-gray-600">Same day available</span>
-                </div>
-                <div className="flex flex-col items-center">
-                  <Star className="h-8 w-8 text-yellow-600 mb-2" />
-                  <span className="font-medium">Best Prices</span>
-                  <span className="text-sm text-gray-600">Competitive rates</span>
-                </div>
-              </div>
-            </div>
+            
+            <Button
+              variant="outline"
+              onClick={() => setIsCartOpen(true)}
+              className="flex items-center space-x-2"
+            >
+              <ShoppingCart className="h-4 w-4" />
+              <span>Cart ({cartItems.length})</span>
+            </Button>
           </div>
+
+          {renderBreadcrumb()}
+        </div>
+
+        {/* Error Message */}
+        {error && (
+          <Alert className="mb-6 border-red-200 bg-red-50">
+            <AlertDescription className="text-red-800">
+              {error}
+            </AlertDescription>
+          </Alert>
         )}
+
+        {/* Search and Filters */}
+        {renderSearchAndFilters()}
+
+        {/* Main Content */}
+        {renderStepContent()}
       </main>
+
+      <Footer />
+      
+      {/* Cart Sidebar */}
       <Cart
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
         items={cartItems}
-        onUpdateQuantity={handleUpdateQuantity}
-        onRemoveItem={handleRemoveItem}
+        onUpdateQuantity={updateCartQuantity}
+        onRemoveItem={removeFromCart}
       />
     </div>
   );
 };
 
-export default Order;
+export default Order; 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowRight, Shield, Truck, Star, Monitor, Battery, Smartphone, Clock, Users, MapPin, Zap, Award, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Header from '@/components/Header';
-import Cart from '@/components/Cart';
+import Cart from '@/components/customer/Cart';
 import { supabase } from '@/lib/supabase';
 
 interface CartItem {
@@ -210,7 +210,7 @@ const Index = () => {
       </section>
 
       {/* Trending Products */}
-      <section className="py-16 bg-gradient-to-r from-gray-50 to-blue-50">
+      {/* <section className="py-16 bg-gradient-to-r from-gray-50 to-blue-50">
         <div className="container mx-auto px-4">
           <div className="flex items-center justify-between mb-8">
             <div>
@@ -245,7 +245,7 @@ const Index = () => {
             </div>
           )}
         </div>
-      </section>
+      </section> */}
 
       {/* Enhanced Features Section */}
       <section className="py-20 bg-white">

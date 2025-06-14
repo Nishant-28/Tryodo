@@ -1,14 +1,25 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, Store, ShoppingBag, TrendingUp, DollarSign, Package, Smartphone, Settings, ArrowRight } from 'lucide-react';
+import { Users, Store, ShoppingBag, TrendingUp, DollarSign, Package, Smartphone, Settings, ArrowRight, AlertTriangle, Database, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import Header from '@/components/Header';
+import { supabase } from '@/lib/supabase';
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const [timeRange, setTimeRange] = useState('7d');
+  const [dbSetupStatus, setDbSetupStatus] = useState<{
+    categoriesExists: boolean;
+    categoryQualitiesExists: boolean;
+    isChecking: boolean;
+  }>({
+    categoriesExists: false,
+    categoryQualitiesExists: false,
+    isChecking: true
+  });
 
   const stats = {
     totalCustomers: 1247,
@@ -18,6 +29,45 @@ const AdminDashboard = () => {
     pendingOrders: 45,
     totalProducts: 15678
   };
+
+  // Check database setup status on component mount
+  useEffect(() => {
+    const checkDatabaseSetup = async () => {
+      try {
+        // Check if categories table exists and has data
+        const { data: categories, error: categoriesError } = await supabase
+          .from('categories')
+          .select('id')
+          .limit(1);
+
+        const categoriesExists = !categoriesError && categories !== null;
+
+        // Check if category_qualities table exists
+        let categoryQualitiesExists = false;
+        try {
+          const { data: qualities, error: qualitiesError } = await supabase
+            .from('category_qualities')
+            .select('id')
+            .limit(1);
+          
+          categoryQualitiesExists = !qualitiesError && qualities !== null;
+        } catch (error) {
+          categoryQualitiesExists = false;
+        }
+
+        setDbSetupStatus({
+          categoriesExists,
+          categoryQualitiesExists,
+          isChecking: false
+        });
+      } catch (error) {
+        console.error('Error checking database setup:', error);
+        setDbSetupStatus(prev => ({ ...prev, isChecking: false }));
+      }
+    };
+
+    checkDatabaseSetup();
+  }, []);
 
   const recentOrders = [
     { id: 'ORD-001', customer: 'Rahul Kumar', vendor: 'Rohan Communication', amount: 8500, status: 'pending' },
@@ -32,6 +82,103 @@ const AdminDashboard = () => {
     { name: 'Dhanesh Electronics', orders: 98, revenue: 145000 },
     { name: 'Mobile Zone', orders: 87, revenue: 123000 }
   ];
+
+  const DatabaseSetupNotification = () => {
+    const { categoriesExists, categoryQualitiesExists, isChecking } = dbSetupStatus;
+    
+    if (isChecking) {
+      return (
+        <Alert className="mb-6 border-blue-200 bg-blue-50">
+          <Database className="h-4 w-4" />
+          <AlertDescription>
+            <div className="flex items-center gap-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+              Checking database setup...
+            </div>
+          </AlertDescription>
+        </Alert>
+      );
+    }
+
+    if (!categoriesExists || !categoryQualitiesExists) {
+      return (
+        <Alert className="mb-6 border-orange-200 bg-orange-50">
+          <AlertTriangle className="h-4 w-4 text-orange-600" />
+          <AlertDescription>
+            <div className="space-y-3">
+              <div className="font-medium text-orange-800">Database Setup Required</div>
+              <div className="text-sm text-orange-700">
+                Some required database tables are missing. Please run the setup script to enable full functionality:
+              </div>
+              <div className="space-y-1 text-sm">
+                <div className="flex items-center gap-2">
+                  {categoriesExists ? (
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4 text-orange-600" />
+                  )}
+                  <span className={categoriesExists ? 'text-green-700' : 'text-orange-700'}>
+                    Categories table {categoriesExists ? '✓' : '✗'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {categoryQualitiesExists ? (
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4 text-orange-600" />
+                  )}
+                  <span className={categoryQualitiesExists ? 'text-green-700' : 'text-orange-700'}>
+                    Category Qualities table {categoryQualitiesExists ? '✓' : '✗'}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  className="border-orange-300 text-orange-700 hover:bg-orange-100"
+                  onClick={() => window.open('https://supabase.com/dashboard', '_blank')}
+                >
+                  <Database className="h-4 w-4 mr-2" />
+                  Open Supabase Dashboard
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  className="border-orange-300 text-orange-700 hover:bg-orange-100"
+                  onClick={() => {
+                    // Copy the setup script content to clipboard
+                    navigator.clipboard.writeText(`-- Run this in your Supabase SQL Editor
+-- Go to: https://supabase.com/dashboard → Your Project → SQL Editor
+
+-- Copy and run the contents of setup-missing-tables.sql file
+-- Or contact your developer to run the database setup script`);
+                    alert('Setup instructions copied to clipboard!');
+                  }}
+                >
+                  Copy Setup Instructions
+                </Button>
+              </div>
+            </div>
+          </AlertDescription>
+        </Alert>
+      );
+    }
+
+    if (categoriesExists && categoryQualitiesExists) {
+      return (
+        <Alert className="mb-6 border-green-200 bg-green-50">
+          <CheckCircle className="h-4 w-4 text-green-600" />
+          <AlertDescription className="text-green-700">
+            <div className="font-medium">Database Setup Complete ✓</div>
+            <div className="text-sm mt-1">All required tables are available. You can now manage categories and qualities.</div>
+          </AlertDescription>
+        </Alert>
+      );
+    }
+
+    return null;
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -54,6 +201,9 @@ const AdminDashboard = () => {
             <option value="90d">Last 90 days</option>
           </select>
         </div>
+
+        {/* Database Setup Notification */}
+        <DatabaseSetupNotification />
 
         {/* Stats Overview */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
@@ -160,7 +310,7 @@ const AdminDashboard = () => {
             </CardContent>
           </Card>
 
-          <Card className="hover:shadow-md transition-shadow cursor-pointer opacity-50">
+          <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/admin/categories')}>
             <CardHeader className="pb-4">
               <CardTitle className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -170,12 +320,32 @@ const AdminDashboard = () => {
                 <ArrowRight className="h-4 w-4 text-gray-400" />
               </CardTitle>
               <CardDescription>
-                Organize product categories and quality types
+                Manage phone feature categories like Display, Battery, Camera
               </CardDescription>
             </CardHeader>
             <CardContent>
               <p className="text-sm text-gray-600">
-                Control product categories and their quality options
+                Define categories for organizing phone specifications and features
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/admin/qualities')}>
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Settings className="h-5 w-5 text-indigo-600" />
+                  Manage Qualities
+                </div>
+                <ArrowRight className="h-4 w-4 text-gray-400" />
+              </CardTitle>
+              <CardDescription>
+                Define specific qualities for each phone model and category
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600">
+                Add qualities like "TFT" for Display, "Ckoza" for Battery, etc.
               </p>
             </CardContent>
           </Card>

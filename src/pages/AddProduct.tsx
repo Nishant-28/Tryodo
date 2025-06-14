@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import Header from '@/components/Header';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Brand {
   id: string;
@@ -21,8 +22,8 @@ interface Brand {
 
 interface Model {
   id: string;
-  name: string;
-  full_name: string;
+  model_name: string;
+  model_number?: string;
   brand_id: string;
   brand_name?: string;
 }
@@ -79,7 +80,9 @@ interface GenericProductForm {
 const AddProduct = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { profile } = useAuth();
   
+  const [vendorId, setVendorId] = useState<string | null>(null);
   // State for master data
   const [brands, setBrands] = useState<Brand[]>([]);
   const [models, setModels] = useState<Model[]>([]);
@@ -119,15 +122,92 @@ const AddProduct = () => {
     specifications: {}
   });
 
+  useEffect(() => {
+    console.log("AddProduct component mounted or profile changed.");
+    console.log("Current profile state:", profile);
+    const fetchVendorId = async () => {
+        if (profile && profile.role === 'vendor') {
+            console.log("Profile found and role is vendor. Attempting to fetch vendor ID...");
+            console.log("Profile user_id:", profile.user_id);
+            try {
+                // Fetch profile to get the id linked to auth.uid()
+                const { data: profileData, error: profileError } = await supabase
+                    .from('profiles')
+                    .select('id')
+                    .eq('user_id', profile.user_id)
+                    .single();
+
+                if (profileError) {
+                    console.error('Supabase error fetching profile ID:', profileError);
+                    throw profileError;
+                }
+                if (!profileData) {
+                    console.log("No profile data found for user_id:", profile.user_id);
+                    toast({
+                        title: "Profile not found",
+                        description: "Could not find a matching profile for your user account.",
+                        variant: "destructive",
+                    });
+                    return;
+                }
+                console.log("Fetched profile data (profile_id):", profileData.id);
+
+                // Use profile_id to fetch vendor_id
+                const { data: vendorData, error: vendorError } = await supabase
+                    .from('vendors')
+                    .select('id')
+                    .eq('profile_id', profileData.id)
+                    .single();
+
+                if (vendorError) {
+                    console.error('Supabase error fetching vendor ID:', vendorError);
+                    throw vendorError;
+                }
+                if (vendorData) {
+                    setVendorId(vendorData.id);
+                    console.log("Vendor ID set to:", vendorData.id);
+                } else {
+                    console.log("No vendor data found for profile_id:", profileData.id);
+                    toast({
+                        title: "Vendor not found",
+                        description: "Could not find a matching vendor for your user account.",
+                        variant: "destructive",
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching vendor ID in catch block:', error);
+                toast({
+                    title: "Error",
+                    description: "Failed to fetch vendor details.",
+                    variant: "destructive",
+                });
+            }
+        } else if (profile) {
+            console.log("Profile found but role is not 'vendor'. Current role:", profile.role);
+        } else {
+            console.log("Profile is null or undefined.");
+        }
+    };
+
+    fetchVendorId();
+  }, [profile, toast]);
+
   // Load master data on component mount
   useEffect(() => {
+    console.log("Loading master data...");
     loadMasterData();
   }, []);
 
   // Filter models when brand changes
-  const filteredModels = models.filter(model => 
-    selectedBrand === '' || model.brand_id === selectedBrand
-  );
+  const filteredModels = models.filter(model => {
+    console.log("Filtering models. Selected brand:", selectedBrand, "Model brand ID:", model.brand_id, "Model full name:", model.model_name);
+    return selectedBrand === '' || model.brand_id === selectedBrand;
+  });
+
+  // Log filteredModels whenever it changes (i.e., when selectedBrand or models change)
+  useEffect(() => {
+    console.log("Filtered models updated:", filteredModels);
+  }, [filteredModels]);
 
   // Filter quality types when category changes
   const filteredQualityTypes = qualityTypes.filter(qt => 
@@ -142,6 +222,7 @@ const AddProduct = () => {
   const loadMasterData = async () => {
     try {
       setLoading(true);
+      console.log("Attempting to load master data from Supabase...");
       
       // Load brands
       const { data: brandsData, error: brandsError } = await supabase
@@ -150,25 +231,33 @@ const AddProduct = () => {
         .eq('is_active', true)
         .order('name');
       
-      if (brandsError) throw brandsError;
+      if (brandsError) {
+        console.error('Error loading brands:', brandsError);
+        throw brandsError;
+      }
       setBrands(brandsData || []);
+      console.log("Brands loaded:", brandsData);
 
       // Load models with brand names
       const { data: modelsData, error: modelsError } = await supabase
-        .from('models')
+        .from('smartphone_models')
         .select(`
           *,
           brands!inner(name)
         `)
         .eq('is_active', true)
-        .order('full_name');
+        .order('model_name');
       
-      if (modelsError) throw modelsError;
+      if (modelsError) {
+        console.error('Error loading models:', modelsError);
+        throw modelsError;
+      }
       const modelsWithBrandNames = modelsData?.map(model => ({
         ...model,
         brand_name: model.brands?.name || ''
       })) || [];
       setModels(modelsWithBrandNames);
+      console.log("Models loaded:", modelsWithBrandNames);
 
       // Load categories
       const { data: categoriesData, error: categoriesError } = await supabase
@@ -177,18 +266,26 @@ const AddProduct = () => {
         .eq('is_active', true)
         .order('sort_order', { ascending: true });
       
-      if (categoriesError) throw categoriesError;
+      if (categoriesError) {
+        console.error('Error loading categories:', categoriesError);
+        throw categoriesError;
+      }
       setCategories(categoriesData || []);
+      console.log("Categories loaded:", categoriesData);
 
-      // Load quality types
+      // Load quality types (corrected table name)
       const { data: qualityTypesData, error: qualityTypesError } = await supabase
-        .from('quality_types')
+        .from('quality_categories')
         .select('*')
         .eq('is_active', true)
         .order('sort_order', { ascending: true });
       
-      if (qualityTypesError) throw qualityTypesError;
+      if (qualityTypesError) {
+        console.error('Error loading quality types:', qualityTypesError);
+        throw qualityTypesError;
+      }
       setQualityTypes(qualityTypesData || []);
+      console.log("Quality types loaded:", qualityTypesData);
 
       // Load generic products
       const { data: genericProductsData, error: genericProductsError } = await supabase
@@ -197,8 +294,12 @@ const AddProduct = () => {
         .eq('is_active', true)
         .order('name');
       
-      if (genericProductsError) throw genericProductsError;
+      if (genericProductsError) {
+        console.error('Error loading generic products:', genericProductsError);
+        throw genericProductsError;
+      }
       setGenericProducts(genericProductsData || []);
+      console.log("Generic products loaded:", genericProductsData);
 
     } catch (error) {
       console.error('Error loading master data:', error);
@@ -327,7 +428,6 @@ const AddProduct = () => {
     if (!phoneForm.quality_type_id) errors.push('Please select a quality type');
     if (!phoneForm.price || parseFloat(phoneForm.price) <= 0) errors.push('Please enter a valid price');
     if (!phoneForm.stock_quantity || parseInt(phoneForm.stock_quantity) < 0) errors.push('Please enter a valid stock quantity');
-    if (phoneForm.product_images.filter(img => img.trim() !== '').length === 0) errors.push('Please add at least one product image');
     
     return errors;
   };
@@ -339,14 +439,20 @@ const AddProduct = () => {
     if (!genericForm.quality_type_id) errors.push('Please select a quality type');
     if (!genericForm.price || parseFloat(genericForm.price) <= 0) errors.push('Please enter a valid price');
     if (!genericForm.stock_quantity || parseInt(genericForm.stock_quantity) < 0) errors.push('Please enter a valid stock quantity');
-    if (genericForm.product_images.filter(img => img.trim() !== '').length === 0) errors.push('Please add at least one product image');
     
     return errors;
   };
 
   const submitPhoneProduct = async () => {
+    console.log('=== Starting Phone Product Submission ===');
+    console.log('Current form state:', phoneForm);
+    console.log('Vendor ID:', vendorId);
+    console.log('Selected brand:', selectedBrand);
+    console.log('Selected category:', selectedCategory);
+    
     const errors = validatePhoneForm();
     if (errors.length > 0) {
+      console.log('Validation errors:', errors);
       toast({
         title: "Validation Error",
         description: errors.join('\n'),
@@ -355,11 +461,18 @@ const AddProduct = () => {
       return;
     }
 
+    if (!vendorId) {
+        console.log('No vendor ID found');
+        toast({
+            title: "Error",
+            description: "Vendor ID is missing. Cannot add product.",
+            variant: "destructive",
+        });
+        return;
+    }
+
     try {
       setLoading(true);
-      
-      // Get current vendor ID (you'll need to implement this based on your auth context)
-      const vendorId = 'current-vendor-id'; // Replace with actual vendor ID from auth context
       
       const productData = {
         vendor_id: vendorId,
@@ -376,11 +489,45 @@ const AddProduct = () => {
         is_active: true
       };
 
-      const { error } = await supabase
-        .from('vendor_products')
-        .insert(productData);
+      console.log('Submitting product data:', productData);
+      console.log('Product data types:', {
+        vendor_id: typeof productData.vendor_id,
+        model_id: typeof productData.model_id,
+        category_id: typeof productData.category_id,
+        quality_type_id: typeof productData.quality_type_id,
+        price: typeof productData.price,
+        warranty_months: typeof productData.warranty_months,
+        stock_quantity: typeof productData.stock_quantity,
+        delivery_time_days: typeof productData.delivery_time_days,
+        product_images: typeof productData.product_images,
+        specifications: typeof productData.specifications
+      });
 
-      if (error) throw error;
+      // Check if auth user exists
+      const { data: authUser, error: authError } = await supabase.auth.getUser();
+      console.log('Current auth user:', authUser?.user?.id);
+      if (authError) {
+        console.error('Auth error:', authError);
+        throw new Error('Authentication required');
+      }
+
+      const { data, error } = await supabase
+        .from('vendor_products')
+        .insert(productData)
+        .select();
+
+      if (error) {
+        console.error('Database error:', error);
+        console.error('Error details:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
+        throw error;
+      }
+
+      console.log('Product inserted successfully:', data);
 
       toast({
         title: "Success",
@@ -401,11 +548,34 @@ const AddProduct = () => {
         specifications: {}
       });
 
-    } catch (error) {
+      // Reset selections
+      setSelectedBrand('');
+      setSelectedCategory('');
+
+    } catch (error: any) {
       console.error('Error adding phone product:', error);
+      
+      let errorMessage = "Failed to add product. Please try again.";
+      
+      if (error?.message) {
+        if (error.message.includes('duplicate key')) {
+          errorMessage = "This product already exists. Please check if you've already added this combination.";
+        } else if (error.message.includes('violates foreign key')) {
+          errorMessage = "Invalid selection. Please refresh the page and try again.";
+        } else if (error.message.includes('violates check constraint')) {
+          errorMessage = "Invalid data entered. Please check your price and quantity values.";
+        } else if (error.message.includes('permission denied') || error.message.includes('RLS')) {
+          errorMessage = "Permission denied. Please make sure you're logged in as a vendor.";
+        } else if (error.message.includes('Authentication required')) {
+          errorMessage = "Please log in and try again.";
+        } else {
+          errorMessage = `Database error: ${error.message}`;
+        }
+      }
+      
       toast({
         title: "Error",
-        description: "Failed to add product. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -424,11 +594,17 @@ const AddProduct = () => {
       return;
     }
 
+    if (!vendorId) {
+        toast({
+            title: "Error",
+            description: "Vendor ID is missing. Cannot add product.",
+            variant: "destructive",
+        });
+        return;
+    }
+
     try {
       setLoading(true);
-      
-      // Get current vendor ID (you'll need to implement this based on your auth context)
-      const vendorId = 'current-vendor-id'; // Replace with actual vendor ID from auth context
       
       const productData = {
         vendor_id: vendorId,
@@ -444,11 +620,25 @@ const AddProduct = () => {
         is_active: true
       };
 
-      const { error } = await supabase
-        .from('vendor_generic_products')
-        .insert(productData);
+      console.log('Submitting generic product data:', productData);
 
-      if (error) throw error;
+      const { data, error } = await supabase
+        .from('vendor_generic_products')
+        .insert(productData)
+        .select();
+
+      if (error) {
+        console.error('Database error:', error);
+        console.error('Error details:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
+        throw error;
+      }
+
+      console.log('Generic product inserted successfully:', data);
 
       toast({
         title: "Success",
@@ -468,11 +658,31 @@ const AddProduct = () => {
         specifications: {}
       });
 
-    } catch (error) {
+      // Reset selections
+      setSelectedCategory('');
+
+    } catch (error: any) {
       console.error('Error adding generic product:', error);
+      
+      let errorMessage = "Failed to add product. Please try again.";
+      
+      if (error?.message) {
+        if (error.message.includes('duplicate key')) {
+          errorMessage = "This product already exists. Please check if you've already added this combination.";
+        } else if (error.message.includes('violates foreign key')) {
+          errorMessage = "Invalid selection. Please refresh the page and try again.";
+        } else if (error.message.includes('violates check constraint')) {
+          errorMessage = "Invalid data entered. Please check your price and quantity values.";
+        } else if (error.message.includes('permission denied') || error.message.includes('RLS')) {
+          errorMessage = "Permission denied. Please make sure you're logged in as a vendor.";
+        } else {
+          errorMessage = `Database error: ${error.message}`;
+        }
+      }
+      
       toast({
         title: "Error",
-        description: "Failed to add product. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -483,7 +693,7 @@ const AddProduct = () => {
   if (loading && brands.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Header />
+        <Header onCartClick={() => {}} />
         <div className="container mx-auto px-4 py-8">
           <div className="flex items-center justify-center min-h-[400px]">
             <div className="text-center">
@@ -498,7 +708,7 @@ const AddProduct = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header />
+      <Header onCartClick={() => {}} />
       
       <main className="container mx-auto px-4 py-8">
         <div className="mb-8">
@@ -512,7 +722,7 @@ const AddProduct = () => {
           </Button>
           
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Add New Product</h1>
-          <p className="text-gray-600">Add your products to the marketplace with competitive pricing and quality options</p>
+          <p className="text-gray-600">Add your products to the marketplace with competitive pricing and quality options.</p>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
@@ -570,7 +780,7 @@ const AddProduct = () => {
                       <SelectContent>
                         {filteredModels.map(model => (
                           <SelectItem key={model.id} value={model.id}>
-                            {model.full_name}
+                            {model.model_name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -625,6 +835,9 @@ const AddProduct = () => {
                         ))}
                       </SelectContent>
                     </Select>
+                    {phoneForm.category_id && filteredQualityTypes.length === 0 && (
+                      <p className="text-sm text-gray-500 mt-1">No quality types available for this category</p>
+                    )}
                   </div>
                 </div>
 
@@ -880,6 +1093,9 @@ const AddProduct = () => {
                       ))}
                     </SelectContent>
                   </Select>
+                  {selectedCategory && filteredQualityTypes.length === 0 && (
+                    <p className="text-sm text-gray-500 mt-1">No quality types available for this category</p>
+                  )}
                 </div>
 
                 {/* Pricing */}

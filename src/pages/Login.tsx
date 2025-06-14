@@ -1,218 +1,299 @@
 import React, { useState, useEffect } from 'react';
-import { User, Building, Store, Eye, EyeOff } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { useAuth, UserRole } from '@/contexts/AuthContext';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useAuth } from '@/contexts/AuthContext';
+import { Eye, EyeOff, Loader2, Shield, Users, Store, ArrowLeft, Smartphone, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 
 const Login = () => {
-  const [userType, setUserType] = useState<UserRole>('customer');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [formData, setFormData] = useState({
-    email: '',
-    password: ''
-  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [selectedTab, setSelectedTab] = useState('customer');
   
-  const { signIn, loading, user, profile } = useAuth();
+  const { signIn, user, profile } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   // Redirect if already logged in
   useEffect(() => {
     if (user && profile) {
-      const from = location.state?.from?.pathname;
-      
-      // If user came from a specific page, try to redirect there
-      // but only if they have access to that page
-      if (from) {
-        const roleRedirects = {
-          customer: ['/'],
-          vendor: ['/vendor-dashboard'],
-          admin: ['/admin-dashboard'],
-        };
-        
-        // Check if the "from" path is allowed for this role
-        const allowedPaths = roleRedirects[profile.role];
-        const isAllowed = allowedPaths.some(path => from.startsWith(path));
-        
-        if (isAllowed) {
-          navigate(from, { replace: true });
-          return;
-        }
-      }
-      
-      // Default redirect based on role
-      const defaultRedirects = {
+      const roleRedirects = {
         customer: '/',
         vendor: '/vendor-dashboard',
         admin: '/admin-dashboard',
       };
       
-      navigate(defaultRedirects[profile.role], { replace: true });
+      const from = location.state?.from?.pathname || roleRedirects[profile.role];
+      navigate(from, { replace: true });
     }
   }, [user, profile, navigate, location]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!formData.email || !formData.password) {
-      toast.error('Please fill in all fields');
-      return;
-    }
+    setError('');
+    setLoading(true);
 
-    const result = await signIn(formData.email, formData.password, userType);
-    
-    if (result.success) {
-      toast.success('Login successful!');
-      // Navigation will be handled by the useEffect above
-    } else {
-      toast.error(result.error || 'Login failed');
-    }
-  };
+    try {
+      if (!email || !password) {
+        setError('Please fill in all fields');
+        return;
+      }
 
-  const userTypeConfig = {
-    customer: {
-      title: 'Customer Login',
-      subtitle: 'Access your account to shop mobile parts',
-      icon: User,
-      color: 'from-blue-600 to-blue-800'
-    },
-    vendor: {
-      title: 'Vendor Login',
-      subtitle: 'Manage your inventory and orders',
-      icon: Store,
-      color: 'from-green-600 to-green-800'
-    },
-    admin: {
-      title: 'Admin Login',
-      subtitle: 'Access company dashboard and analytics',
-      icon: Building,
-      color: 'from-purple-600 to-purple-800'
+      const result = await signIn(email, password);
+      
+      if (result.success) {
+        // The auth context will handle profile fetching
+        // Just redirect - the useEffect will handle the rest
+      } else {
+        setError(result.error || 'Login failed');
+      }
+    } catch (err) {
+      setError('An unexpected error occurred');
+      console.error('Login error:', err);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const currentConfig = userTypeConfig[userType];
-  const IconComponent = currentConfig.icon;
+  const getRoleInfo = (role: string) => {
+    const roleConfig = {
+      customer: {
+        icon: <Smartphone className="h-6 w-6" />,
+        title: 'Customer Login',
+        description: 'Access your account to shop for mobile parts',
+        gradient: 'from-blue-500 to-purple-600',
+        bgGradient: 'from-blue-50 to-purple-50',
+      },
+      vendor: {
+        icon: <Store className="h-6 w-6" />,
+        title: 'Vendor Portal',
+        description: 'Manage your products and orders',
+        gradient: 'from-green-500 to-teal-600',
+        bgGradient: 'from-green-50 to-teal-50',
+      },
+      admin: {
+        icon: <Shield className="h-6 w-6" />,
+        title: 'Admin Dashboard',
+        description: 'Manage the platform and vendors',
+        gradient: 'from-orange-500 to-red-600',
+        bgGradient: 'from-orange-50 to-red-50',
+      },
+    };
+    return roleConfig[role as keyof typeof roleConfig];
+  };
+
+  const currentRoleInfo = getRoleInfo(selectedTab);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <main className="container mx-auto px-4 py-8">
-        <div className="max-w-md mx-auto">
-          {/* User Type Selection */}
-          <div className="grid grid-cols-3 gap-2 mb-8 bg-white p-2 rounded-lg shadow-sm">
-            {Object.entries(userTypeConfig).map(([type, config]) => {
-              const Icon = config.icon;
-              return (
-                <button
-                  key={type}
-                  onClick={() => setUserType(type as UserRole)}
-                  className={`flex flex-col items-center p-3 rounded-md transition-all ${
-                    userType === type
-                      ? `bg-gradient-to-br ${config.color} text-white shadow-md`
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                  disabled={loading}
-                >
-                  <Icon className="h-5 w-5 mb-1" />
-                  <span className="text-xs font-medium capitalize">{type}</span>
-                </button>
-              );
-            })}
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50">
+      {/* Background Elements */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div className="absolute top-20 left-10 w-20 h-20 bg-blue-400/20 rounded-full animate-pulse"></div>
+        <div className="absolute bottom-32 right-16 w-32 h-32 bg-purple-400/20 rounded-full animate-pulse delay-1000"></div>
+        <div className="absolute top-1/2 left-1/4 w-16 h-16 bg-green-400/20 rounded-full animate-pulse delay-500"></div>
+      </div>
+
+      {/* Header */}
+      <div className="relative z-10 p-6">
+        <div className="flex items-center justify-between max-w-6xl mx-auto">
+          <Link to="/" className="flex items-center space-x-2 group">
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
+              <span className="text-white font-bold text-lg">T</span>
+            </div>
+            <span className="text-2xl font-bold text-gray-900 group-hover:text-blue-600 transition-colors">
+              Tryodo
+            </span>
+          </Link>
+          
+          <Button
+            variant="ghost"
+            asChild
+            className="hover:bg-white/50"
+          >
+            <Link to="/" className="flex items-center space-x-2">
+              <ArrowLeft className="h-4 w-4" />
+              <span>Back to Home</span>
+            </Link>
+          </Button>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="relative z-10 flex items-center justify-center p-6">
+        <div className="w-full max-w-md">
+          {/* Hero Section */}
+          <div className="text-center mb-8">
+            <div className={`inline-flex items-center bg-gradient-to-r ${currentRoleInfo.gradient} p-3 rounded-2xl mb-4`}>
+              <div className="text-white">
+                {currentRoleInfo.icon}
+              </div>
+            </div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome Back</h1>
+            <p className="text-gray-600">Sign in to access your Tryodo account</p>
           </div>
 
           {/* Login Form */}
-          <div className="bg-white rounded-2xl shadow-lg p-8">
-            <div className="text-center mb-8">
-              <div className={`w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br ${currentConfig.color} flex items-center justify-center`}>
-                <IconComponent className="h-8 w-8 text-white" />
-              </div>
-              <h1 className="text-2xl font-bold text-gray-900">{currentConfig.title}</h1>
-              <p className="text-gray-600 mt-2">{currentConfig.subtitle}</p>
-            </div>
+          <Card className="backdrop-blur-sm bg-white/90 shadow-2xl border-0">
+            <CardHeader className="space-y-1 pb-4">
+              <CardTitle className="text-2xl font-bold text-center">Sign In</CardTitle>
+              <CardDescription className="text-center">
+                Choose your account type and enter your credentials
+              </CardDescription>
+            </CardHeader>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  id="email"
-                  required
-                  value={formData.email}
-                  onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Enter your email"
-                  disabled={loading}
-                />
-              </div>
+            <CardContent>
+              <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
+                <TabsList className="grid w-full grid-cols-3 mb-6">
+                  <TabsTrigger value="customer" className="text-xs">
+                    <Users className="h-4 w-4 mr-1" />
+                    Customer
+                  </TabsTrigger>
+                  <TabsTrigger value="vendor" className="text-xs">
+                    <Store className="h-4 w-4 mr-1" />
+                    Vendor
+                  </TabsTrigger>
+                  <TabsTrigger value="admin" className="text-xs">
+                    <Shield className="h-4 w-4 mr-1" />
+                    Admin
+                  </TabsTrigger>
+                </TabsList>
 
-              <div>
-                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                  Password
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    id="password"
-                    required
-                    value={formData.password}
-                    onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-12"
-                    placeholder="Enter your password"
-                    disabled={loading}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    disabled={loading}
-                  >
-                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                  </button>
-                </div>
-              </div>
+                {['customer', 'vendor', 'admin'].map((role) => (
+                  <TabsContent key={role} value={role} className="space-y-4">
+                    <div className={`p-4 rounded-lg bg-gradient-to-r ${getRoleInfo(role).bgGradient} border-l-4 border-l-blue-500`}>
+                      <div className="flex items-center space-x-3">
+                        <div className={`p-2 bg-gradient-to-r ${getRoleInfo(role).gradient} rounded-lg text-white`}>
+                          {getRoleInfo(role).icon}
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-gray-900">{getRoleInfo(role).title}</h3>
+                          <p className="text-sm text-gray-600">{getRoleInfo(role).description}</p>
+                        </div>
+                      </div>
+                    </div>
 
-              <div className="flex items-center justify-between">
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    disabled={loading}
-                  />
-                  <span className="ml-2 text-sm text-gray-600">Remember me</span>
-                </label>
-                <Link 
-                  to="/forgot-password" 
-                  className="text-sm text-blue-600 hover:text-blue-800"
-                >
-                  Forgot password?
-                </Link>
-              </div>
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                      {error && (
+                        <Alert variant="destructive">
+                          <AlertDescription>{error}</AlertDescription>
+                        </Alert>
+                      )}
 
-              <Button
-                type="submit"
-                className={`w-full bg-gradient-to-r ${currentConfig.color} hover:opacity-90 text-white py-3`}
-                disabled={loading}
-              >
-                {loading ? 'Signing in...' : 'Sign In'}
-              </Button>
-            </form>
+                      <div className="space-y-2">
+                        <Label htmlFor="email">Email Address</Label>
+                        <Input
+                          id="email"
+                          type="email"
+                          placeholder="Enter your email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          disabled={loading}
+                          className="h-12"
+                          required
+                        />
+                      </div>
 
-            <div className="mt-6 text-center">
-              <p className="text-gray-600">
+                      <div className="space-y-2">
+                        <Label htmlFor="password">Password</Label>
+                        <div className="relative">
+                          <Input
+                            id="password"
+                            type={showPassword ? 'text' : 'password'}
+                            placeholder="Enter your password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            disabled={loading}
+                            className="h-12 pr-12"
+                            required
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="absolute right-0 top-0 h-12 px-3 hover:bg-transparent"
+                            onClick={() => setShowPassword(!showPassword)}
+                            disabled={loading}
+                          >
+                            {showPassword ? (
+                              <EyeOff className="h-4 w-4 text-gray-400" />
+                            ) : (
+                              <Eye className="h-4 w-4 text-gray-400" />
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <Link
+                          to="/reset-password"
+                          className="text-sm text-blue-600 hover:text-blue-500 hover:underline"
+                        >
+                          Forgot password?
+                        </Link>
+                      </div>
+
+                      <Button
+                        type="submit"
+                        className={`w-full h-12 bg-gradient-to-r ${currentRoleInfo.gradient} hover:opacity-90 text-white font-semibold`}
+                        disabled={loading}
+                      >
+                        {loading ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Signing In...
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="mr-2 h-4 w-4" />
+                            Sign In as {role.charAt(0).toUpperCase() + role.slice(1)}
+                          </>
+                        )}
+                      </Button>
+                    </form>
+                  </TabsContent>
+                ))}
+              </Tabs>
+            </CardContent>
+
+            <CardFooter className="justify-center">
+              <p className="text-sm text-gray-600">
                 Don't have an account?{' '}
-                <Link 
-                  to={`/signup?role=${userType}`} 
-                  className="text-blue-600 hover:text-blue-800 font-medium"
+                <Link
+                  to="/signup"
+                  className="text-blue-600 hover:text-blue-500 font-semibold hover:underline"
                 >
-                  Sign up as {userType}
+                  Sign up here
                 </Link>
               </p>
+            </CardFooter>
+          </Card>
+
+          {/* Additional Info */}
+          <div className="mt-8 text-center">
+            <p className="text-sm text-gray-500 mb-4">
+              Secure login powered by Supabase
+            </p>
+            <div className="flex items-center justify-center space-x-6 text-xs text-gray-400">
+              <span className="flex items-center">
+                <Shield className="h-3 w-3 mr-1" />
+                SSL Encrypted
+              </span>
+              <span className="flex items-center">
+                <Users className="h-3 w-3 mr-1" />
+                Trusted by 5000+ users
+              </span>
             </div>
           </div>
         </div>
-      </main>
+      </div>
     </div>
   );
 };
