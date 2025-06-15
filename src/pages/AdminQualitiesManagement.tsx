@@ -89,8 +89,6 @@ const AdminQualitiesManagement = () => {
       setLoading(true);
       setInitialLoading(true);
       
-      console.log('Loading qualities data...');
-      
       // Load categories
       const { data: categoriesData, error: categoriesError } = await supabase
         .from('categories')
@@ -112,7 +110,6 @@ const AdminQualitiesManagement = () => {
       
       if (qualitiesError) throw qualitiesError;
       
-      console.log('Qualities loaded:', qualitiesData?.length || 0);
       setQualities(qualitiesData || []);
 
     } catch (error: any) {

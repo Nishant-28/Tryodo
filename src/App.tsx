@@ -6,6 +6,10 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import EnvironmentCheck from "@/components/EnvironmentCheck";
+import PWAInstallPrompt from "@/components/PWAInstallPrompt";
+import PWAStatus from "@/components/PWAStatus";
+import { useEffect } from "react";
+import { registerPWA } from "@/lib/pwa";
 import Index from "./pages/Index";
 import Order from "./pages/Order";
 import Login from "./pages/Login";
@@ -22,12 +26,27 @@ import UserProfilePage from "./pages/UserProfilePage";
 import NotFound from "./pages/NotFound";
 import About from "./pages/About";
 import Contact from "./pages/Contact";
-import AuthDebug from "./components/AuthDebug";
 import Checkout from "./pages/Checkout";
 import OrderSuccess from "./pages/OrderSuccess";
 import MyOrders from "./pages/MyOrders";
 
 const queryClient = new QueryClient();
+
+const PWAWrapper = ({ children }: { children: React.ReactNode }) => {
+  useEffect(() => {
+    registerPWA().then((pwaInfo) => {
+      // PWA registered successfully
+    });
+  }, []);
+
+  return (
+    <>
+      {children}
+      <PWAInstallPrompt />
+      <PWAStatus />
+    </>
+  );
+};
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -35,7 +54,8 @@ const App = () => (
       <Toaster />
       <Sonner />
       <EnvironmentCheck />
-      <AuthProvider>
+      <PWAWrapper>
+        <AuthProvider>
         <BrowserRouter
           future={{
             v7_startTransition: true,
@@ -49,7 +69,6 @@ const App = () => (
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />
-            <Route path="/auth-debug" element={<AuthDebug />} />
             
             {/* Role-specific login routes */}
             <Route path="/vendor-login" element={<Login />} />
@@ -162,6 +181,7 @@ const App = () => (
           </Routes>
         </BrowserRouter>
       </AuthProvider>
+      </PWAWrapper>
     </TooltipProvider>
   </QueryClientProvider>
 );

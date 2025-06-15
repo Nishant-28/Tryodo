@@ -96,21 +96,16 @@ const Checkout = () => {
   useEffect(() => {
     // Get cart items from location state or localStorage
     const items = location.state?.cartItems || JSON.parse(localStorage.getItem('cartItems') || '[]');
-    console.log('Checkout: Cart items loaded:', items);
     setCartItems(items);
     
     if (items.length === 0) {
-      console.log('Checkout: No cart items found, redirecting to order page');
       navigate('/order');
       return;
     }
 
     // Load addresses only if user is authenticated
     if (user && profile) {
-      console.log('Checkout: User authenticated, loading addresses');
       loadAddresses();
-    } else {
-      console.log('Checkout: User not authenticated:', { user: !!user, profile: !!profile });
     }
   }, [location.state, navigate, user, profile]);
 
@@ -127,7 +122,6 @@ const Checkout = () => {
         .single();
 
       if (customerError) {
-        console.log('Customer not found, creating customer record:', customerError);
         // Create customer record if it doesn't exist
         const { data: newCustomer, error: createError } = await supabase
           .from('customers')
@@ -145,7 +139,6 @@ const Checkout = () => {
         }
         
         customer = newCustomer;
-        console.log('Customer created:', newCustomer);
       } else {
         customer = existingCustomer;
       }

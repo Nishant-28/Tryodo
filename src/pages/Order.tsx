@@ -323,7 +323,6 @@ const fetchCategories = async (): Promise<Category[]> => {
     if (error) throw error;
     return data && data.length > 0 ? data : MOCK_CATEGORIES;
   } catch (error) {
-    console.warn('Using mock categories:', error);
     return MOCK_CATEGORIES;
   }
 };
@@ -339,7 +338,6 @@ const fetchBrands = async (categoryId?: string): Promise<Brand[]> => {
     if (error) throw error;
     return data && data.length > 0 ? data : MOCK_BRANDS;
   } catch (error) {
-    console.warn('Using mock brands:', error);
     return MOCK_BRANDS;
   }
 };
@@ -356,7 +354,6 @@ const fetchModels = async (brandId: string): Promise<Model[]> => {
     if (error) throw error;
     return data && data.length > 0 ? data : (MOCK_MODELS[brandId] || []);
   } catch (error) {
-    console.warn('Using mock models:', error);
     return MOCK_MODELS[brandId] || [];
   }
 };
@@ -391,7 +388,6 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
     if (error) throw error;
     return data && data.length > 0 ? data : MOCK_VENDOR_PRODUCTS.filter(p => p.model_id === modelId);
   } catch (error) {
-    console.warn('Using mock vendor products:', error);
     return MOCK_VENDOR_PRODUCTS.filter(p => p.model_id === modelId);
   }
 };

@@ -57,8 +57,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Create profile after signup or as fallback
   const createProfile = async (user: User, fullName: string, role: UserRole): Promise<Profile | null> => {
     try {
-      console.log(`🔨 Creating profile for user: ${user.email} with role: ${role}`);
-      
       const profileData = {
         user_id: user.id,
         email: user.email!,
@@ -73,14 +71,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .single();
 
       if (error) {
-        console.error('❌ Error creating profile:', error);
+        console.error('Error creating profile:', error);
         return null;
       }
 
-      console.log('✅ Profile created successfully:', data);
       return data;
     } catch (error) {
-      console.error('❌ Error in createProfile:', error);
+      console.error('Error in createProfile:', error);
       return null;
     }
   };
@@ -88,8 +85,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Fetch user profile with retry logic and fallback creation
   const fetchProfile = async (userId: string, retries = 3): Promise<Profile | null> => {
     try {
-      console.log(`🔍 Fetching profile for user: ${userId}, retries left: ${retries}`);
-      
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -97,13 +92,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .single();
 
       if (error) {
-        console.error('❌ Error fetching profile:', error);
-        console.log('🔍 Error details:', { code: error.code, message: error.message });
+        console.error('Error fetching profile:', error);
         
         // If profile not found and we have retries left, try creating one
         if (error.code === 'PGRST116' && retries > 0) {
-          console.log('🔄 Profile not found, attempting to create fallback profile...');
-          
           // Get user data from Supabase auth
           const { data: { user }, error: userError } = await supabase.auth.getUser();
           
@@ -114,13 +106,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             
             const createdProfile = await createProfile(user, userName, userRole as UserRole);
             if (createdProfile) {
-              console.log('✅ Fallback profile created successfully');
               return createdProfile;
             }
           }
           
           // Retry fetching after a short delay
-          console.log('⏳ Waiting 1 second before retry...');
           await new Promise(resolve => setTimeout(resolve, 1000));
           return fetchProfile(userId, retries - 1);
         }
@@ -128,10 +118,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return null;
       }
 
-      console.log('✅ Profile found:', data.role);
       return data;
     } catch (error) {
-      console.error('❌ Error in fetchProfile:', error);
+      console.error('Error in fetchProfile:', error);
       return null;
     }
   };
@@ -144,10 +133,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(currentUser);
         setProfile(userProfile);
         setSession(currentSession);
-        console.log('✅ Auth state updated:', userProfile.role);
         return true;
       } else {
-        console.log('❌ No profile found, signing out...');
         await supabase.auth.signOut();
         return false;
       }
@@ -314,20 +301,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const initializeAuth = async () => {
       try {
-        console.log('🔄 Initializing auth state...');
-        
         // Clear any expired sessions first
         clearExpiredSession();
         
         // Check for valid cached session to speed up loading
         if (hasValidCachedSession()) {
-          console.log('💾 Valid cached session found, should load quickly');
           const cachedUserInfo = getCachedUserInfo();
-          if (cachedUserInfo) {
-            console.log('👤 Cached user info:', { email: cachedUserInfo.email, role: cachedUserInfo.role });
-          }
-        } else {
-          console.log('🔍 No valid cached session found');
         }
         
         // Get session from Supabase
@@ -336,29 +315,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!isMounted) return;
 
         if (sessionError) {
-          console.error('❌ Session error:', sessionError);
+          console.error('Session error:', sessionError);
           setLoading(false);
           setInitialCheckComplete(true);
           return;
         }
 
-        console.log('📊 Initial session check:', {
-          hasSession: !!initialSession,
-          hasUser: !!initialSession?.user,
-          userEmail: initialSession?.user?.email
-        });
-
         if (initialSession?.user) {
-          console.log('👤 Session found, updating auth state...');
           await updateAuthState(initialSession.user, initialSession);
         } else {
-          console.log('🚫 No valid session found');
           setUser(null);
           setProfile(null);
           setSession(null);
         }
       } catch (error) {
-        console.error('❌ Auth initialization error:', error);
+        console.error('Auth initialization error:', error);
         if (isMounted) {
           setUser(null);
           setProfile(null);
@@ -366,7 +337,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } finally {
         if (isMounted) {
-          console.log('✅ Auth initialization complete');
           setLoading(false);
           setInitialCheckComplete(true);
         }
@@ -377,8 +347,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
-      console.log('🔄 Auth state changed:', event, currentSession?.user?.email);
-
       if (!isMounted) return;
 
       try {
@@ -388,25 +356,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         if (event === 'SIGNED_IN' && currentSession?.user) {
-          console.log('✅ User signed in, updating state...');
           if (initialCheckComplete) {
             await updateAuthState(currentSession.user, currentSession);
           }
         } else if (event === 'SIGNED_OUT') {
-          console.log('🚪 User signed out');
           if (isMounted) {
             setUser(null);
             setProfile(null);
             setSession(null);
           }
         } else if (event === 'TOKEN_REFRESHED' && currentSession) {
-          console.log('🔄 Token refreshed');
           if (isMounted) {
             setSession(currentSession);
           }
         }
       } catch (error) {
-        console.error('❌ Auth state change error:', error);
+        console.error('Auth state change error:', error);
       } finally {
         if (isMounted && event !== 'TOKEN_REFRESHED') {
           setLoading(false);
