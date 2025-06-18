@@ -76,29 +76,19 @@ const AdminModelsManagement = () => {
       setLoading(true);
       setInitialLoading(true);
       
-      console.log('=== Starting data load ===');
-      console.log('Supabase URL:', import.meta.env.VITE_SUPABASE_URL);
-      console.log('Supabase client:', supabase);
-      
       // Load brands first
-      console.log('Loading brands...');
       const { data: brandsData, error: brandsError } = await supabase
         .from('brands')
         .select('*')
         .order('name');
       
-      console.log('Brands response:', { data: brandsData, error: brandsError });
-      
       if (brandsError) {
-        console.error('Brands error:', brandsError);
         throw brandsError;
       }
       
-      console.log('Brands loaded successfully:', brandsData?.length || 0);
       setBrands(brandsData || []);
 
       // Load models with brand information
-      console.log('Loading models...');
       const { data: modelsData, error: modelsError } = await supabase
         .from('smartphone_models')
         .select(`
@@ -107,56 +97,41 @@ const AdminModelsManagement = () => {
         `)
         .order('created_at', { ascending: false });
       
-      console.log('Models response:', { data: modelsData, error: modelsError });
-      
       if (modelsError) {
-        console.error('Models error:', modelsError);
-        console.log('Trying to load models without brands join...');
-        
         // If the join fails, try loading models without brands
         const { data: simpleModelsData, error: simpleError } = await supabase
           .from('smartphone_models')
           .select('*')
           .order('created_at', { ascending: false });
         
-        console.log('Simple models response:', { data: simpleModelsData, error: simpleError });
-        
         if (simpleError) throw simpleError;
         
-        console.log('Models loaded (without brands):', simpleModelsData?.length || 0);
         setModels(simpleModelsData || []);
         return;
       }
-      
+
+      // Transform models data to include brand name
       const modelsWithBrandNames = modelsData?.map(model => ({
         ...model,
         brand_name: model.brands?.name || 'Unknown Brand'
       })) || [];
-      
-      console.log('Models loaded (with brands):', modelsWithBrandNames.length);
+
       setModels(modelsWithBrandNames);
       
-      console.log('=== Data load completed successfully ===');
-
     } catch (error: any) {
-      console.error('=== Failed to load data ===');
-      console.error('Error details:', error);
-      console.error('Error code:', error.code);
-      console.error('Error message:', error.message);
-      console.error('Full error object:', JSON.stringify(error, null, 2));
+      let errorMessage = 'Failed to load data. ';
       
-      let errorMessage = "Failed to load models data.";
-      if (error.message?.includes('relation') || error.message?.includes('does not exist')) {
-        errorMessage = "Database tables not found. Please ensure the database schema is set up correctly.";
-      } else if (error.message?.includes('permission')) {
-        errorMessage = "Permission denied. Please check your database access rights.";
-      } else if (error.message?.includes('Failed to fetch')) {
-        errorMessage = "Cannot connect to database. Check your Supabase URL and network connection.";
+      if (error.code === 'PGRST116' || error.message?.includes('relation') || error.message?.includes('does not exist')) {
+        errorMessage += 'Database tables may not be properly set up. Please contact the administrator.';
+      } else if (error.code === '42P01') {
+        errorMessage += 'Required database tables are missing. Please run the database migration scripts.';
       } else if (error.message?.includes('JWT')) {
-        errorMessage = "Authentication error. Check your Supabase keys.";
+        errorMessage += 'Authentication token expired. Please refresh the page and try again.';
+      } else if (error.message?.includes('permission')) {
+        errorMessage += 'You do not have permission to access this data.';
+      } else {
+        errorMessage += error.message || 'An unknown error occurred.';
       }
-      
-      console.error('Final error message to user:', errorMessage);
       
       toast({
         title: "Error",

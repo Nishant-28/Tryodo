@@ -123,91 +123,138 @@ const AddProduct = () => {
   });
 
   useEffect(() => {
-    console.log("AddProduct component mounted or profile changed.");
-    console.log("Current profile state:", profile);
-    const fetchVendorId = async () => {
-        if (profile && profile.role === 'vendor') {
-            console.log("Profile found and role is vendor. Attempting to fetch vendor ID...");
-            console.log("Profile user_id:", profile.user_id);
-            try {
-                // Fetch profile to get the id linked to auth.uid()
-                const { data: profileData, error: profileError } = await supabase
-                    .from('profiles')
-                    .select('id')
-                    .eq('user_id', profile.user_id)
-                    .single();
+    if (profile) {
+      if (profile.role === 'vendor') {
+        const fetchVendorId = async () => {
+          try {
+            // First get the profile ID from the profiles table
+            const { data: profileData, error: profileError } = await supabase
+              .from('profiles')
+              .select('id')
+              .eq('user_id', profile.user_id)
+              .single();
 
-                if (profileError) {
-                    console.error('Supabase error fetching profile ID:', profileError);
-                    throw profileError;
-                }
-                if (!profileData) {
-                    console.log("No profile data found for user_id:", profile.user_id);
-                    toast({
-                        title: "Profile not found",
-                        description: "Could not find a matching profile for your user account.",
-                        variant: "destructive",
-                    });
-                    return;
-                }
-                console.log("Fetched profile data (profile_id):", profileData.id);
-
-                // Use profile_id to fetch vendor_id
-                const { data: vendorData, error: vendorError } = await supabase
-                    .from('vendors')
-                    .select('id')
-                    .eq('profile_id', profileData.id)
-                    .single();
-
-                if (vendorError) {
-                    console.error('Supabase error fetching vendor ID:', vendorError);
-                    throw vendorError;
-                }
-                if (vendorData) {
-                    setVendorId(vendorData.id);
-                    console.log("Vendor ID set to:", vendorData.id);
-                } else {
-                    console.log("No vendor data found for profile_id:", profileData.id);
-                    toast({
-                        title: "Vendor not found",
-                        description: "Could not find a matching vendor for your user account.",
-                        variant: "destructive",
-                    });
-                }
-            } catch (error) {
-                console.error('Error fetching vendor ID in catch block:', error);
-                toast({
-                    title: "Error",
-                    description: "Failed to fetch vendor details.",
-                    variant: "destructive",
-                });
+            if (profileError || !profileData) {
+              return;
             }
-        } else if (profile) {
-            console.log("Profile found but role is not 'vendor'. Current role:", profile.role);
-        } else {
-            console.log("Profile is null or undefined.");
-        }
-    };
 
-    fetchVendorId();
-  }, [profile, toast]);
+            // Then get vendor ID using the profile ID
+            const { data: vendorData, error: vendorError } = await supabase
+              .from('vendors')
+              .select('id')
+              .eq('profile_id', profileData.id)
+              .single();
+
+            if (vendorError || !vendorData) {
+              return;
+            }
+
+            setVendorId(vendorData.id);
+          } catch (error) {
+            // Error handled silently
+          }
+        };
+
+        fetchVendorId();
+      }
+    }
+  }, [profile]);
 
   // Load master data on component mount
   useEffect(() => {
-    console.log("Loading master data...");
+    const loadMasterData = async () => {
+      try {
+        const { data: brandsData, error: brandsError } = await supabase
+          .from('brands')
+          .select('*')
+          .order('name');
+
+        if (brandsError) {
+          throw brandsError;
+        }
+        setBrands(brandsData || []);
+        console.log("Brands loaded:", brandsData);
+
+        // Load models with brand names
+        const { data: modelsData, error: modelsError } = await supabase
+          .from('smartphone_models')
+          .select(`
+            *,
+            brands!inner(name)
+          `)
+          .eq('is_active', true)
+          .order('model_name');
+        
+        if (modelsError) {
+          console.error('Error loading models:', modelsError);
+          throw modelsError;
+        }
+        const modelsWithBrandNames = modelsData?.map(model => ({
+          ...model,
+          brand_name: model.brands?.name || ''
+        })) || [];
+        setModels(modelsWithBrandNames);
+        console.log("Models loaded:", modelsWithBrandNames);
+
+        // Load categories
+        const { data: categoriesData, error: categoriesError } = await supabase
+          .from('categories')
+          .select('*')
+          .eq('is_active', true)
+          .order('sort_order', { ascending: true });
+        
+        if (categoriesError) {
+          console.error('Error loading categories:', categoriesError);
+          throw categoriesError;
+        }
+        setCategories(categoriesData || []);
+        console.log("Categories loaded:", categoriesData);
+
+        // Load quality types (corrected table name)
+        const { data: qualityTypesData, error: qualityTypesError } = await supabase
+          .from('quality_categories')
+          .select('*')
+          .eq('is_active', true)
+          .order('sort_order', { ascending: true });
+        
+        if (qualityTypesError) {
+          console.error('Error loading quality types:', qualityTypesError);
+          throw qualityTypesError;
+        }
+        setQualityTypes(qualityTypesData || []);
+        console.log("Quality types loaded:", qualityTypesData);
+
+        // Load generic products
+        const { data: genericProductsData, error: genericProductsError } = await supabase
+          .from('generic_products')
+          .select('*')
+          .eq('is_active', true)
+          .order('name');
+        
+        if (genericProductsError) {
+          console.error('Error loading generic products:', genericProductsError);
+          throw genericProductsError;
+        }
+        setGenericProducts(genericProductsData || []);
+        console.log("Generic products loaded:", genericProductsData);
+
+      } catch (error) {
+        console.error('Error loading master data:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load product data. Please refresh the page.",
+          variant: "destructive",
+        });
+      }
+    };
+
     loadMasterData();
   }, []);
 
   // Filter models when brand changes
   const filteredModels = models.filter(model => {
-    console.log("Filtering models. Selected brand:", selectedBrand, "Model brand ID:", model.brand_id, "Model full name:", model.model_name);
     return selectedBrand === '' || model.brand_id === selectedBrand;
   });
-
-  // Log filteredModels whenever it changes (i.e., when selectedBrand or models change)
-  useEffect(() => {
-    console.log("Filtered models updated:", filteredModels);
-  }, [filteredModels]);
 
   // Filter quality types when category changes
   const filteredQualityTypes = qualityTypes.filter(qt => 
@@ -218,100 +265,6 @@ const AddProduct = () => {
   const filteredGenericProducts = genericProducts.filter(gp => 
     selectedCategory === '' || gp.category_id === selectedCategory
   );
-
-  const loadMasterData = async () => {
-    try {
-      setLoading(true);
-      console.log("Attempting to load master data from Supabase...");
-      
-      // Load brands
-      const { data: brandsData, error: brandsError } = await supabase
-        .from('brands')
-        .select('*')
-        .eq('is_active', true)
-        .order('name');
-      
-      if (brandsError) {
-        console.error('Error loading brands:', brandsError);
-        throw brandsError;
-      }
-      setBrands(brandsData || []);
-      console.log("Brands loaded:", brandsData);
-
-      // Load models with brand names
-      const { data: modelsData, error: modelsError } = await supabase
-        .from('smartphone_models')
-        .select(`
-          *,
-          brands!inner(name)
-        `)
-        .eq('is_active', true)
-        .order('model_name');
-      
-      if (modelsError) {
-        console.error('Error loading models:', modelsError);
-        throw modelsError;
-      }
-      const modelsWithBrandNames = modelsData?.map(model => ({
-        ...model,
-        brand_name: model.brands?.name || ''
-      })) || [];
-      setModels(modelsWithBrandNames);
-      console.log("Models loaded:", modelsWithBrandNames);
-
-      // Load categories
-      const { data: categoriesData, error: categoriesError } = await supabase
-        .from('categories')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true });
-      
-      if (categoriesError) {
-        console.error('Error loading categories:', categoriesError);
-        throw categoriesError;
-      }
-      setCategories(categoriesData || []);
-      console.log("Categories loaded:", categoriesData);
-
-      // Load quality types (corrected table name)
-      const { data: qualityTypesData, error: qualityTypesError } = await supabase
-        .from('quality_categories')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true });
-      
-      if (qualityTypesError) {
-        console.error('Error loading quality types:', qualityTypesError);
-        throw qualityTypesError;
-      }
-      setQualityTypes(qualityTypesData || []);
-      console.log("Quality types loaded:", qualityTypesData);
-
-      // Load generic products
-      const { data: genericProductsData, error: genericProductsError } = await supabase
-        .from('generic_products')
-        .select('*')
-        .eq('is_active', true)
-        .order('name');
-      
-      if (genericProductsError) {
-        console.error('Error loading generic products:', genericProductsError);
-        throw genericProductsError;
-      }
-      setGenericProducts(genericProductsData || []);
-      console.log("Generic products loaded:", genericProductsData);
-
-    } catch (error) {
-      console.error('Error loading master data:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load product data. Please refresh the page.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleImageAdd = (formType: 'phone' | 'generic') => {
     if (formType === 'phone') {

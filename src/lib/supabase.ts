@@ -2,13 +2,9 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseServiceRoleKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY || import.meta.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('🚨 Supabase configuration missing!', {
-    hasUrl: !!supabaseUrl,
-    hasKey: !!supabaseAnonKey,
-    url: supabaseUrl ? supabaseUrl.substring(0, 20) + '...' : 'undefined',
-  });
   throw new Error('Supabase configuration is missing. Please check your environment variables.');
 }
 
@@ -29,7 +25,7 @@ export interface Database {
           id: string;
           user_id: string;
           email: string;
-          role: 'customer' | 'vendor' | 'admin';
+          role: 'customer' | 'vendor' | 'admin' | 'delivery_boy';
           full_name: string | null;
           created_at: string;
           updated_at: string;
@@ -38,7 +34,7 @@ export interface Database {
           id?: string;
           user_id: string;
           email: string;
-          role: 'customer' | 'vendor' | 'admin';
+          role: 'customer' | 'vendor' | 'admin' | 'delivery_boy';
           full_name?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -47,7 +43,7 @@ export interface Database {
           id?: string;
           user_id?: string;
           email?: string;
-          role?: 'customer' | 'vendor' | 'admin';
+          role?: 'customer' | 'vendor' | 'admin' | 'delivery_boy';
           full_name?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -471,6 +467,89 @@ export interface Database {
           updated_at?: string;
         };
       };
+      // Add delivery tables here based on the provided example and existing patterns
+      delivery_boys: {
+        Row: {
+          id: string;
+          name: string;
+          phone: string;
+          email: string;
+          assigned_pincodes: string[];
+          status: 'active' | 'inactive' | 'busy' | 'offline';
+          current_location: {
+            lat: number;
+            lng: number;
+            address: string;
+            timestamp: string;
+          };
+          vehicle_type: string;
+          vehicle_number: string;
+          created_at: string; // Added for consistency with other tables
+          updated_at: string; // Added for consistency with other tables
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          phone: string;
+          email: string;
+          assigned_pincodes?: string[] | null; // Made nullable for insert/update
+          status?: 'active' | 'inactive' | 'busy' | 'offline';
+          current_location?: {
+            lat: number;
+            lng: number;
+            address: string;
+            timestamp: string;
+          } | null; // Made nullable for insert/update
+          vehicle_type: string;
+          vehicle_number: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          phone?: string;
+          email?: string;
+          assigned_pincodes?: string[] | null;
+          status?: 'active' | 'inactive' | 'busy' | 'offline';
+          current_location?: {
+            lat: number;
+            lng: number;
+            address: string;
+            timestamp: string;
+          } | null;
+          vehicle_type?: string;
+          vehicle_number?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      delivery_assignments: {
+        Row: {
+          id: string;
+          delivery_boy_id: string;
+          order_ids: string[];
+          status: string;
+          created_at: string; // Added for consistency with other tables
+          updated_at: string; // Added for consistency with other tables
+        };
+        Insert: {
+          id?: string;
+          delivery_boy_id: string;
+          order_ids?: string[] | null; // Made nullable for insert/update
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          delivery_boy_id?: string;
+          order_ids?: string[] | null;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
     };
   };
 }
@@ -478,16 +557,10 @@ export interface Database {
 // Create Supabase client with proper auth configuration for session persistence
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
-    // Ensure sessions persist across page refreshes and browser restarts
-    storage: window.localStorage,
-    autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: true,
-    // Additional options for better session management
-    storageKey: 'tryodo-auth-token',
-    flowType: 'pkce',
+    autoRefreshToken: true,
+    detectSessionInUrl: true
   },
-  // Add global configuration for better connection handling
   global: {
     headers: {
       'x-client-info': 'tryodo-website@1.0.0',
@@ -502,6 +575,19 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
     },
   },
 });
+
+// Create a service role client for administrative operations that bypass RLS
+export const supabaseServiceRole = supabaseServiceRoleKey ? createClient<Database>(supabaseUrl, supabaseServiceRoleKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false
+  },
+  global: {
+    headers: {
+      'x-client-info': 'tryodo-website-admin@1.0.0',
+    },
+  },
+}) : null;
 
 // Utility function to clear all auth-related storage
 export const clearAuthStorage = () => {
@@ -610,3 +696,10 @@ if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
   window.forceAuthReset = forceAuthReset;
   (window as any).testDbConnection = testDbConnection;
 }
+
+// Type definitions for delivery tables
+// The previous standalone DeliveryBoy and DeliveryAssignment interfaces have been integrated
+// directly into the `Database` interface above for better type inference with Supabase client.
+// They are removed from here to avoid redundancy.
+
+export default supabase;

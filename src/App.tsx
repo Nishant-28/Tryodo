@@ -29,6 +29,7 @@ import Contact from "./pages/Contact";
 import Checkout from "./pages/Checkout";
 import OrderSuccess from "./pages/OrderSuccess";
 import MyOrders from "./pages/MyOrders";
+import DeliveryPartnerDashboard from "./pages/DeliveryPartnerDashboard";
 
 const queryClient = new QueryClient();
 
@@ -73,6 +74,7 @@ const App = () => (
             {/* Role-specific login routes */}
             <Route path="/vendor-login" element={<Login />} />
             <Route path="/admin-login" element={<Login />} />
+            <Route path="/delivery-partner-login" element={<Login />} />
 
             {/* Customer-only routes */}
             <Route 
@@ -172,6 +174,16 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <AdminQualitiesManagement />
+                </ProtectedRoute>
+              } 
+            />
+
+            {/* Delivery Partner routes */}
+            <Route 
+              path="/delivery-partner-dashboard" 
+              element={
+                <ProtectedRoute allowedRoles={['delivery_boy']}>
+                  <DeliveryPartnerDashboard />
                 </ProtectedRoute>
               } 
             />

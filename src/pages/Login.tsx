@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
-import { Eye, EyeOff, Loader2, Shield, Users, Store, ArrowLeft, Smartphone, Zap } from 'lucide-react';
+import { Eye, EyeOff, Loader2, Shield, Users, Store, ArrowLeft, Smartphone, Zap, Truck } from 'lucide-react';
 import { toast } from 'sonner';
 
 const Login = () => {
@@ -29,6 +29,7 @@ const Login = () => {
         customer: '/',
         vendor: '/vendor-dashboard',
         admin: '/admin-dashboard',
+        delivery_boy: '/delivery-partner-dashboard',
       };
       
       const from = location.state?.from?.pathname || roleRedirects[profile.role];
@@ -85,6 +86,13 @@ const Login = () => {
         description: 'Manage the platform and vendors',
         gradient: 'from-orange-500 to-red-600',
         bgGradient: 'from-orange-50 to-red-50',
+      },
+      delivery_boy: {
+        icon: <Truck className="h-6 w-6" />,
+        title: 'Delivery Partner',
+        description: 'Manage your orders and deliveries',
+        gradient: 'from-orange-500 to-amber-600',
+        bgGradient: 'from-orange-50 to-amber-50',
       },
     };
     return roleConfig[role as keyof typeof roleConfig];
@@ -151,7 +159,7 @@ const Login = () => {
 
             <CardContent>
               <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-3 mb-6">
+                <TabsList className="grid w-full grid-cols-4 mb-6">
                   <TabsTrigger value="customer" className="text-xs">
                     <Users className="h-4 w-4 mr-1" />
                     Customer
@@ -164,9 +172,13 @@ const Login = () => {
                     <Shield className="h-4 w-4 mr-1" />
                     Admin
                   </TabsTrigger>
+                  <TabsTrigger value="delivery_boy" className="text-xs">
+                    <Truck className="h-4 w-4 mr-1" />
+                    Delivery
+                  </TabsTrigger>
                 </TabsList>
 
-                {['customer', 'vendor', 'admin'].map((role) => (
+                {['customer', 'vendor', 'admin', 'delivery_boy'].map((role) => (
                   <TabsContent key={role} value={role} className="space-y-4">
                     <div className={`p-4 rounded-lg bg-gradient-to-r ${getRoleInfo(role).bgGradient} border-l-4 border-l-blue-500`}>
                       <div className="flex items-center space-x-3">

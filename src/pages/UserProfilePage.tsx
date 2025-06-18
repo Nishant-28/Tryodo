@@ -36,7 +36,7 @@ const UserProfilePage = () => {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Header cartItems={0} onCartClick={() => {}} /> {/* Placeholder for cart items and click handler */}
+      <Header cartItems={0} onCartClick={() => {}} />
       <main className="flex-grow bg-gradient-to-r from-gray-50 to-blue-50 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-lg p-8 grid grid-cols-1 md:grid-cols-3 gap-8">
           {/* Left Sidebar */}

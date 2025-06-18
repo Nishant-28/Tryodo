@@ -26,7 +26,6 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     
     const timeout = setTimeout(() => {
       if (loading) {
-        console.log('⏰ Auth loading timeout reached');
         setTimeoutReached(true);
       }
     }, timeoutDuration);
@@ -48,18 +47,11 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
   // If we're still loading and haven't timed out, show spinner
   if (loading && !timeoutReached) {
-    console.log('⏳ Auth still loading, showing spinner');
     return <LoadingSpinner />;
   }
 
   // If we've timed out or loading is done but no user, redirect to login
   if (timeoutReached || (!loading && !user)) {
-    if (timeoutReached) {
-      console.log('⏰ Auth timeout reached, redirecting to login');
-    } else {
-      console.log('🚫 No authenticated user, redirecting to login');
-    }
-    
     return (
       <Navigate 
         to={redirectTo} 
@@ -71,7 +63,6 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
   // If user exists but no profile, show error
   if (user && !profile) {
-    console.log('❌ User found but no profile, redirecting to login');
     return (
       <Navigate 
         to={redirectTo} 
@@ -86,8 +77,6 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
   // Check role-based access
   if (allowedRoles.length > 0 && profile && !allowedRoles.includes(profile.role)) {
-    console.log(`🚫 Access denied. User role: ${profile.role}, Required: ${allowedRoles.join(', ')}`);
-    
     // Redirect based on user role
     const roleRedirects = {
       customer: '/',
@@ -110,7 +99,6 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   }
 
   // All checks passed, render children
-  console.log('✅ Access granted for user:', profile?.role);
   return <>{children}</>;
 };
 

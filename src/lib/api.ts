@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, supabaseServiceRole } from './supabase';
 
 // Types for API responses
 export interface ApiResponse<T> {
@@ -606,7 +606,643 @@ export class AnalyticsAPI {
   }
 }
 
-// Main API class that combines all APIs
+// Order API
+export class OrderAPI {
+  /**
+   * Get customer orders with detailed tracking information
+   */
+  static async getCustomerOrders(customerId: string): Promise<ApiResponse<any[]>> {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select(`
+          *,
+          order_items (
+            *,
+            vendor:vendors (
+              id,
+              business_name,
+              contact_phone,
+              business_city,
+              business_state
+            )
+          )
+        `)
+        .eq('customer_id', customerId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Enhance orders with delivery tracking information
+      const enhancedOrders = await Promise.all(
+        (data || []).map(async (order) => {
+          // Get delivery partner information if order is assigned
+          let deliveryInfo = null;
+          try {
+            const { data: deliveryData } = await supabase
+              .from('delivery_partner_orders')
+              .select(`
+                *,
+                delivery_partner:delivery_partners (
+                  id,
+                  profile:profiles (
+                    full_name,
+                    phone
+                  )
+                )
+              `)
+              .eq('order_id', order.id)
+              .single();
+
+            if (deliveryData?.delivery_partner) {
+              deliveryInfo = {
+                delivery_partner_id: deliveryData.delivery_partner.id,
+                delivery_partner_name: deliveryData.delivery_partner.profile?.full_name,
+                delivery_partner_phone: deliveryData.delivery_partner.profile?.phone,
+                pickup_otp: deliveryData.pickup_otp,
+                delivery_otp: deliveryData.delivery_otp,
+                delivery_assigned_at: deliveryData.assigned_at,
+                delivery_status: deliveryData.status
+              };
+            }
+          } catch (e) {
+            // Delivery partner not assigned yet
+          }
+
+          return {
+            ...order,
+            ...deliveryInfo,
+            current_delivery_status: this.getCurrentDeliveryStatus(order, deliveryInfo)
+          };
+        })
+      );
+
+      return {
+        success: true,
+        data: enhancedOrders,
+        message: 'Orders retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch orders'
+      };
+    }
+  }
+
+  /**
+   * Subscribe to real-time order updates for a customer
+   */
+  static subscribeToOrderUpdates(
+    customerId: string,
+    onUpdate: (payload: any) => void
+  ): () => void {
+    // Subscribe to orders table changes
+    const ordersSubscription = supabase
+      .channel('customer-orders')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'orders',
+          filter: `customer_id=eq.${customerId}`
+        },
+        (payload) => {
+          console.log('Order update received:', payload);
+          onUpdate(payload);
+        }
+      )
+      .subscribe();
+
+    // Subscribe to order_items table changes
+    const orderItemsSubscription = supabase
+      .channel('customer-order-items')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'order_items'
+        },
+                 async (payload) => {
+           // Check if this order item belongs to the customer
+           const orderId = (payload.new as any)?.order_id || (payload.old as any)?.order_id;
+           if (orderId) {
+             const { data: order } = await supabase
+               .from('orders')
+               .select('customer_id')
+               .eq('id', orderId)
+               .single();
+
+             if (order?.customer_id === customerId) {
+               console.log('Order item update received:', payload);
+               onUpdate(payload);
+             }
+           }
+         }
+      )
+      .subscribe();
+
+    // Subscribe to delivery partner orders changes
+    const deliverySubscription = supabase
+      .channel('customer-delivery-updates')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'delivery_partner_orders'
+        },
+                 async (payload) => {
+           // Check if this delivery update belongs to the customer
+           const orderId = (payload.new as any)?.order_id || (payload.old as any)?.order_id;
+           if (orderId) {
+             const { data: order } = await supabase
+               .from('orders')
+               .select('customer_id')
+               .eq('id', orderId)
+               .single();
+
+             if (order?.customer_id === customerId) {
+               console.log('Delivery update received:', payload);
+               onUpdate(payload);
+             }
+           }
+         }
+      )
+      .subscribe();
+
+    // Return unsubscribe function
+    return () => {
+      ordersSubscription.unsubscribe();
+      orderItemsSubscription.unsubscribe();
+      deliverySubscription.unsubscribe();
+    };
+  }
+
+  /**
+   * Get order by ID with full tracking details
+   */
+  static async getOrderById(orderId: string): Promise<ApiResponse<any>> {
+    try {
+      const { data: order, error } = await supabase
+        .from('orders')
+        .select(`
+          *,
+          order_items (
+            *,
+            vendor:vendors (
+              id,
+              business_name,
+              contact_phone,
+              business_city,
+              business_state
+            )
+          )
+        `)
+        .eq('id', orderId)
+        .single();
+
+      if (error) throw error;
+
+      // Get delivery partner information
+      let deliveryInfo = null;
+      try {
+        const { data: deliveryData } = await supabase
+          .from('delivery_partner_orders')
+          .select(`
+            *,
+            delivery_partner:delivery_partners (
+              id,
+              profile:profiles (
+                full_name,
+                phone
+              )
+            )
+          `)
+          .eq('order_id', orderId)
+          .single();
+
+        if (deliveryData?.delivery_partner) {
+          deliveryInfo = {
+            delivery_partner_id: deliveryData.delivery_partner.id,
+            delivery_partner_name: deliveryData.delivery_partner.profile?.full_name,
+            delivery_partner_phone: deliveryData.delivery_partner.profile?.phone,
+            pickup_otp: deliveryData.pickup_otp,
+            delivery_otp: deliveryData.delivery_otp,
+            delivery_assigned_at: deliveryData.assigned_at,
+            delivery_status: deliveryData.status
+          };
+        }
+      } catch (e) {
+        // Delivery partner not assigned yet
+      }
+
+      return {
+        success: true,
+        data: {
+          ...order,
+          ...deliveryInfo,
+          current_delivery_status: this.getCurrentDeliveryStatus(order, deliveryInfo)
+        },
+        message: 'Order retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch order'
+      };
+    }
+  }
+
+  /**
+   * Update order status
+   */
+  static async updateOrderStatus(
+    orderId: string,
+    status: string,
+    notes?: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .update({
+          order_status: status,
+          updated_at: new Date().toISOString(),
+          ...(notes && { notes }),
+          ...(status === 'delivered' && { actual_delivery_date: new Date().toISOString() }),
+          ...(status === 'shipped' && { shipped_date: new Date().toISOString() }),
+          ...(status === 'picked_up' && { picked_up_date: new Date().toISOString() }),
+          ...(status === 'out_for_delivery' && { out_for_delivery_date: new Date().toISOString() })
+        })
+        .eq('id', orderId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: 'Order status updated successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to update order status'
+      };
+    }
+  }
+
+  /**
+   * Get delivery progress percentage
+   */
+  static getDeliveryProgress(order: any, deliveryPartner?: any): number {
+    const status = order.order_status;
+    
+    switch (status) {
+      case 'pending': return 0;
+      case 'confirmed': return 20;
+      case 'processing': return 40;
+      case 'packed': return 50;
+      case 'picked_up': return 65;
+      case 'shipped': 
+      case 'out_for_delivery': return 85;
+      case 'delivered': return 100;
+      case 'cancelled':
+      case 'returned': return 0;
+      default: return 0;
+    }
+  }
+
+  /**
+   * Get order statistics for customer
+   */
+  static async getCustomerOrderStats(customerId: string): Promise<ApiResponse<any>> {
+    try {
+      const { data: orders, error } = await supabase
+        .from('orders')
+        .select('order_status, total_amount, created_at')
+        .eq('customer_id', customerId);
+
+      if (error) throw error;
+
+      const stats = {
+        total_orders: orders?.length || 0,
+        total_spent: orders?.reduce((sum, order) => sum + (order.total_amount || 0), 0) || 0,
+        pending_orders: orders?.filter(o => o.order_status === 'pending').length || 0,
+        delivered_orders: orders?.filter(o => o.order_status === 'delivered').length || 0,
+        cancelled_orders: orders?.filter(o => o.order_status === 'cancelled').length || 0,
+        recent_orders: orders?.filter(o => {
+          const orderDate = new Date(o.created_at);
+          const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+          return orderDate > thirtyDaysAgo;
+        }).length || 0
+      };
+
+      return {
+        success: true,
+        data: stats,
+        message: 'Customer order statistics retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch order statistics'
+      };
+    }
+  }
+
+  /**
+   * Get detailed order tracking information
+   */
+  static async getOrderTracking(orderId: string): Promise<ApiResponse<any>> {
+    try {
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .select(`
+          *,
+          order_items (
+            *,
+            vendor:vendors (
+              id,
+              business_name,
+              contact_phone
+            )
+          )
+        `)
+        .eq('id', orderId)
+        .single();
+
+      if (orderError) throw orderError;
+
+      // Get delivery partner information
+      let deliveryPartner = null;
+      const { data: deliveryData } = await supabase
+        .from('delivery_partner_orders')
+        .select(`
+          *,
+          delivery_partner:delivery_partners (
+            profile:profiles (
+              full_name,
+              phone
+            )
+          )
+        `)
+        .eq('order_id', orderId)
+        .single();
+
+      if (deliveryData?.delivery_partner) {
+        deliveryPartner = {
+          id: deliveryData.delivery_partner_id,
+          name: deliveryData.delivery_partner.profile?.full_name,
+          phone: deliveryData.delivery_partner.profile?.phone,
+          pickup_otp: deliveryData.pickup_otp,
+          delivery_otp: deliveryData.delivery_otp,
+          assigned_at: deliveryData.assigned_at,
+          status: deliveryData.status
+        };
+      }
+
+      // Build tracking timeline
+      const trackingUpdates = this.buildTrackingTimeline(order, deliveryPartner);
+
+      return {
+        success: true,
+        data: {
+          ...order,
+          delivery_partner: deliveryPartner,
+          tracking_updates: trackingUpdates,
+          current_delivery_status: this.getCurrentDeliveryStatus(order, deliveryPartner)
+        },
+        message: 'Order tracking retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch order tracking'
+      };
+    }
+  }
+
+  /**
+   * Cancel an order
+   */
+  static async cancelOrder(orderId: string, reason: string): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .update({
+          order_status: 'cancelled',
+          cancelled_date: new Date().toISOString(),
+          cancellation_reason: reason,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', orderId)
+        .eq('order_status', 'pending') // Only allow cancelling pending orders
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Also cancel all order items
+      await supabase
+        .from('order_items')
+        .update({
+          item_status: 'cancelled',
+          updated_at: new Date().toISOString()
+        })
+        .eq('order_id', orderId);
+
+      return {
+        success: true,
+        data,
+        message: 'Order cancelled successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to cancel order'
+      };
+    }
+  }
+
+  /**
+   * Request order return
+   */
+  static async requestReturn(orderId: string, reason: string): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .update({
+          order_status: 'returned',
+          updated_at: new Date().toISOString(),
+          notes: `Return requested: ${reason}`
+        })
+        .eq('id', orderId)
+        .eq('order_status', 'delivered') // Only allow returns for delivered orders
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: 'Return request submitted successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to request return'
+      };
+    }
+  }
+
+  /**
+   * Helper method to determine current delivery status
+   */
+  private static getCurrentDeliveryStatus(order: any, deliveryInfo?: any): string {
+    if (deliveryInfo?.delivery_status) {
+      return deliveryInfo.delivery_status;
+    }
+    
+    // Map order status to delivery status
+    switch (order.order_status) {
+      case 'confirmed': return 'confirmed';
+      case 'processing': return 'assigned_to_delivery';
+      case 'packed': return 'picked_up';
+      case 'shipped':
+      case 'out_for_delivery': return 'out_for_delivery';
+      case 'delivered': return 'delivered';
+      default: return order.order_status;
+    }
+  }
+
+  /**
+   * Build tracking timeline from order data
+   */
+  private static buildTrackingTimeline(order: any, deliveryPartner?: any): any[] {
+    const updates = [];
+
+    // Order confirmed
+    if (order.created_at) {
+      updates.push({
+        id: 'confirmed',
+        status: 'Order Confirmed',
+        message: 'Your order has been confirmed and is being prepared',
+        timestamp: order.created_at,
+        location: 'Order Processing Center'
+      });
+    }
+
+    // Assigned to delivery
+    if (deliveryPartner?.assigned_at) {
+      updates.push({
+        id: 'assigned',
+        status: 'Assigned to Delivery Partner',
+        message: `Order assigned to ${deliveryPartner.name}`,
+        timestamp: deliveryPartner.assigned_at,
+        location: 'Delivery Hub'
+      });
+    }
+
+    // Picked up
+    if (order.picked_up_date) {
+      updates.push({
+        id: 'picked_up',
+        status: 'Picked Up',
+        message: 'Order has been picked up by delivery partner',
+        timestamp: order.picked_up_date,
+        location: 'Vendor Location'
+      });
+    }
+
+    // Out for delivery
+    if (order.out_for_delivery_date) {
+      updates.push({
+        id: 'out_for_delivery',
+        status: 'Out for Delivery',
+        message: 'Order is on the way to your location',
+        timestamp: order.out_for_delivery_date,
+        location: 'En Route'
+      });
+    }
+
+    // Delivered
+    if (order.actual_delivery_date) {
+      updates.push({
+        id: 'delivered',
+        status: 'Delivered',
+        message: 'Order has been successfully delivered',
+        timestamp: order.actual_delivery_date,
+        location: 'Customer Location'
+      });
+    }
+
+    return updates.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  }
+
+  static async updateOrderItemStatus(
+    orderItemId: string,
+    status: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      console.log('Updating order item status:', { orderItemId, status });
+      
+      // Check authentication first
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        console.error('Authentication error:', authError);
+        return { success: false, error: 'User not authenticated' };
+      }
+      
+      console.log('User authenticated:', user.email);
+      
+      // First try using the RPC function to bypass CORS restrictions
+      try {
+        const { data, error } = await supabase.rpc('update_order_item_status', {
+          item_id: orderItemId,
+          new_status: status
+        });
+
+        if (!error) {
+          console.log('Update successful via RPC:', data);
+          return { success: true, data, message: 'Order item status updated successfully' };
+        } else {
+          console.warn('RPC function not available, falling back to direct update:', error);
+        }
+      } catch (rpcError: any) {
+        console.warn('RPC function failed, falling back to direct update:', rpcError);
+      }
+
+      // Fallback to direct table update
+      const { data, error } = await supabase
+        .from('order_items')
+        .update({ 
+          item_status: status, 
+          updated_at: new Date().toISOString() 
+        })
+        .eq('id', orderItemId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Direct update error:', error);
+        throw error;
+      }
+
+      console.log('Update successful via direct update:', data);
+      return { success: true, data, message: 'Order item status updated successfully' };
+    } catch (error: any) {
+      console.error('OrderAPI.updateOrderItemStatus error:', error);
+      return { success: false, error: error.message || 'Failed to update order item status' };
+    }
+  }
+}
+
+// Tryodo Main API
 export class TryodoAPI {
   static Brand = BrandAPI;
   static Smartphone = SmartphoneAPI;
@@ -614,6 +1250,7 @@ export class TryodoAPI {
   static Category = CategoryAPI;
   static Comparison = ComparisonAPI;
   static Analytics = AnalyticsAPI;
+  static Order = OrderAPI;
 
   /**
    * Health check endpoint

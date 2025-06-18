@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth, UserRole } from '@/contexts/AuthContext';
-import { Eye, EyeOff, Loader2, Shield, Users, Store, ArrowLeft, Smartphone, Zap, CheckCircle, Mail } from 'lucide-react';
+import { Eye, EyeOff, Loader2, Shield, Users, Store, ArrowLeft, Smartphone, Zap, CheckCircle, Mail, Truck } from 'lucide-react';
 import { toast } from 'sonner';
 
 const Signup = () => {
@@ -35,6 +35,7 @@ const Signup = () => {
         customer: '/',
         vendor: '/vendor-dashboard',
         admin: '/admin-dashboard',
+        delivery_boy: '/delivery-partner-dashboard',
       };
       navigate(roleRedirects[profile.role], { replace: true });
     }
@@ -141,6 +142,13 @@ const Signup = () => {
         description: 'Manage the platform (Invitation only)',
         features: ['Platform management', 'Vendor approval', 'System analytics', 'Content moderation'],
         gradient: 'from-orange-500 to-red-600',
+      },
+      delivery_boy: {
+        icon: <Truck className="h-5 w-5" />,
+        title: 'Delivery Partner',
+        description: 'Join as a delivery partner',
+        features: ['Accept delivery orders', 'Real-time tracking', 'Flexible schedule', 'Earn on delivery'],
+        gradient: 'from-amber-500 to-orange-600',
       },
     };
     return roleConfig[role as keyof typeof roleConfig];
@@ -273,6 +281,12 @@ const Signup = () => {
                         <div className="flex items-center space-x-2">
                           <Shield className="h-4 w-4" />
                           <span>Admin - Platform management</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="delivery_boy">
+                        <div className="flex items-center space-x-2">
+                          <Truck className="h-4 w-4" />
+                          <span>Delivery Partner</span>
                         </div>
                       </SelectItem>
                     </SelectContent>

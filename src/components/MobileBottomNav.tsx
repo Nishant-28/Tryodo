@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, Search, ShoppingCart, User, Package } from 'lucide-react';
+import { Home, Search, ShoppingCart, User, Package, Truck, Activity } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -13,12 +13,13 @@ const MobileBottomNav = ({ cartItems = 0, onCartClick }: MobileBottomNavProps) =
   const { profile } = useAuth();
   const location = useLocation();
 
-  // Only show for customer role
-  if (!profile || profile.role !== 'customer') {
+  // Only show for customer and delivery_boy roles
+  if (!profile || !['customer', 'delivery_boy'].includes(profile.role)) {
     return null;
   }
 
-  const navigationItems = [
+  // Different navigation for different roles
+  const customerNavigationItems = [
     {
       icon: Home,
       label: 'Home',
@@ -53,6 +54,43 @@ const MobileBottomNav = ({ cartItems = 0, onCartClick }: MobileBottomNavProps) =
     }
   ];
 
+  const deliveryNavigationItems = [
+    {
+      icon: Package,
+      label: 'Available',
+      href: '/delivery-partner-dashboard',
+      isActive: location.pathname === '/delivery-partner-dashboard' && location.hash !== '#my-orders',
+      onClick: undefined,
+      badge: undefined
+    },
+    {
+      icon: Truck,
+      label: 'My Orders',
+      href: '/delivery-partner-dashboard#my-orders',
+      isActive: location.pathname === '/delivery-partner-dashboard' && location.hash === '#my-orders',
+      onClick: undefined,
+      badge: undefined
+    },
+    {
+      icon: Activity,
+      label: 'Dashboard',
+      href: '/delivery-partner-dashboard',
+      isActive: location.pathname === '/delivery-partner-dashboard',
+      onClick: undefined,
+      badge: undefined
+    },
+    {
+      icon: User,
+      label: 'Profile',
+      href: '/profile',
+      isActive: location.pathname === '/profile',
+      onClick: undefined,
+      badge: undefined
+    }
+  ];
+
+  const navigationItems = profile.role === 'delivery_boy' ? deliveryNavigationItems : customerNavigationItems;
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 safe-area-pb z-40 sm:hidden">
       <div className="grid grid-cols-5 h-16">
@@ -60,7 +98,7 @@ const MobileBottomNav = ({ cartItems = 0, onCartClick }: MobileBottomNavProps) =
           const Icon = item.icon;
           const isActive = item.isActive;
 
-          if (item.onClick) {
+          if (item.onClick && typeof item.onClick === 'function') {
             return (
               <button
                 key={index}

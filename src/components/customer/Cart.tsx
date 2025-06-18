@@ -108,12 +108,9 @@ const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem }: CartPr
               <Button 
                 className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
                 onClick={() => {
-                  console.log('Cart: Proceeding to checkout with items:', items);
                   // Store cart items in localStorage and navigate to checkout
                   localStorage.setItem('cartItems', JSON.stringify(items));
-                  console.log('Cart: Items stored in localStorage');
                   onClose(); // Close the cart
-                  console.log('Cart: Navigating to checkout');
                   navigate('/checkout', { state: { cartItems: items } });
                 }}
               >

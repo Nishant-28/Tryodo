@@ -345,7 +345,7 @@ const Contact = () => {
           </div>
         </div>
 
-        {/* Map Section Placeholder */}
+        {/* Office Location */}
         <div className="mb-16">
           <Card className="border-2">
             <CardHeader>
@@ -358,7 +358,7 @@ const Contact = () => {
               <div className="bg-gray-200 rounded-lg h-64 flex items-center justify-center">
                 <div className="text-center text-gray-500">
                   <MapPin className="h-12 w-12 mx-auto mb-4" />
-                  <p className="text-sm">Interactive map will be available soon</p>
+                  <p className="text-sm">Office Location</p>
                   <p className="text-xs mt-2">123 Tryodo Street, Tech Valley, Bangalore</p>
                 </div>
               </div>

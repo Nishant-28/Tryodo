@@ -42,6 +42,7 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
       case 'admin': return Building;
       case 'vendor': return Store;
       case 'customer': return UserCircle;
+      case 'delivery_boy': return Package;
       default: return User;
     }
   };
@@ -97,7 +98,12 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
           {/* Logo */}
           <div className="flex items-center space-x-2">
             <Link 
-              to={profile?.role === 'customer' ? '/' : profile?.role === 'vendor' ? '/vendor-dashboard' : '/admin-dashboard'}
+              to={
+                profile?.role === 'customer' ? '/' : 
+                profile?.role === 'vendor' ? '/vendor-dashboard' : 
+                profile?.role === 'delivery_boy' ? '/delivery-partner-dashboard' :
+                '/admin-dashboard'
+              }
               className="touch-manipulation"
             >
               <img src="/Tryodo_Full_LOGO.png" alt="Tryodo Logo" className="h-16 sm:h-20 w-auto" />
@@ -143,6 +149,15 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
             {profile?.role === 'admin' && (
               <>
                 <Link to="/admin-dashboard" className="text-purple-600 hover:text-purple-700 transition-colors font-medium touch-manipulation py-2">
+                  Dashboard
+                </Link>
+              </>
+            )}
+
+            {/* Delivery Partner Navigation */}
+            {profile?.role === 'delivery_boy' && (
+              <>
+                <Link to="/delivery-partner-dashboard" className="text-orange-600 hover:text-orange-700 transition-colors font-medium touch-manipulation py-2">
                   Dashboard
                 </Link>
               </>
@@ -230,6 +245,15 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
                       <Link to="/admin-dashboard" className="flex items-center py-3">
                         <Building className="mr-3 h-4 w-4" />
                         Admin Dashboard
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
+                  
+                  {profile.role === 'delivery_boy' && (
+                    <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
+                      <Link to="/delivery-partner-dashboard" className="flex items-center py-3">
+                        <Package className="mr-3 h-4 w-4" />
+                        Delivery Dashboard
                       </Link>
                     </DropdownMenuItem>
                   )}
@@ -335,6 +359,16 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
                   <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
                     <Link to="/admin-dashboard" className="py-3">
                       <Building className="mr-3 h-4 w-4" />
+                      Dashboard
+                    </Link>
+                  </DropdownMenuItem>
+                )}
+
+                {/* Delivery Partner mobile menu */}
+                {profile?.role === 'delivery_boy' && (
+                  <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
+                    <Link to="/delivery-partner-dashboard" className="py-3">
+                      <Package className="mr-3 h-4 w-4" />
                       Dashboard
                     </Link>
                   </DropdownMenuItem>

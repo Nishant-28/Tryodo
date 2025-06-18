@@ -1,58 +1,5 @@
 import { supabase } from './supabase';
 
-// Types for Delivery API
-export interface DeliveryBoy {
-  id: string;
-  profile_id: string;
-  name: string;
-  phone: string;
-  email: string;
-  assigned_pincodes: string[];
-  status: 'active' | 'inactive' | 'busy' | 'offline';
-  current_location?: {
-    lat: number;
-    lng: number;
-    address: string;
-    timestamp: string;
-  };
-  vehicle_type: 'bike' | 'scooter' | 'car' | 'cycle';
-  vehicle_number?: string;
-  rating: number;
-  total_deliveries: number;
-  successful_deliveries: number;
-  is_verified: boolean;
-}
-
-export interface DeliveryAssignment {
-  id: string;
-  delivery_boy_id: string;
-  order_ids: string[];
-  pickup_addresses: any[];
-  delivery_addresses: any[];
-  total_orders: number;
-  estimated_distance?: number;
-  estimated_time?: number;
-  status: 'assigned' | 'accepted' | 'picked_up' | 'in_transit' | 'delivered' | 'cancelled' | 'failed';
-  priority: 'low' | 'normal' | 'high' | 'urgent';
-  assigned_at: string;
-  delivery_instructions?: string;
-}
-
-export interface OrderTracking {
-  id: string;
-  order_id: string;
-  status: string;
-  location?: {
-    lat: number;
-    lng: number;
-    address: string;
-  };
-  timestamp: string;
-  notes?: string;
-  delivery_boy_id?: string;
-  estimated_arrival?: string;
-}
-
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
@@ -60,97 +7,267 @@ export interface ApiResponse<T> {
   message?: string;
 }
 
-// Delivery Boy Management API
-export class DeliveryBoyAPI {
+export interface AvailableOrder {
+  order_id: string;
+  order_number: string;
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string;
+  vendor_id: string;
+  vendor_name: string;
+  vendor_phone: string;
+  vendor_address: string;
+  delivery_address: any;
+  total_amount: number;
+  item_count: number;
+  created_at: string;
+  pickup_otp: string;
+  delivery_otp: string;
+  distance_km?: number;
+  estimated_time_mins?: number;
+}
+
+export interface MyOrder {
+  order_id: string;
+  order_number: string;
+  customer_name: string;
+  customer_phone: string;
+  vendor_name: string;
+  vendor_phone: string;
+  vendor_address: string;
+  delivery_address: any;
+  total_amount: number;
+  item_count: number;
+  status: 'accepted' | 'picked_up' | 'delivered';
+  accepted_at: string;
+  pickup_otp: string;
+  delivery_otp: string;
+  picked_up_at?: string;
+  delivered_at?: string;
+}
+
+export interface DeliveryStats {
+  delivery_partner_id: string;
+  today_deliveries: number;
+  total_earnings: number;
+  average_rating: number;
+  total_deliveries: number;
+  active_orders: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export class DeliveryAPI {
   /**
-   * Get delivery boy profile
+   * Get all available orders for delivery
    */
-  static async getProfile(deliveryBoyId: string): Promise<ApiResponse<DeliveryBoy>> {
+  static async getAvailableOrders(): Promise<ApiResponse<AvailableOrder[]>> {
     try {
       const { data, error } = await supabase
-        .from('delivery_boys')
+        .from('delivery_available_orders_view')
         .select('*')
-        .eq('id', deliveryBoyId)
-        .single();
+        .eq('status', 'available_for_pickup')
+        .order('created_at', { ascending: true });
 
       if (error) throw error;
 
       return {
         success: true,
-        data,
-        message: 'Delivery boy profile retrieved successfully'
+        data: data || [],
+        message: `Found ${data?.length || 0} available orders`
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to fetch delivery boy profile'
+        error: error.message || 'Failed to fetch available orders'
       };
     }
   }
 
   /**
-   * Update delivery boy status
+   * Get delivery partner's current orders
    */
-  static async updateStatus(
-    deliveryBoyId: string, 
-    status: DeliveryBoy['status']
-  ): Promise<ApiResponse<DeliveryBoy>> {
+  static async getMyOrders(deliveryPartnerId: string): Promise<ApiResponse<MyOrder[]>> {
     try {
       const { data, error } = await supabase
-        .from('delivery_boys')
-        .update({ 
-          status,
-          last_active_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', deliveryBoyId)
-        .select()
-        .single();
+        .from('delivery_partner_orders_view')
+        .select('*')
+        .eq('delivery_partner_id', deliveryPartnerId)
+        .in('status', ['accepted', 'picked_up'])
+        .order('accepted_at', { ascending: false });
+
+      if (error) throw error;
+
+      return {  
+        success: true,
+        data: data || [],
+        message: `Found ${data?.length || 0} active orders`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch your orders'
+      };
+    }
+  }
+
+  /**
+   * Accept a delivery order
+   */
+  static async acceptOrder(orderId: string, deliveryPartnerId: string): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase.rpc('accept_delivery_order', {
+        p_order_id: orderId,
+        p_delivery_partner_id: deliveryPartnerId
+      });
 
       if (error) throw error;
 
       return {
         success: true,
         data,
-        message: `Status updated to ${status}`
+        message: 'Order accepted successfully'
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to update status'
+        error: error.message || 'Failed to accept order'
       };
     }
   }
 
   /**
-   * Update delivery boy location
+   * Mark order as picked up with OTP verification
    */
-  static async updateLocation(
-    deliveryBoyId: string,
-    location: { lat: number; lng: number; address?: string }
+  static async markPickedUp(
+    orderId: string, 
+    deliveryPartnerId: string, 
+    pickupOtp: string
   ): Promise<ApiResponse<any>> {
     try {
-      const locationData = {
-        ...location,
-        timestamp: new Date().toISOString()
-      };
-
-      const { data, error } = await supabase
-        .from('delivery_boys')
-        .update({ 
-          current_location: locationData,
-          last_active_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', deliveryBoyId)
-        .select()
-        .single();
+      const { data, error } = await supabase.rpc('mark_order_picked_up', {
+        p_order_id: orderId,
+        p_delivery_partner_id: deliveryPartnerId,
+        p_pickup_otp: pickupOtp
+      });
 
       if (error) throw error;
 
       return {
         success: true,
-        data: locationData,
+        data,
+        message: 'Order marked as picked up successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to mark as picked up'
+      };
+    }
+  }
+
+  /**
+   * Mark order as delivered with OTP verification
+   */
+  static async markDelivered(
+    orderId: string, 
+    deliveryPartnerId: string, 
+    deliveryOtp: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase.rpc('mark_order_delivered', {
+        p_order_id: orderId,
+        p_delivery_partner_id: deliveryPartnerId,
+        p_delivery_otp: deliveryOtp
+      });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: 'Order delivered successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to mark as delivered'
+      };
+    }
+  }
+
+  /**
+   * Get delivery partner statistics
+   */
+  static async getDeliveryStats(deliveryPartnerId: string): Promise<ApiResponse<DeliveryStats>> {
+    try {
+      const { data, error } = await supabase
+        .from('delivery_partner_stats')
+        .select('*')
+        .eq('delivery_partner_id', deliveryPartnerId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') throw error;
+
+      // If no stats exist, create default stats
+      if (!data) {
+        const defaultStats: Partial<DeliveryStats> = {
+          delivery_partner_id: deliveryPartnerId,
+          today_deliveries: 0,
+          total_earnings: 0,
+          average_rating: 0,
+          total_deliveries: 0,
+          active_orders: 0
+        };
+
+        const { data: newStats, error: createError } = await supabase
+          .from('delivery_partner_stats')
+          .insert(defaultStats)
+          .select()
+          .single();
+
+        if (createError) throw createError;
+
+        return {
+          success: true,
+          data: newStats,
+          message: 'Stats initialized successfully'
+        };
+      }
+
+      return {
+        success: true,
+        data,
+        message: 'Stats retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch delivery stats'
+      };
+    }
+  }
+
+  /**
+   * Update delivery partner location
+   */
+  static async updateLocation(
+    deliveryPartnerId: string, 
+    latitude: number, 
+    longitude: number
+  ): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase.rpc('update_delivery_partner_location', {
+        p_delivery_partner_id: deliveryPartnerId,
+        p_latitude: latitude,
+        p_longitude: longitude
+      });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
         message: 'Location updated successfully'
       };
     } catch (error: any) {
@@ -162,576 +279,318 @@ export class DeliveryBoyAPI {
   }
 
   /**
-   * Get delivery boy statistics
+   * Get order details by order ID
    */
-  static async getStatistics(deliveryBoyId: string): Promise<ApiResponse<any>> {
+  static async getOrderDetails(orderId: string): Promise<ApiResponse<any>> {
     try {
-      const { data: deliveryBoy, error: dbError } = await supabase
-        .from('delivery_boys')
-        .select('total_deliveries, successful_deliveries, cancelled_deliveries, rating')
-        .eq('id', deliveryBoyId)
+      const { data, error } = await supabase
+        .from('delivery_order_details_view')
+        .select('*')
+        .eq('order_id', orderId)
         .single();
 
-      if (dbError) throw dbError;
-
-      // Get today's deliveries
-      const today = new Date().toISOString().split('T')[0];
-      const { data: todayAssignments, error: assignmentError } = await supabase
-        .from('delivery_assignments')
-        .select('status')
-        .eq('delivery_boy_id', deliveryBoyId)
-        .gte('created_at', `${today}T00:00:00.000Z`)
-        .lte('created_at', `${today}T23:59:59.999Z`);
-
-      if (assignmentError) throw assignmentError;
-
-      const todayDelivered = todayAssignments?.filter(a => a.status === 'delivered').length || 0;
-      const todayTotal = todayAssignments?.length || 0;
-
-      const stats = {
-        ...deliveryBoy,
-        today_deliveries: todayDelivered,
-        today_assignments: todayTotal,
-        success_rate: deliveryBoy.total_deliveries > 0 
-          ? Math.round((deliveryBoy.successful_deliveries / deliveryBoy.total_deliveries) * 100)
-          : 0
-      };
+      if (error) throw error;
 
       return {
         success: true,
-        data: stats,
-        message: 'Statistics retrieved successfully'
+        data,
+        message: 'Order details retrieved successfully'
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to fetch statistics'
+        error: error.message || 'Failed to fetch order details'
       };
     }
   }
-}
 
-// Delivery Assignment API
-export class DeliveryAssignmentAPI {
   /**
-   * Get assignments for a delivery boy
+   * Generate new OTP for pickup/delivery
    */
-  static async getAssignments(
-    deliveryBoyId: string,
-    status?: string
-  ): Promise<ApiResponse<DeliveryAssignment[]>> {
+  static async generateOTP(orderId: string, type: 'pickup' | 'delivery'): Promise<ApiResponse<string>> {
     try {
-      let query = supabase
-        .from('delivery_assignments')
+      const { data, error } = await supabase.rpc('generate_delivery_otp', {
+        p_order_id: orderId,
+        p_otp_type: type
+      });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: `${type} OTP generated successfully`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to generate OTP'
+      };
+    }
+  }
+
+  /**
+   * Verify OTP
+   */
+  static async verifyOTP(
+    orderId: string, 
+    otp: string, 
+    type: 'pickup' | 'delivery'
+  ): Promise<ApiResponse<boolean>> {
+    try {
+      const { data, error } = await supabase.rpc('verify_delivery_otp', {
+        p_order_id: orderId,
+        p_otp: otp,
+        p_otp_type: type
+      });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: 'OTP verified successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Invalid OTP'
+      };
+    }
+  }
+
+  /**
+   * Get delivery partner profile
+   */
+  static async getDeliveryPartnerProfile(deliveryPartnerId: string): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase
+        .from('delivery_partners')
         .select(`
           *,
-          orders!inner(
-            id,
-            order_number,
-            customer_id,
-            delivery_address,
-            total_amount,
-            customers(
-              profiles(full_name, phone)
-            )
+          profiles!inner(
+            full_name,
+            phone,
+            email
           )
         `)
-        .eq('delivery_boy_id', deliveryBoyId)
-        .order('assigned_at', { ascending: false });
-
-      if (status) {
-        query = query.eq('status', status);
-      }
-
-      const { data, error } = await query;
+        .eq('profile_id', deliveryPartnerId)
+        .single();
 
       if (error) throw error;
 
       return {
         success: true,
-        data: data || [],
-        message: 'Assignments retrieved successfully'
+        data,
+        message: 'Profile retrieved successfully'
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to fetch assignments'
+        error: error.message || 'Failed to fetch profile'
       };
     }
   }
 
   /**
-   * Accept an assignment
+   * Update delivery partner availability status
    */
-  static async acceptAssignment(assignmentId: string): Promise<ApiResponse<DeliveryAssignment>> {
+  static async updateAvailabilityStatus(
+    deliveryPartnerId: string, 
+    isAvailable: boolean
+  ): Promise<ApiResponse<any>> {
     try {
       const { data, error } = await supabase
-        .from('delivery_assignments')
-        .update({
-          status: 'accepted',
-          accepted_at: new Date().toISOString(),
+        .from('delivery_partners')
+        .update({ 
+          is_available: isAvailable,
           updated_at: new Date().toISOString()
         })
-        .eq('id', assignmentId)
+        .eq('profile_id', deliveryPartnerId)
         .select()
         .single();
 
       if (error) throw error;
 
-      // Update delivery boy status to busy
-      await supabase
-        .from('delivery_boys')
-        .update({ status: 'busy' })
-        .eq('id', data.delivery_boy_id);
-
       return {
         success: true,
         data,
-        message: 'Assignment accepted successfully'
+        message: `Status updated to ${isAvailable ? 'available' : 'unavailable'}`
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to accept assignment'
+        error: error.message || 'Failed to update availability status'
       };
     }
   }
 
   /**
-   * Update assignment status
+   * Get delivery history
    */
-  static async updateStatus(
-    assignmentId: string,
-    status: DeliveryAssignment['status'],
-    notes?: string
-  ): Promise<ApiResponse<DeliveryAssignment>> {
+  static async getDeliveryHistory(
+    deliveryPartnerId: string,
+    page: number = 1,
+    limit: number = 20
+  ): Promise<ApiResponse<any[]>> {
     try {
-      const updateData: any = {
-        status,
-        updated_at: new Date().toISOString()
-      };
-
-      // Set timestamp based on status
-      const timestamp = new Date().toISOString();
-      switch (status) {
-        case 'picked_up':
-          updateData.pickup_completed_at = timestamp;
-          break;
-        case 'in_transit':
-          updateData.delivery_started_at = timestamp;
-          break;
-        case 'delivered':
-          updateData.delivered_at = timestamp;
-          break;
-        case 'cancelled':
-          updateData.cancelled_at = timestamp;
-          if (notes) updateData.cancellation_reason = notes;
-          break;
-      }
+      const offset = (page - 1) * limit;
 
       const { data, error } = await supabase
-        .from('delivery_assignments')
-        .update(updateData)
-        .eq('id', assignmentId)
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      // Update related orders status
-      if (status === 'delivered') {
-        await supabase
-          .from('orders')
-          .update({ 
-            delivery_status: 'delivered',
-            actual_delivery_date: timestamp
-          })
-          .in('id', data.order_ids);
-
-        // Update delivery boy status back to active
-        await supabase
-          .from('delivery_boys')
-          .update({ status: 'active' })
-          .eq('id', data.delivery_boy_id);
-      }
-
-      return {
-        success: true,
-        data,
-        message: `Assignment status updated to ${status}`
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to update assignment status'
-      };
-    }
-  }
-
-  /**
-   * Get route optimization for assignments
-   */
-  static async getRouteOptimization(assignmentId: string): Promise<ApiResponse<any>> {
-    try {
-      const { data: assignment, error } = await supabase
-        .from('delivery_assignments')
-        .select('pickup_addresses, delivery_addresses')
-        .eq('id', assignmentId)
-        .single();
-
-      if (error) throw error;
-
-      // Simple route optimization (in production, use Google Maps API or similar)
-      const optimizedRoute = {
-        pickup_sequence: assignment.pickup_addresses.map((addr: any, index: number) => ({
-          order: index + 1,
-          address: addr,
-          estimated_time: 15 // minutes
-        })),
-        delivery_sequence: assignment.delivery_addresses.map((addr: any, index: number) => ({
-          order: index + 1,
-          address: addr,
-          estimated_time: 10 // minutes
-        })),
-        total_estimated_time: (assignment.pickup_addresses.length * 15) + (assignment.delivery_addresses.length * 10),
-        total_estimated_distance: assignment.pickup_addresses.length + assignment.delivery_addresses.length * 2 // km
-      };
-
-      return {
-        success: true,
-        data: optimizedRoute,
-        message: 'Route optimization calculated successfully'
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to calculate route optimization'
-      };
-    }
-  }
-}
-
-// Order Tracking API
-export class OrderTrackingAPI {
-  /**
-   * Get tracking information for an order
-   */
-  static async getTracking(orderId: string): Promise<ApiResponse<OrderTracking[]>> {
-    try {
-      const { data, error } = await supabase
-        .from('order_tracking')
-        .select(`
-          *,
-          delivery_boys(name, phone, vehicle_type, vehicle_number)
-        `)
-        .eq('order_id', orderId)
-        .order('timestamp', { ascending: true });
+        .from('delivery_history_view')
+        .select('*')
+        .eq('delivery_partner_id', deliveryPartnerId)
+        .order('delivered_at', { ascending: false })
+        .range(offset, offset + limit - 1);
 
       if (error) throw error;
 
       return {
         success: true,
         data: data || [],
-        message: 'Order tracking retrieved successfully'
+        message: `Retrieved ${data?.length || 0} delivery records`
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to fetch order tracking'
+        error: error.message || 'Failed to fetch delivery history'
       };
     }
   }
 
   /**
-   * Add tracking update
+   * Calculate earnings for a specific period
    */
-  static async addTrackingUpdate(
-    orderId: string,
-    status: string,
-    location?: { lat: number; lng: number; address: string },
-    notes?: string,
-    deliveryBoyId?: string
-  ): Promise<ApiResponse<OrderTracking>> {
+  static async getEarnings(
+    deliveryPartnerId: string,
+    startDate: string,
+    endDate: string
+  ): Promise<ApiResponse<any>> {
     try {
-      const trackingData: any = {
-        order_id: orderId,
-        status,
-        timestamp: new Date().toISOString(),
-        notes,
-        delivery_boy_id: deliveryBoyId
-      };
-
-      if (location) {
-        trackingData.location = location;
-      }
-
-      const { data, error } = await supabase
-        .from('order_tracking')
-        .insert(trackingData)
-        .select()
-        .single();
+      const { data, error } = await supabase.rpc('calculate_delivery_earnings', {
+        p_delivery_partner_id: deliveryPartnerId,
+        p_start_date: startDate,
+        p_end_date: endDate
+      });
 
       if (error) throw error;
 
       return {
         success: true,
         data,
-        message: 'Tracking update added successfully'
+        message: 'Earnings calculated successfully'
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to add tracking update'
+        error: error.message || 'Failed to calculate earnings'
       };
     }
   }
 
   /**
-   * Get real-time tracking for multiple orders
+   * Assignment management methods
    */
-  static async getMultipleOrderTracking(orderIds: string[]): Promise<ApiResponse<any>> {
-    try {
-      const { data, error } = await supabase
-        .from('order_tracking')
-        .select(`
-          order_id,
-          status,
-          location,
-          timestamp,
-          delivery_boys(name, phone, current_location)
-        `)
-        .in('order_id', orderIds)
-        .order('timestamp', { ascending: false });
+  static Assignment = {
+    /**
+     * Create delivery assignment from order
+     */
+    async createAssignmentFromOrder(
+      orderItemId: string,
+      orderId: string,
+      vendorId: string,
+      customerPincode: string,
+      priority: 'normal' | 'urgent' = 'normal'
+    ): Promise<ApiResponse<any>> {
+      try {
+        // First check if order is already assigned
+        const { data: existingAssignment } = await supabase
+          .from('delivery_partner_orders')
+          .select('id')
+          .eq('order_id', orderId)
+          .single();
 
-      if (error) throw error;
-
-      // Group by order_id and get latest status
-      const trackingByOrder = data?.reduce((acc: any, tracking: any) => {
-        if (!acc[tracking.order_id]) {
-          acc[tracking.order_id] = tracking;
+        if (existingAssignment) {
+          return {
+            success: false,
+            error: 'Order already assigned to delivery partner'
+          };
         }
-        return acc;
-      }, {});
 
-      return {
-        success: true,
-        data: trackingByOrder || {},
-        message: 'Multiple order tracking retrieved successfully'
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to fetch multiple order tracking'
-      };
-    }
-  }
-}
+        // Generate OTPs for pickup and delivery
+        const pickupOtp = Math.floor(100000 + Math.random() * 900000).toString();
+        const deliveryOtp = Math.floor(100000 + Math.random() * 900000).toString();
 
-// Delivery Pricing API
-export class DeliveryPricingAPI {
-  /**
-   * Calculate delivery fee for an order
-   */
-  static async calculateDeliveryFee(
-    pincode: string,
-    orderValue: number,
-    distance?: number
-  ): Promise<ApiResponse<any>> {
-    try {
-      const { data: pricing, error } = await supabase
-        .from('delivery_pricing')
-        .select('*')
-        .eq('pincode', pincode)
-        .eq('is_active', true)
-        .single();
+        // Create delivery assignment record with OTPs
+        const { data: assignmentData, error: assignmentError } = await supabase
+          .from('delivery_partner_orders')
+          .insert({
+            order_id: orderId,
+            delivery_partner_id: null, // Will be filled when a delivery partner accepts
+            status: 'accepted',
+            pickup_otp: pickupOtp,
+            delivery_otp: deliveryOtp,
+            accepted_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .select()
+          .single();
 
-      if (error) throw error;
+        if (assignmentError) throw assignmentError;
 
-      let deliveryFee = pricing.base_price;
+        // Update order status to ready for pickup
+        const { error: orderError } = await supabase
+          .from('orders')
+          .update({
+            order_status: 'ready_for_pickup',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', orderId);
 
-      // Check order value ranges
-      if (pricing.order_value_ranges) {
-        const range = pricing.order_value_ranges.find((r: any) => 
-          orderValue >= r.min && orderValue < r.max
-        );
-        if (range) {
-          deliveryFee = range.price;
-        }
+        if (orderError) throw orderError;
+
+        return {
+          success: true,
+          data: {
+            orderId,
+            assignmentId: assignmentData.id,
+            pickupOtp,
+            deliveryOtp,
+            status: 'ready_for_pickup',
+            message: 'Order marked as ready for pickup by delivery partners'
+          },
+          message: 'Delivery assignment created successfully'
+        };
+      } catch (error: any) {
+        return {
+          success: false,
+          error: error.message || 'Failed to create delivery assignment'
+        };
       }
+    },
 
-      // Add distance-based pricing
-      if (distance && pricing.per_km_price) {
-        deliveryFee += distance * pricing.per_km_price;
+    /**
+     * Auto-assign order to best delivery partner
+     */
+    async autoAssignOrder(
+      orderId: string,
+      customerLatitude?: number,
+      customerLongitude?: number
+    ): Promise<ApiResponse<any>> {
+      try {
+        // This would implement smart assignment logic
+        // For now, just mark as available for pickup
+        return this.createAssignmentFromOrder('', orderId, '', '', 'normal');
+      } catch (error: any) {
+        return {
+          success: false,
+          error: error.message || 'Failed to auto-assign order'
+        };
       }
-
-      // Check free delivery threshold
-      if (orderValue >= pricing.free_delivery_threshold) {
-        deliveryFee = 0;
-      }
-
-      const result = {
-        base_price: pricing.base_price,
-        calculated_fee: deliveryFee,
-        is_free_delivery: deliveryFee === 0,
-        free_delivery_threshold: pricing.free_delivery_threshold,
-        distance_fee: distance ? distance * pricing.per_km_price : 0
-      };
-
-      return {
-        success: true,
-        data: result,
-        message: 'Delivery fee calculated successfully'
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to calculate delivery fee'
-      };
     }
-  }
-
-  /**
-   * Check delivery availability for pincode
-   */
-  static async checkDeliveryAvailability(pincode: string): Promise<ApiResponse<any>> {
-    try {
-      const { data: pricing, error } = await supabase
-        .from('delivery_pricing')
-        .select('*')
-        .eq('pincode', pincode)
-        .eq('is_active', true)
-        .single();
-
-      if (error && error.code !== 'PGRST116') throw error;
-
-      const isAvailable = !!pricing;
-      
-      return {
-        success: true,
-        data: {
-          is_available: isAvailable,
-          pricing: pricing || null,
-          message: isAvailable ? 'Delivery available' : 'Delivery not available in this area'
-        },
-        message: 'Delivery availability checked successfully'
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to check delivery availability'
-      };
-    }
-  }
+  };
 }
 
-// Notifications API for delivery partners
-export class DeliveryNotificationAPI {
-  /**
-   * Get notifications for delivery boy
-   */
-  static async getNotifications(deliveryBoyId: string): Promise<ApiResponse<any[]>> {
-    try {
-      // Get new assignments
-      const { data: assignments, error: assignmentError } = await supabase
-        .from('delivery_assignments')
-        .select('*')
-        .eq('delivery_boy_id', deliveryBoyId)
-        .eq('status', 'assigned')
-        .order('assigned_at', { ascending: false });
-
-      if (assignmentError) throw assignmentError;
-
-      const notifications = assignments?.map(assignment => ({
-        id: assignment.id,
-        type: 'new_assignment',
-        title: 'New Delivery Assignment',
-        message: `You have ${assignment.total_orders} new order(s) to deliver`,
-        timestamp: assignment.assigned_at,
-        data: assignment
-      })) || [];
-
-      return {
-        success: true,
-        data: notifications,
-        message: 'Notifications retrieved successfully'
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to fetch notifications'
-      };
-    }
-  }
-
-  /**
-   * Send notification to customer about delivery status
-   */
-  static async notifyCustomer(
-    orderId: string,
-    status: string,
-    message: string
-  ): Promise<ApiResponse<any>> {
-    try {
-      // In a real implementation, this would send push notifications, SMS, or email
-      // For now, we'll just log the tracking update
-      
-      const trackingUpdate = await OrderTrackingAPI.addTrackingUpdate(
-        orderId,
-        status,
-        undefined,
-        message
-      );
-
-      return {
-        success: true,
-        data: { notification_sent: true },
-        message: 'Customer notification sent successfully'
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to send customer notification'
-      };
-    }
-  }
-}
-
-// Main Delivery API class
-export class DeliveryAPI {
-  static DeliveryBoy = DeliveryBoyAPI;
-  static Assignment = DeliveryAssignmentAPI;
-  static Tracking = OrderTrackingAPI;
-  static Pricing = DeliveryPricingAPI;
-  static Notification = DeliveryNotificationAPI;
-
-  /**
-   * Health check for delivery services
-   */
-  static async healthCheck(): Promise<ApiResponse<any>> {
-    try {
-      const { data, error } = await supabase
-        .from('delivery_boys')
-        .select('id')
-        .limit(1);
-
-      if (error) throw error;
-
-      return {
-        success: true,
-        data: {
-          status: 'healthy',
-          timestamp: new Date().toISOString(),
-          delivery_service: 'operational'
-        },
-        message: 'Delivery API is running smoothly'
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Delivery API health check failed'
-      };
-    }
-  }
-}
-
+// Export as default and named export for flexibility
 export default DeliveryAPI; 

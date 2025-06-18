@@ -87,32 +87,22 @@ export const debugAuthStorage = (): void => {
     const tokenKey = getAuthTokenKey();
     const cachedSession = localStorage.getItem(tokenKey);
     
-    console.log('🔍 Auth Storage Debug:', {
-      tokenKey,
-      hasSession: !!cachedSession,
-      isValid: hasValidCachedSession(),
-      userInfo: getCachedUserInfo(),
-      allAuthKeys: Object.keys(localStorage).filter(key => 
-        key.startsWith('sb-') || 
-        key.includes('supabase') || 
-        key.includes('auth')
-      )
-    });
-    
     if (cachedSession) {
       try {
         const sessionData = JSON.parse(cachedSession);
-        console.log('📄 Session Data:', {
-          hasAccessToken: !!sessionData?.access_token,
-          hasRefreshToken: !!sessionData?.refresh_token,
-          expiresAt: sessionData?.expires_at ? new Date(sessionData.expires_at * 1000).toLocaleString() : 'Not set',
-          userEmail: sessionData?.user?.email
-        });
+        // Basic debug info only for development
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Auth Debug:', {
+            hasSession: true,
+            userEmail: sessionData?.user?.email,
+            isValid: hasValidCachedSession()
+          });
+        }
       } catch {
-        console.log('❌ Invalid session data format');
+        // Invalid session data format
       }
     }
   } catch (error) {
-    console.error('❌ Error debugging auth storage:', error);
+    // Error handled silently
   }
 }; 
