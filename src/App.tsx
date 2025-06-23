@@ -1,15 +1,16 @@
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { CartProvider } from "@/contexts/CartContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
-import EnvironmentCheck from "@/components/EnvironmentCheck";
 import PWAInstallPrompt from "@/components/PWAInstallPrompt";
-import PWAStatus from "@/components/PWAStatus";
-import { useEffect } from "react";
+import MobileBottomNav from "@/components/MobileBottomNav";
+import { useEffect, useState } from "react";
 import { registerPWA } from "@/lib/pwa";
+import { useAuth } from "@/contexts/AuthContext";
+import { useCart } from "@/contexts/CartContext";
 import Index from "./pages/Index";
 import Order from "./pages/Order";
 import Login from "./pages/Login";
@@ -30,170 +31,145 @@ import Checkout from "./pages/Checkout";
 import OrderSuccess from "./pages/OrderSuccess";
 import MyOrders from "./pages/MyOrders";
 import DeliveryPartnerDashboard from "./pages/DeliveryPartnerDashboard";
+import NetworkStatusIndicator from "@/components/NetworkStatusIndicator";
+import Cart from "@/components/customer/Cart";
 
 const queryClient = new QueryClient();
 
 const PWAWrapper = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
-    registerPWA().then((pwaInfo) => {
-      // PWA registered successfully
-    });
+    registerPWA();
   }, []);
 
+  return <>{children}</>;
+};
+
+// Mobile Layout Wrapper for Customer Views
+const MobileCustomerLayout = ({ children }: { children: React.ReactNode }) => {
+  const { profile } = useAuth();
+  const { totalItems } = useCart();
+  const [isCartOpen, setIsCartOpen] = useState(false);
+
+  const isCustomer = profile?.role === 'customer';
+
   return (
-    <>
-      {children}
-      <PWAInstallPrompt />
-      <PWAStatus />
-    </>
+    <div className="flex flex-col min-h-screen">
+      <main className={`flex-grow ${isCustomer ? 'pb-20 sm:pb-0' : ''}`}>
+        {children}
+      </main>
+      
+      {/* Mobile Bottom Navigation - only for customer */}
+      {isCustomer && (
+        <MobileBottomNav 
+          cartItems={totalItems}
+          onCartClick={() => setIsCartOpen(true)}
+        />
+      )}
+
+      {/* Cart Modal */}
+      <Cart
+        isOpen={isCartOpen}
+        onClose={() => setIsCartOpen(false)}
+      />
+    </div>
   );
 };
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <EnvironmentCheck />
-      <PWAWrapper>
-        <AuthProvider>
+      <AuthProvider>
+        <CartProvider>
         <BrowserRouter
           future={{
             v7_startTransition: true,
             v7_relativeSplatPath: true,
           }}
         >
-          <Routes>
-            {/* Public routes - no authentication required */}
-            <Route path="/login" element={<Login />} />
-            <Route path="/signup" element={<Signup />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-            <Route path="/about" element={<About />} />
-            <Route path="/contact" element={<Contact />} />
-            
-            {/* Role-specific login routes */}
-            <Route path="/vendor-login" element={<Login />} />
-            <Route path="/admin-login" element={<Login />} />
-            <Route path="/delivery-partner-login" element={<Login />} />
+          <PWAWrapper>
+            <div className="flex flex-col min-h-screen">
+              <Toaster position="top-center" richColors />
+              <PWAInstallPrompt />
+              <NetworkStatusIndicator />
+              
+              <Routes>
+                {/* Public routes */}
+                <Route path="/login" element={<Login />} />
+                <Route path="/signup" element={<Signup />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
+                <Route path="/about" element={<About />} />
+                <Route path="/contact" element={<Contact />} />
 
-            {/* Customer-only routes */}
-            <Route 
-              path="/" 
-              element={
-                <ProtectedRoute allowedRoles={['customer']}>
-                  <Index />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/order" 
-              element={
-                <ProtectedRoute allowedRoles={['customer']}>
-                  <Order />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/profile" 
-              element={
-                <ProtectedRoute allowedRoles={['customer']}>
-                  <UserProfilePage />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/checkout" 
-              element={
-                <ProtectedRoute allowedRoles={['customer']}>
-                  <Checkout />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/order-success" 
-              element={
-                <ProtectedRoute allowedRoles={['customer']}>
-                  <OrderSuccess />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/my-orders" 
-              element={
-                <ProtectedRoute allowedRoles={['customer']}>
-                  <MyOrders />
-                </ProtectedRoute>
-              } 
-            />
+                {/* Role-specific login routes */}
+                <Route path="/vendor-login" element={<Login />} />
+                <Route path="/admin-login" element={<Login />} />
+                <Route path="/delivery-partner-login" element={<Login />} />
 
-            {/* Vendor-only routes */}
-            <Route 
-              path="/vendor-dashboard" 
-              element={
-                <ProtectedRoute allowedRoles={['vendor']}>
-                  <VendorDashboard />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/vendor/add-product" 
-              element={
-                <ProtectedRoute allowedRoles={['vendor']}>
-                  <AddProduct />
-                </ProtectedRoute>
-              } 
-            />
+                {/* Customer-only routes with mobile layout */}
+                <Route path="/" element={
+                  <ProtectedRoute allowedRoles={['customer']}>
+                    <MobileCustomerLayout>
+                      <Index />
+                    </MobileCustomerLayout>
+                  </ProtectedRoute>
+                } />
+                <Route path="/order" element={
+                  <ProtectedRoute allowedRoles={['customer']}>
+                    <MobileCustomerLayout>
+                      <Order />
+                    </MobileCustomerLayout>
+                  </ProtectedRoute>
+                } />
+                <Route path="/profile" element={
+                  <ProtectedRoute allowedRoles={['customer']}>
+                    <MobileCustomerLayout>
+                      <UserProfilePage />
+                    </MobileCustomerLayout>
+                  </ProtectedRoute>
+                } />
+                <Route path="/checkout" element={
+                  <ProtectedRoute allowedRoles={['customer']}>
+                    <MobileCustomerLayout>
+                      <Checkout />
+                    </MobileCustomerLayout>
+                  </ProtectedRoute>
+                } />
+                <Route path="/order-success" element={
+                  <ProtectedRoute allowedRoles={['customer']}>
+                    <MobileCustomerLayout>
+                      <OrderSuccess />
+                    </MobileCustomerLayout>
+                  </ProtectedRoute>
+                } />
+                <Route path="/my-orders" element={
+                  <ProtectedRoute allowedRoles={['customer']}>
+                    <MobileCustomerLayout>
+                      <MyOrders />
+                    </MobileCustomerLayout>
+                  </ProtectedRoute>
+                } />
 
-            {/* Admin-only routes */}
-            <Route 
-              path="/admin-dashboard" 
-              element={
-                <ProtectedRoute allowedRoles={['admin']}>
-                  <AdminDashboard />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/admin/models" 
-              element={
-                <ProtectedRoute allowedRoles={['admin']}>
-                  <AdminModelsManagement />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/admin/categories" 
-              element={
-                <ProtectedRoute allowedRoles={['admin']}>
-                  <AdminCategoriesManagement />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/admin/qualities" 
-              element={
-                <ProtectedRoute allowedRoles={['admin']}>
-                  <AdminQualitiesManagement />
-                </ProtectedRoute>
-              } 
-            />
+                {/* Vendor-only routes */}
+                <Route path="/vendor-dashboard" element={<ProtectedRoute allowedRoles={['vendor']}><VendorDashboard /></ProtectedRoute>} />
+                <Route path="/vendor/add-product" element={<ProtectedRoute allowedRoles={['vendor']}><AddProduct /></ProtectedRoute>} />
 
-            {/* Delivery Partner routes */}
-            <Route 
-              path="/delivery-partner-dashboard" 
-              element={
-                <ProtectedRoute allowedRoles={['delivery_boy']}>
-                  <DeliveryPartnerDashboard />
-                </ProtectedRoute>
-              } 
-            />
+                {/* Admin-only routes */}
+                <Route path="/admin-dashboard" element={<ProtectedRoute allowedRoles={['admin']}><AdminDashboard /></ProtectedRoute>} />
+                <Route path="/admin/models" element={<ProtectedRoute allowedRoles={['admin']}><AdminModelsManagement /></ProtectedRoute>} />
+                <Route path="/admin/categories" element={<ProtectedRoute allowedRoles={['admin']}><AdminCategoriesManagement /></ProtectedRoute>} />
+                <Route path="/admin/qualities" element={<ProtectedRoute allowedRoles={['admin']}><AdminQualitiesManagement /></ProtectedRoute>} />
 
-            {/* Catch-all route */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+                {/* Delivery Partner routes */}
+                <Route path="/delivery-partner-dashboard" element={<ProtectedRoute allowedRoles={['delivery_partner']}><DeliveryPartnerDashboard /></ProtectedRoute>} />
+
+                {/* Catch-all route */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </div>
+          </PWAWrapper>
         </BrowserRouter>
+        </CartProvider>
       </AuthProvider>
-      </PWAWrapper>
     </TooltipProvider>
   </QueryClientProvider>
 );

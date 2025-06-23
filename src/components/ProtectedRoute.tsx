@@ -81,10 +81,11 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     const roleRedirects = {
       customer: '/',
       vendor: '/vendor-dashboard',
-      admin: '/admin-dashboard'
+      admin: '/admin-dashboard',
+      delivery_partner: '/delivery-partner-dashboard'
     };
     
-    const roleRedirect = roleRedirects[profile.role] || '/';
+    const roleRedirect = roleRedirects[profile.role as keyof typeof roleRedirects] || '/';
     
     return (
       <Navigate 

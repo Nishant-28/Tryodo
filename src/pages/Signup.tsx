@@ -35,7 +35,7 @@ const Signup = () => {
         customer: '/',
         vendor: '/vendor-dashboard',
         admin: '/admin-dashboard',
-        delivery_boy: '/delivery-partner-dashboard',
+        delivery_partner: '/delivery-partner-dashboard',
       };
       navigate(roleRedirects[profile.role], { replace: true });
     }
@@ -143,7 +143,7 @@ const Signup = () => {
         features: ['Platform management', 'Vendor approval', 'System analytics', 'Content moderation'],
         gradient: 'from-orange-500 to-red-600',
       },
-      delivery_boy: {
+      delivery_partner: {
         icon: <Truck className="h-5 w-5" />,
         title: 'Delivery Partner',
         description: 'Join as a delivery partner',
@@ -283,7 +283,7 @@ const Signup = () => {
                           <span>Admin - Platform management</span>
                         </div>
                       </SelectItem>
-                      <SelectItem value="delivery_boy">
+                                              <SelectItem value="delivery_partner">
                         <div className="flex items-center space-x-2">
                           <Truck className="h-4 w-4" />
                           <span>Delivery Partner</span>

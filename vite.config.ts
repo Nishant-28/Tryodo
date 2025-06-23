@@ -111,6 +111,45 @@ export default defineConfig({
             }
           },
           {
+            urlPattern: ({ url }) => url.href.includes('/rest/v1/'),
+            method: 'POST',
+            handler: 'NetworkOnly',
+            options: {
+              backgroundSync: {
+                name: 'supabase-post-queue',
+                options: {
+                  maxRetentionTime: 24 * 60 // 24 hours
+                }
+              }
+            }
+          },
+          {
+            urlPattern: ({ url }) => url.href.includes('/rest/v1/'),
+            method: 'PATCH',
+            handler: 'NetworkOnly',
+            options: {
+              backgroundSync: {
+                name: 'supabase-patch-queue',
+                options: {
+                  maxRetentionTime: 24 * 60 // 24 hours
+                }
+              }
+            }
+          },
+          {
+            urlPattern: ({ url }) => url.href.includes('/rest/v1/'),
+            method: 'DELETE',
+            handler: 'NetworkOnly',
+            options: {
+              backgroundSync: {
+                name: 'supabase-delete-queue',
+                options: {
+                  maxRetentionTime: 24 * 60 // 24 hours
+                }
+              }
+            }
+          },
+          {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*$/,
             handler: 'NetworkFirst',
             options: {

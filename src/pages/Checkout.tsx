@@ -17,9 +17,11 @@ import Footer from '@/components/Footer';
 import { supabase } from '@/lib/supabase';
 import { toast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCart } from '@/contexts/CartContext';
 
 interface CartItem {
   id: string;
+  productId: string;
   name: string;
   vendor: string;
   vendorId: string;
@@ -54,9 +56,8 @@ interface PaymentMethod {
 
 const Checkout = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   const { user, profile } = useAuth();
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const { cart, clearCart } = useCart();
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<string>('');
   const [selectedPayment, setSelectedPayment] = useState<string>('');
@@ -94,11 +95,8 @@ const Checkout = () => {
   ];
 
   useEffect(() => {
-    // Get cart items from location state or localStorage
-    const items = location.state?.cartItems || JSON.parse(localStorage.getItem('cartItems') || '[]');
-    setCartItems(items);
-    
-    if (items.length === 0) {
+    // Check if user has items in cart
+    if (!cart || cart.items.length === 0) {
       navigate('/order');
       return;
     }
@@ -107,7 +105,7 @@ const Checkout = () => {
     if (user && profile) {
       loadAddresses();
     }
-  }, [location.state, navigate, user, profile]);
+  }, [cart, navigate, user, profile]);
 
   const loadAddresses = async () => {
     if (!user || !profile) return;
@@ -390,7 +388,7 @@ const Checkout = () => {
   };
 
   const calculateTotals = () => {
-    const subtotal = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const subtotal = cart.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const shippingCharges = 0; // Free delivery
     const taxAmount = 0; // No tax
     const total = subtotal + shippingCharges + taxAmount;
@@ -465,14 +463,15 @@ const Checkout = () => {
       if (orderError) throw orderError;
 
       // Create order items
-      const orderItems = cartItems.map(item => ({
+      const orderItems = cart.items.map(item => ({
         order_id: order.id,
         vendor_id: item.vendorId,
-        vendor_product_id: item.id,
+        vendor_product_id: item.productId, // Use productId instead of id
         product_name: item.name,
         product_description: `Quality product from ${item.vendor}`,
         unit_price: item.price,
-        quantity: item.quantity
+        quantity: item.quantity,
+        line_total: item.price * item.quantity
       }));
 
       const { error: itemsError } = await supabase
@@ -482,7 +481,7 @@ const Checkout = () => {
       if (itemsError) throw itemsError;
 
       // Clear cart
-      localStorage.removeItem('cartItems');
+      clearCart();
 
       // Navigate to order success page
       navigate('/order-success', { 
@@ -511,7 +510,7 @@ const Checkout = () => {
 
   const { subtotal, shippingCharges, taxAmount, total } = calculateTotals();
 
-  if (cartItems.length === 0) {
+  if (cart.items.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50">
         <Header onCartClick={() => {}} />
@@ -559,12 +558,12 @@ const Checkout = () => {
             <div className="text-sm text-yellow-700">
               <p>User authenticated: {user ? 'Yes' : 'No'}</p>
               <p>Profile loaded: {profile ? 'Yes' : 'No'}</p>
-              <p>Cart items count: {cartItems.length}</p>
+              <p>Cart items count: {cart.items.length}</p>
               <p>Addresses loaded: {addresses.length}</p>
-              {cartItems.length > 0 && (
+              {cart.items.length > 0 && (
                 <details className="mt-2">
                   <summary className="cursor-pointer">Cart Items</summary>
-                  <pre className="mt-2 text-xs">{JSON.stringify(cartItems, null, 2)}</pre>
+                  <pre className="mt-2 text-xs">{JSON.stringify(cart.items, null, 2)}</pre>
                 </details>
               )}
             </div>
@@ -735,7 +734,7 @@ const Checkout = () => {
               <CardContent className="space-y-4">
                 {/* Items */}
                 <div className="space-y-3">
-                  {cartItems.map((item) => (
+                  {cart.items.map((item) => (
                     <div key={item.id} className="flex items-center gap-3">
                       <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
                         <div className="w-6 h-6 bg-gray-200 rounded"></div>

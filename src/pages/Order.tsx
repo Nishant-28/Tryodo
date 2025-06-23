@@ -12,6 +12,8 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import Cart from '@/components/customer/Cart';
 import { supabase } from '@/lib/supabase';
+import { toast } from 'sonner';
+import { useCart } from '@/contexts/CartContext';
 
 // Types
 interface Category {
@@ -49,7 +51,6 @@ interface Vendor {
   business_name: string;
   rating: number;
   total_reviews: number;
-  response_time_hours: number;
   is_verified: boolean;
   business_city: string | null;
   business_state: string | null;
@@ -221,95 +222,106 @@ const MOCK_MODELS: { [brandId: string]: Model[] } = {
   ]
 };
 
-const MOCK_VENDOR_PRODUCTS: VendorProduct[] = [
-  {
-    id: 'prod-1',
-    vendor_id: 'vendor-1',
-    model_id: 'iphone-15-pro',
-    category_id: '1',
-    quality_type_id: 'quality-1',
-    price: 5999,
-    original_price: 7999,
-    warranty_months: 12,
-    stock_quantity: 15,
-    is_in_stock: true,
-    delivery_time_days: 2,
-    product_images: null,
-    vendor: {
+// Generate mock vendor products for all models
+const generateMockVendorProducts = (): VendorProduct[] => {
+  const vendors = [
+    {
       id: 'vendor-1',
-      business_name: 'TechParts Pro',
-      rating: 4.8,
-      total_reviews: 1247,
-      response_time_hours: 2,
+      business_name: 'Rohan Communication',
+      rating: 4.9,
+      total_reviews: 1523,
       is_verified: true,
       business_city: 'Mumbai',
       business_state: 'Maharashtra'
     },
-    quality: {
-      id: 'quality-1',
-      name: 'Original',
-      description: 'Genuine OEM parts with warranty'
-    }
-  },
-  {
-    id: 'prod-2',
-    vendor_id: 'vendor-2',
-    model_id: 'iphone-15-pro',
-    category_id: '1',
-    quality_type_id: 'quality-2',
-    price: 3999,
-    original_price: 4999,
-    warranty_months: 6,
-    stock_quantity: 8,
-    is_in_stock: true,
-    delivery_time_days: 3,
-    product_images: null,
-    vendor: {
+    {
       id: 'vendor-2',
-      business_name: 'Mobile Hub',
-      rating: 4.5,
-      total_reviews: 892,
-      response_time_hours: 4,
+      business_name: 'TechParts Pro',
+      rating: 4.8,
+      total_reviews: 1247,
       is_verified: true,
       business_city: 'Delhi',
       business_state: 'Delhi'
     },
-    quality: {
-      id: 'quality-2',
-      name: 'Premium Copy',
-      description: 'High-quality aftermarket parts'
-    }
-  },
-  {
-    id: 'prod-3',
-    vendor_id: 'vendor-3',
-    model_id: 'iphone-15-pro',
-    category_id: '1',
-    quality_type_id: 'quality-3',
-    price: 2499,
-    original_price: null,
-    warranty_months: 3,
-    stock_quantity: 25,
-    is_in_stock: true,
-    delivery_time_days: 5,
-    product_images: null,
-    vendor: {
+    {
       id: 'vendor-3',
-      business_name: 'Budget Electronics',
-      rating: 4.2,
-      total_reviews: 456,
-      response_time_hours: 6,
-      is_verified: false,
+      business_name: 'Mobile Hub',
+      rating: 4.5,
+      total_reviews: 892,
+      is_verified: true,
       business_city: 'Bangalore',
       business_state: 'Karnataka'
     },
-    quality: {
+    {
+      id: 'vendor-4',
+      business_name: 'Budget Electronics',
+      rating: 4.2,
+      total_reviews: 456,
+      is_verified: false,
+      business_city: 'Chennai',
+      business_state: 'Tamil Nadu'
+    }
+  ];
+
+  const qualities = [
+    {
+      id: 'quality-1',
+      name: 'Original',
+      description: 'Genuine OEM parts with warranty'
+    },
+    {
+      id: 'quality-2',
+      name: 'Premium Copy',
+      description: 'High-quality aftermarket parts'
+    },
+    {
       id: 'quality-3',
       name: 'Standard',
       description: 'Good quality replacement parts'
     }
-  }
-];
+  ];
+
+  const products: VendorProduct[] = [];
+  
+  // Generate products for all models
+  const allModelIds = [
+    'iphone-15-pro', 'iphone-15', 'iphone-14',
+    'galaxy-s24-ultra', 'galaxy-s24', 'galaxy-s23',
+    'pixel-8-pro', 'pixel-8', 'pixel-7',
+    'oneplus-12', 'oneplus-11', 'oneplus-10',
+    'redmi-note-13', 'mi-14', 'mi-13'
+  ];
+
+  MOCK_CATEGORIES.forEach(category => {
+    allModelIds.forEach(modelId => {
+      vendors.forEach((vendor, vendorIndex) => {
+        qualities.forEach((quality, qualityIndex) => {
+          const basePrice = (category.id === '1' ? 2000 : category.id === '2' ? 500 : 1200) + (vendorIndex * 1000) + (qualityIndex * 500);
+          products.push({
+            id: `prod-${modelId}-${vendor.id}-${quality.id}-${category.id}`,
+            vendor_id: vendor.id,
+            model_id: modelId,
+            category_id: category.id,
+            quality_type_id: quality.id,
+            price: basePrice,
+            original_price: qualityIndex === 0 ? basePrice + (category.id === '1' ? 1000 : 200) : null,
+            warranty_months: 12 - (qualityIndex * 3),
+            stock_quantity: 10 + (vendorIndex * 5),
+            is_in_stock: true,
+            delivery_time_days: 2 + vendorIndex,
+            product_images: null,
+            vendor,
+            quality
+          });
+        });
+      });
+    });
+  });
+
+  return products;
+};
+
+const MOCK_VENDOR_PRODUCTS: VendorProduct[] = generateMockVendorProducts();
 
 // API Functions
 const fetchCategories = async (): Promise<Category[]> => {
@@ -329,21 +341,36 @@ const fetchCategories = async (): Promise<Category[]> => {
 
 const fetchBrands = async (categoryId?: string): Promise<Brand[]> => {
   try {
+    console.log('🔍 Fetching brands for category:', categoryId);
     const { data, error } = await supabase
       .from('brands')
       .select('*')
       .eq('is_active', true)
       .order('name', { ascending: true });
     
-    if (error) throw error;
-    return data && data.length > 0 ? data : MOCK_BRANDS;
+    if (error) {
+      console.error('🚨 Error fetching brands:', error);
+      throw error;
+    }
+    
+    console.log('🏢 Brands from database:', data?.length, data);
+    
+    if (data && data.length > 0) {
+      console.log('✅ Using database brands');
+      return data;
+    } else {
+      console.log('🔄 No brands found in database, using mock data');
+      return MOCK_BRANDS;
+    }
   } catch (error) {
+    console.log('❌ Error fetching brands, using mock data:', error);
     return MOCK_BRANDS;
   }
 };
 
 const fetchModels = async (brandId: string): Promise<Model[]> => {
   try {
+    console.log('🔍 Fetching models for brand:', brandId);
     const { data, error } = await supabase
       .from('smartphone_models')
       .select('*')
@@ -351,48 +378,165 @@ const fetchModels = async (brandId: string): Promise<Model[]> => {
       .eq('is_active', true)
       .order('model_name', { ascending: true });
     
-    if (error) throw error;
-    return data && data.length > 0 ? data : (MOCK_MODELS[brandId] || []);
+    if (error) {
+      console.error('🚨 Error fetching models:', error);
+      throw error;
+    }
+    
+    console.log('📱 Models from database:', data?.length, data);
+    
+    if (data && data.length > 0) {
+      console.log('✅ Using database models');
+      return data;
+    } else {
+      console.log('🔄 No models found in database, using mock data');
+      return MOCK_MODELS[brandId] || [];
+    }
   } catch (error) {
+    console.log('❌ Error fetching models, using mock data:', error);
     return MOCK_MODELS[brandId] || [];
   }
 };
 
 const fetchVendorProducts = async (modelId: string, categoryId: string): Promise<VendorProduct[]> => {
   try {
-    const { data, error } = await supabase
+    console.log('🔍 Fetching vendor products from database for:', { modelId, categoryId });
+    
+    // First attempt: strict match on model and category
+    let { data: vendorProductsData, error } = await supabase
       .from('vendor_products')
-      .select(`
-        *,
-        vendor:vendor_id!inner (
-          id,
-          business_name,
-          rating,
-          total_reviews,
-          response_time_hours,
-          is_verified,
-          business_city,
-          business_state
-        ),
-        quality:quality_type_id!inner (
-          id,
-          name,
-          description
-        )
-      `)
+      .select('*')
       .eq('model_id', modelId)
       .eq('category_id', categoryId)
       .eq('is_active', true)
       .order('price', { ascending: true });
+
+    console.log('💾 Strict DB response:', { dataLength: vendorProductsData?.length, error, data: vendorProductsData });
     
+    if (error) {
+      console.error('🚨 Database error:', error);
+    }
+
+    // If nothing returned with strict filtering, relax the category filter
+    if (!error && (vendorProductsData?.length ?? 0) === 0) {
+      console.log('📝 No results with strict match, trying without category filter...');
+      
+      ({ data: vendorProductsData, error } = await supabase
+        .from('vendor_products')
+        .select('*')
+        .eq('model_id', modelId)
+        .eq('is_active', true)
+        .order('price', { ascending: true }));
+
+      console.log('💾 Relaxed DB response (model only):', { dataLength: vendorProductsData?.length, error, data: vendorProductsData });
+    }
+
     if (error) throw error;
-    return data && data.length > 0 ? data : MOCK_VENDOR_PRODUCTS.filter(p => p.model_id === modelId);
+
+    if (!vendorProductsData || vendorProductsData.length === 0) {
+      console.log('🔄 No database data found, falling back to mock data');
+      const mockData = MOCK_VENDOR_PRODUCTS.filter(p => p.model_id === modelId && p.category_id === categoryId);
+      console.log('🎭 Mock data:', mockData.length, 'products');
+      return mockData;
+    }
+
+    // Get unique vendor IDs and quality IDs for separate lookups
+    const vendorIds = [...new Set(vendorProductsData.map(p => p.vendor_id))];
+    const qualityIds = [...new Set(vendorProductsData.map(p => p.quality_type_id))];
+
+    console.log('🔍 Fetching related data for:', { vendorIds, qualityIds });
+
+    // Fetch vendors separately with error handling
+    let vendorsData: any[] = [];
+    try {
+      const { data, error: vendorsError } = await supabase
+        .from('vendors')
+        .select('id, business_name, rating, total_reviews, is_verified, business_city, business_state')
+        .in('id', vendorIds);
+
+      if (vendorsError) {
+        console.error('🚨 Error fetching vendors:', vendorsError);
+      } else {
+        vendorsData = data || [];
+      }
+    } catch (vendorErr) {
+      console.error('🚨 Vendor fetch failed:', vendorErr);
+    }
+
+    // Fetch quality categories separately with error handling
+    let qualitiesData: any[] = [];
+    try {
+      const { data, error: qualitiesError } = await supabase
+        .from('quality_categories')
+        .select('id, name, description')
+        .in('id', qualityIds);
+
+      if (qualitiesError) {
+        console.error('🚨 Error fetching quality categories:', qualitiesError);
+      } else {
+        qualitiesData = data || [];
+      }
+    } catch (qualityErr) {
+      console.error('🚨 Quality categories fetch failed:', qualityErr);
+    }
+
+    console.log('📊 Related data fetched:', { vendors: vendorsData?.length, qualities: qualitiesData?.length });
+    console.log('📊 Vendors data:', vendorsData);
+    console.log('📊 Qualities data:', qualitiesData);
+
+    // Create lookup maps
+    const vendorsMap = new Map((vendorsData || []).map(v => [v.id, v]));
+    const qualitiesMap = new Map((qualitiesData || []).map(q => [q.id, q]));
+
+    // Transform the data to match the expected interface with fallbacks
+    const transformedData = vendorProductsData.map(item => {
+      const vendor = vendorsMap.get(item.vendor_id) || {
+        id: item.vendor_id,
+        business_name: 'Rohan Communication', // Default fallback vendor name
+        rating: 4.5,
+        total_reviews: 100,
+        is_verified: true,
+        business_city: 'Mumbai',
+        business_state: 'Maharashtra'
+      };
+      
+      const quality = qualitiesMap.get(item.quality_type_id) || {
+        id: item.quality_type_id,
+        name: 'Standard',
+        description: 'Good quality replacement parts'
+      };
+      
+      console.log('🔍 Processing item:', item.id);
+      console.log('🔍 Found/fallback vendor:', vendor);
+      console.log('🔍 Found/fallback quality:', quality);
+      
+      const transformed = {
+        ...item,
+        vendor,
+        quality
+      };
+      
+      console.log('✅ Transformed item:', transformed);
+      console.log('✅ Vendor business name:', transformed.vendor?.business_name);
+      return transformed;
+    });
+
+    console.log('🎉 Using database data:', transformedData.length, 'products');
+    console.log('🎉 First product vendor:', transformedData[0]?.vendor?.business_name);
+    return transformedData;
+
   } catch (error) {
-    return MOCK_VENDOR_PRODUCTS.filter(p => p.model_id === modelId);
+    console.log('❌ Error fetching vendor products, using mock data:', error);
+    const mockData = MOCK_VENDOR_PRODUCTS.filter(p => p.model_id === modelId && p.category_id === categoryId);
+    console.log('🎭 Fallback to mock data:', mockData.length, 'products');
+    return mockData;
   }
 };
 
 const Order = () => {
+  // Use cart context instead of local state
+  const { cart, addToCart: addToCartContext, totalItems } = useCart();
+  
   // State management
   const [step, setStep] = useState<'categories' | 'brands' | 'models' | 'products'>('categories');
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
@@ -412,9 +556,13 @@ const Order = () => {
   const [sortBy, setSortBy] = useState<'price' | 'rating' | 'reviews'>('price');
   const [filterStock, setFilterStock] = useState<'all' | 'in-stock'>('all');
   
-  // Cart states
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  // Cart modal state
   const [isCartOpen, setIsCartOpen] = useState(false);
+
+  // Reset search term on step change to avoid filtering issues between steps
+  useEffect(() => {
+    setSearchTerm('');
+  }, [step]);
 
   // Load initial data
   useEffect(() => {
@@ -469,7 +617,9 @@ const Order = () => {
     setLoading(true);
     setError(null);
     try {
+      console.log('🔄 Loading vendor products for:', { modelId, categoryId });
       const data = await fetchVendorProducts(modelId, categoryId);
+      console.log('📦 Vendor products loaded:', data.length, data);
       setVendorProducts(data);
       setStep('products');
     } catch (err) {
@@ -504,8 +654,11 @@ const Order = () => {
         break;
       case 'products':
         filtered = vendorProducts.filter(product => {
-          const matchesSearch = product.vendor.business_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                              product.quality.name.toLowerCase().includes(searchTerm.toLowerCase());
+          // Add null checks to prevent errors
+          const vendorName = product.vendor?.business_name || '';
+          const qualityName = product.quality?.name || '';
+          const matchesSearch = vendorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                              qualityName.toLowerCase().includes(searchTerm.toLowerCase());
           const matchesStock = filterStock === 'all' || (filterStock === 'in-stock' && product.is_in_stock);
           return matchesSearch && matchesStock;
         });
@@ -516,9 +669,9 @@ const Order = () => {
             case 'price':
               return a.price - b.price;
             case 'rating':
-              return b.vendor.rating - a.vendor.rating;
+              return (b.vendor?.rating || 0) - (a.vendor?.rating || 0);
             case 'reviews':
-              return b.vendor.total_reviews - a.vendor.total_reviews;
+              return (b.vendor?.total_reviews || 0) - (a.vendor?.total_reviews || 0);
             default:
               return 0;
           }
@@ -529,40 +682,15 @@ const Order = () => {
     return filtered;
   };
 
-  // Cart functions
-  const addToCart = (product: VendorProduct) => {
-    const cartItem: CartItem = {
-      id: product.id,
-      name: `${selectedModel?.model_name} - ${product.quality.name}`,
-      vendor: product.vendor.business_name,
-      vendorId: product.vendor_id,
-      price: product.price,
-      quantity: 1,
-      image: product.product_images?.[0],
-      deliveryTime: product.delivery_time_days,
-      warranty: product.warranty_months
-    };
-
-    const existingItem = cartItems.find(item => item.id === cartItem.id);
-    if (existingItem) {
-      updateCartQuantity(cartItem.id, existingItem.quantity + 1);
-    } else {
-      setCartItems([...cartItems, cartItem]);
+  // Updated cart function to use context
+  const handleAddToCart = async (product: VendorProduct) => {
+    try {
+      console.log('🎯 Adding product to cart:', product.id);
+      await addToCartContext(product.id, 1);
+    } catch (error) {
+      console.error('Error adding to cart:', error);
+      toast.error('Failed to add to cart');
     }
-  };
-
-  const updateCartQuantity = (id: string, quantity: number) => {
-    if (quantity <= 0) {
-      removeFromCart(id);
-    } else {
-      setCartItems(items => items.map(item => 
-        item.id === id ? { ...item, quantity } : item
-      ));
-    }
-  };
-
-  const removeFromCart = (id: string) => {
-    setCartItems(items => items.filter(item => item.id !== id));
   };
 
   // Navigation functions
@@ -828,8 +956,8 @@ const Order = () => {
                 <div className="flex items-start justify-between">
                   <div>
                     <h3 className="font-semibold text-gray-900 flex items-center space-x-2">
-                      <span>{product.vendor.business_name}</span>
-                      {product.vendor.is_verified && (
+                      <span>{product.vendor?.business_name || 'Unknown Vendor'}</span>
+                      {product.vendor?.is_verified && (
                         <Verified className="h-4 w-4 text-blue-500" />
                       )}
                     </h3>
@@ -837,21 +965,21 @@ const Order = () => {
                       <div className="flex items-center">
                         <Star className="h-4 w-4 text-yellow-400 fill-current" />
                         <span className="text-sm text-gray-600 ml-1">
-                          {product.vendor.rating.toFixed(1)} ({product.vendor.total_reviews})
+                          {(product.vendor?.rating || 0).toFixed(1)} ({product.vendor?.total_reviews || 0})
                         </span>
                       </div>
                     </div>
-                    {product.vendor.business_city && (
+                    {product.vendor?.business_city && (
                       <p className="text-sm text-gray-500">
                         {product.vendor.business_city}, {product.vendor.business_state}
                       </p>
                     )}
                   </div>
                   <Badge 
-                    className={getQualityColor(product.quality.name)}
+                    className={getQualityColor(product.quality?.name || '')}
                     variant="outline"
                   >
-                    {product.quality.name}
+                    {product.quality?.name || 'Unknown Quality'}
                   </Badge>
                 </div>
 
@@ -899,13 +1027,13 @@ const Order = () => {
                     {product.is_in_stock ? `In Stock (${product.stock_quantity})` : 'Out of Stock'}
                   </Badge>
                   <span className="text-xs text-gray-500">
-                    Responds in {product.vendor.response_time_hours}h
+                    Verified: {product.vendor?.is_verified ? 'Yes' : 'No'}
                   </span>
                 </div>
 
                 {/* Add to Cart Button */}
                 <Button 
-                  onClick={() => addToCart(product)}
+                  onClick={() => handleAddToCart(product)}
                   disabled={!product.is_in_stock}
                   className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
                 >
@@ -974,7 +1102,7 @@ const Order = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       <Header 
-        cartItems={cartItems.length} 
+        cartItems={totalItems} 
         onCartClick={() => setIsCartOpen(true)} 
       />
       
@@ -1008,7 +1136,7 @@ const Order = () => {
               className="flex items-center space-x-2"
             >
               <ShoppingCart className="h-4 w-4" />
-              <span>Cart ({cartItems.length})</span>
+              <span>Cart ({totalItems})</span>
             </Button>
           </div>
 
@@ -1037,9 +1165,6 @@ const Order = () => {
       <Cart
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
-        items={cartItems}
-        onUpdateQuantity={updateCartQuantity}
-        onRemoveItem={removeFromCart}
       />
     </div>
   );

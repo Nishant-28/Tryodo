@@ -467,85 +467,441 @@ export interface Database {
           updated_at?: string;
         };
       };
-      // Add delivery tables here based on the provided example and existing patterns
-      delivery_boys: {
+      customers: {
         Row: {
           id: string;
-          name: string;
-          phone: string;
-          email: string;
-          assigned_pincodes: string[];
-          status: 'active' | 'inactive' | 'busy' | 'offline';
-          current_location: {
-            lat: number;
-            lng: number;
-            address: string;
-            timestamp: string;
-          };
-          vehicle_type: string;
-          vehicle_number: string;
-          created_at: string; // Added for consistency with other tables
-          updated_at: string; // Added for consistency with other tables
+          profile_id: string;
+          date_of_birth: string | null;
+          gender: string | null;
+          total_orders: number;
+          total_spent: number;
+          last_order_date: string | null;
+          preferred_delivery_address: any | null;
+          created_at: string;
+          updated_at: string;
         };
         Insert: {
           id?: string;
-          name: string;
-          phone: string;
-          email: string;
-          assigned_pincodes?: string[] | null; // Made nullable for insert/update
-          status?: 'active' | 'inactive' | 'busy' | 'offline';
-          current_location?: {
-            lat: number;
-            lng: number;
-            address: string;
-            timestamp: string;
-          } | null; // Made nullable for insert/update
-          vehicle_type: string;
-          vehicle_number: string;
+          profile_id: string;
+          date_of_birth?: string | null;
+          gender?: string | null;
+          total_orders?: number;
+          total_spent?: number;
+          last_order_date?: string | null;
+          preferred_delivery_address?: any | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           id?: string;
-          name?: string;
-          phone?: string;
-          email?: string;
-          assigned_pincodes?: string[] | null;
-          status?: 'active' | 'inactive' | 'busy' | 'offline';
-          current_location?: {
-            lat: number;
-            lng: number;
-            address: string;
-            timestamp: string;
-          } | null;
-          vehicle_type?: string;
-          vehicle_number?: string;
+          profile_id?: string;
+          date_of_birth?: string | null;
+          gender?: string | null;
+          total_orders?: number;
+          total_spent?: number;
+          last_order_date?: string | null;
+          preferred_delivery_address?: any | null;
           created_at?: string;
           updated_at?: string;
         };
       };
-      delivery_assignments: {
+      delivery_partners: {
         Row: {
           id: string;
-          delivery_boy_id: string;
-          order_ids: string[];
-          status: string;
-          created_at: string; // Added for consistency with other tables
-          updated_at: string; // Added for consistency with other tables
+          profile_id: string;
+          license_number: string;
+          vehicle_type: string;
+          vehicle_number: string;
+          aadhar_number: string;
+          pan_number: string | null;
+          bank_account_number: string | null;
+          bank_ifsc_code: string | null;
+          emergency_contact_name: string | null;
+          emergency_contact_phone: string | null;
+          current_latitude: number | null;
+          current_longitude: number | null;
+          assigned_pincodes: string[];
+          is_available: boolean;
+          is_active: boolean;
+          is_verified: boolean;
+          rating: number;
+          total_reviews: number;
+          total_deliveries: number;
+          successful_deliveries: number;
+          cancelled_deliveries: number;
+          average_delivery_time_minutes: number;
+          joined_at: string;
+          last_location_update: string | null;
+          created_at: string;
+          updated_at: string;
         };
         Insert: {
           id?: string;
-          delivery_boy_id: string;
-          order_ids?: string[] | null; // Made nullable for insert/update
-          status?: string;
+          profile_id: string;
+          license_number: string;
+          vehicle_type: string;
+          vehicle_number: string;
+          aadhar_number: string;
+          pan_number?: string | null;
+          bank_account_number?: string | null;
+          bank_ifsc_code?: string | null;
+          emergency_contact_name?: string | null;
+          emergency_contact_phone?: string | null;
+          current_latitude?: number | null;
+          current_longitude?: number | null;
+          assigned_pincodes?: string[];
+          is_available?: boolean;
+          is_active?: boolean;
+          is_verified?: boolean;
+          rating?: number;
+          total_reviews?: number;
+          total_deliveries?: number;
+          successful_deliveries?: number;
+          cancelled_deliveries?: number;
+          average_delivery_time_minutes?: number;
+          joined_at?: string;
+          last_location_update?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           id?: string;
-          delivery_boy_id?: string;
-          order_ids?: string[] | null;
+          profile_id?: string;
+          license_number?: string;
+          vehicle_type?: string;
+          vehicle_number?: string;
+          aadhar_number?: string;
+          pan_number?: string | null;
+          bank_account_number?: string | null;
+          bank_ifsc_code?: string | null;
+          emergency_contact_name?: string | null;
+          emergency_contact_phone?: string | null;
+          current_latitude?: number | null;
+          current_longitude?: number | null;
+          assigned_pincodes?: string[];
+          is_available?: boolean;
+          is_active?: boolean;
+          is_verified?: boolean;
+          rating?: number;
+          total_reviews?: number;
+          total_deliveries?: number;
+          successful_deliveries?: number;
+          cancelled_deliveries?: number;
+          average_delivery_time_minutes?: number;
+          joined_at?: string;
+          last_location_update?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      orders: {
+        Row: {
+          id: string;
+          order_number: string;
+          customer_id: string;
+          delivery_address: any;
+          subtotal: number;
+          shipping_charges: number;
+          tax_amount: number;
+          discount_amount: number;
+          total_amount: number;
+          order_status: string;
+          payment_status: string;
+          payment_method: string | null;
+          payment_id: string | null;
+          estimated_delivery_date: string | null;
+          actual_delivery_date: string | null;
+          delivery_instructions: string | null;
+          preferred_delivery_time: string | null;
+          delivery_attempts: number;
+          last_delivery_attempt: string | null;
+          special_instructions: string | null;
+          notes: string | null;
+          cancelled_date: string | null;
+          cancellation_reason: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          order_number?: string;
+          customer_id: string;
+          delivery_address: any;
+          subtotal: number;
+          shipping_charges?: number;
+          tax_amount?: number;
+          discount_amount?: number;
+          total_amount: number;
+          order_status?: string;
+          payment_status?: string;
+          payment_method?: string | null;
+          payment_id?: string | null;
+          estimated_delivery_date?: string | null;
+          actual_delivery_date?: string | null;
+          delivery_instructions?: string | null;
+          preferred_delivery_time?: string | null;
+          delivery_attempts?: number;
+          last_delivery_attempt?: string | null;
+          special_instructions?: string | null;
+          notes?: string | null;
+          cancelled_date?: string | null;
+          cancellation_reason?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          order_number?: string;
+          customer_id?: string;
+          delivery_address?: any;
+          subtotal?: number;
+          shipping_charges?: number;
+          tax_amount?: number;
+          discount_amount?: number;
+          total_amount?: number;
+          order_status?: string;
+          payment_status?: string;
+          payment_method?: string | null;
+          payment_id?: string | null;
+          estimated_delivery_date?: string | null;
+          actual_delivery_date?: string | null;
+          delivery_instructions?: string | null;
+          preferred_delivery_time?: string | null;
+          delivery_attempts?: number;
+          last_delivery_attempt?: string | null;
+          special_instructions?: string | null;
+          notes?: string | null;
+          cancelled_date?: string | null;
+          cancellation_reason?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      order_items: {
+        Row: {
+          id: string;
+          order_id: string;
+          vendor_id: string;
+          vendor_product_id: string | null;
+          vendor_generic_product_id: string | null;
+          product_name: string;
+          product_description: string | null;
+          category_name: string | null;
+          quality_type_name: string | null;
+          unit_price: number;
+          quantity: number;
+          line_total: number;
+          item_status: string;
+          vendor_confirmed_at: string | null;
+          vendor_notes: string | null;
+          picked_up_at: string | null;
+          pickup_confirmed_by: string | null;
+          warranty_months: number;
+          estimated_delivery_days: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          order_id: string;
+          vendor_id: string;
+          vendor_product_id?: string | null;
+          vendor_generic_product_id?: string | null;
+          product_name: string;
+          product_description?: string | null;
+          category_name?: string | null;
+          quality_type_name?: string | null;
+          unit_price: number;
+          quantity?: number;
+          item_status?: string;
+          vendor_confirmed_at?: string | null;
+          vendor_notes?: string | null;
+          picked_up_at?: string | null;
+          pickup_confirmed_by?: string | null;
+          warranty_months?: number;
+          estimated_delivery_days?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          order_id?: string;
+          vendor_id?: string;
+          vendor_product_id?: string | null;
+          vendor_generic_product_id?: string | null;
+          product_name?: string;
+          product_description?: string | null;
+          category_name?: string | null;
+          quality_type_name?: string | null;
+          unit_price?: number;
+          quantity?: number;
+          item_status?: string;
+          vendor_confirmed_at?: string | null;
+          vendor_notes?: string | null;
+          picked_up_at?: string | null;
+          pickup_confirmed_by?: string | null;
+          warranty_months?: number;
+          estimated_delivery_days?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      delivery_partner_orders: {
+        Row: {
+          id: string;
+          order_id: string;
+          delivery_partner_id: string;
+          status: string;
+          pickup_otp: string;
+          delivery_otp: string;
+          pickup_otp_verified: boolean;
+          delivery_otp_verified: boolean;
+          pickup_otp_verified_at: string | null;
+          delivery_otp_verified_at: string | null;
+          assigned_at: string;
+          accepted_at: string | null;
+          pickup_started_at: string | null;
+          picked_up_at: string | null;
+          delivery_started_at: string | null;
+          delivered_at: string | null;
+          cancelled_at: string | null;
+          failed_at: string | null;
+          cancellation_reason: string | null;
+          failure_reason: string | null;
+          delivery_fee: number;
+          distance_km: number | null;
+          estimated_delivery_time_minutes: number | null;
+          actual_delivery_time_minutes: number | null;
+          pickup_location: any | null;
+          delivery_location: any | null;
+          current_location: any | null;
+          pickup_instructions: string | null;
+          delivery_instructions: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          order_id: string;
+          delivery_partner_id: string;
           status?: string;
+          pickup_otp?: string;
+          delivery_otp?: string;
+          pickup_otp_verified?: boolean;
+          delivery_otp_verified?: boolean;
+          pickup_otp_verified_at?: string | null;
+          delivery_otp_verified_at?: string | null;
+          assigned_at?: string;
+          accepted_at?: string | null;
+          pickup_started_at?: string | null;
+          picked_up_at?: string | null;
+          delivery_started_at?: string | null;
+          delivered_at?: string | null;
+          cancelled_at?: string | null;
+          failed_at?: string | null;
+          cancellation_reason?: string | null;
+          failure_reason?: string | null;
+          delivery_fee?: number;
+          distance_km?: number | null;
+          estimated_delivery_time_minutes?: number | null;
+          actual_delivery_time_minutes?: number | null;
+          pickup_location?: any | null;
+          delivery_location?: any | null;
+          current_location?: any | null;
+          pickup_instructions?: string | null;
+          delivery_instructions?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          order_id?: string;
+          delivery_partner_id?: string;
+          status?: string;
+          pickup_otp?: string;
+          delivery_otp?: string;
+          pickup_otp_verified?: boolean;
+          delivery_otp_verified?: boolean;
+          pickup_otp_verified_at?: string | null;
+          delivery_otp_verified_at?: string | null;
+          assigned_at?: string;
+          accepted_at?: string | null;
+          pickup_started_at?: string | null;
+          picked_up_at?: string | null;
+          delivery_started_at?: string | null;
+          delivered_at?: string | null;
+          cancelled_at?: string | null;
+          failed_at?: string | null;
+          cancellation_reason?: string | null;
+          failure_reason?: string | null;
+          delivery_fee?: number;
+          distance_km?: number | null;
+          estimated_delivery_time_minutes?: number | null;
+          actual_delivery_time_minutes?: number | null;
+          pickup_location?: any | null;
+          delivery_location?: any | null;
+          current_location?: any | null;
+          pickup_instructions?: string | null;
+          delivery_instructions?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      delivery_partner_stats: {
+        Row: {
+          id: string;
+          delivery_partner_id: string;
+          today_deliveries: number;
+          week_deliveries: number;
+          month_deliveries: number;
+          total_deliveries: number;
+          today_earnings: number;
+          week_earnings: number;
+          month_earnings: number;
+          total_earnings: number;
+          average_rating: number;
+          active_orders: number;
+          last_delivery_at: string | null;
+          stats_date: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          delivery_partner_id: string;
+          today_deliveries?: number;
+          week_deliveries?: number;
+          month_deliveries?: number;
+          total_deliveries?: number;
+          today_earnings?: number;
+          week_earnings?: number;
+          month_earnings?: number;
+          total_earnings?: number;
+          average_rating?: number;
+          active_orders?: number;
+          last_delivery_at?: string | null;
+          stats_date?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          delivery_partner_id?: string;
+          today_deliveries?: number;
+          week_deliveries?: number;
+          month_deliveries?: number;
+          total_deliveries?: number;
+          today_earnings?: number;
+          week_earnings?: number;
+          month_earnings?: number;
+          total_earnings?: number;
+          average_rating?: number;
+          active_orders?: number;
+          last_delivery_at?: string | null;
+          stats_date?: string;
           created_at?: string;
           updated_at?: string;
         };
@@ -680,12 +1036,168 @@ export const debugAuthState = async () => {
 export const testDbConnection = async () => {
   console.log('🔍 Testing database connection...');
   try {
-    const { data, error } = await supabase.from('profiles').select('count').limit(1);
-    console.log('✅ Database connection test result:', { data, error });
-    return { success: !error, data, error };
+    // Test connection using auth endpoint which is always accessible
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    
+    if (sessionError) {
+      console.log('❌ Auth session error:', sessionError.message);
+      return { success: false, error: `Auth error: ${sessionError.message}` };
+    }
+    
+    // Try a simple database query to test connectivity
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('count(*)')
+      .limit(1);
+    
+    console.log('✅ Database connection test result:', { 
+      success: !error, 
+      hasSession: !!session,
+      error: error?.message 
+    });
+    
+    if (error) {
+      // Check if it's an RLS error, which actually means connection is working
+      if (error.code === 'PGRST301' || error.message.includes('row-level security')) {
+        return { 
+          success: true, 
+          message: 'Database connected (RLS active - this is normal)' 
+        };
+      }
+      return { success: false, error: error.message };
+    }
+    
+    return { 
+      success: true, 
+      message: 'Database connection successful',
+      hasSession: !!session 
+    };
   } catch (err) {
     console.error('❌ Database connection test failed:', err);
-    return { success: false, error: err };
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+};
+
+// Debug auth issues
+export const debugAuthIssues = async () => {
+  console.log('🔧 Starting comprehensive auth debug...');
+  
+  try {
+    // 1. Test basic connectivity
+    const dbTest = await testDbConnection();
+    console.log('1️⃣ Database Test:', dbTest);
+    
+    // 2. Check current session
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    console.log('2️⃣ Current Session:', { 
+      hasSession: !!session, 
+      error: sessionError?.message,
+      userId: session?.user?.id 
+    });
+    
+    // 3. If logged in, check profile
+    if (session?.user) {
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .single();
+      
+      console.log('3️⃣ Profile Check:', { 
+        hasProfile: !!profileData,
+        profileData: profileData,
+        error: profileError?.message 
+      });
+      
+      // 4. Check role-specific records if profile exists
+      if (profileData) {
+        let roleRecordExists = false;
+        let roleRecordError = null;
+        
+        try {
+          switch (profileData.role) {
+            case 'customer':
+              const { data: customerData } = await supabase
+                .from('customers')
+                .select('id')
+                .eq('profile_id', profileData.id)
+                .single();
+              roleRecordExists = !!customerData;
+              break;
+            case 'vendor':
+              const { data: vendorData } = await supabase
+                .from('vendors')
+                .select('id')
+                .eq('profile_id', profileData.id)
+                .single();
+              roleRecordExists = !!vendorData;
+              break;
+            case 'delivery_partner':
+              const { data: deliveryData } = await supabase
+                .from('delivery_partners')
+                .select('id')
+                .eq('profile_id', profileData.id)
+                .single();
+              roleRecordExists = !!deliveryData;
+              break;
+            default:
+              roleRecordExists = true; // Admin doesn't need role-specific records
+          }
+        } catch (err: any) {
+          roleRecordError = err.message;
+        }
+        
+        console.log('4️⃣ Role Record Check:', { 
+          role: profileData.role,
+          roleRecordExists,
+          error: roleRecordError 
+        });
+      }
+    }
+    
+    return { success: true, message: 'Debug completed - check console for details' };
+    
+  } catch (error) {
+    console.error('❌ Debug failed:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+};
+
+// Create a test account for debugging
+export const createDebugAccount = async (role: 'customer' | 'vendor' | 'delivery_partner' = 'customer') => {
+  console.log('🧪 Creating debug account with role:', role);
+  
+  const testEmail = `debug-${role}-${Date.now()}@tryodo.test`;
+  const testPassword = 'debug123456';
+  
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email: testEmail,
+      password: testPassword,
+      options: {
+        data: {
+          full_name: `Debug ${role.charAt(0).toUpperCase() + role.slice(1)}`,
+          role: role,
+        }
+      }
+    });
+    
+    if (error) {
+      console.error('❌ Debug account creation failed:', error);
+      return { success: false, error: error.message };
+    }
+    
+    console.log('✅ Debug account created:', testEmail);
+    return { 
+      success: true, 
+      email: testEmail, 
+      password: testPassword,
+      user: data.user 
+    };
+    
+  } catch (error) {
+    console.error('❌ Debug account creation failed:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 };
 
@@ -695,6 +1207,8 @@ if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
   window.clearAuthStorage = clearAuthStorage;
   window.forceAuthReset = forceAuthReset;
   (window as any).testDbConnection = testDbConnection;
+  (window as any).debugAuthIssues = debugAuthIssues;
+  (window as any).createDebugAccount = createDebugAccount;
 }
 
 // Type definitions for delivery tables

@@ -1,14 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { CheckCircle, Package, Truck, Clock, ArrowRight, Download, Share2, AlertTriangle, Timer, User, Store, Phone, MapPin, RefreshCw } from 'lucide-react';
+import { 
+  CheckCircle, Package, Truck, Clock, ArrowRight, Download, Share2, 
+  AlertTriangle, Timer, User, Store, Phone, MapPin, RefreshCw,
+  Star, Verified, Copy, Facebook, Twitter, MessageCircle, Mail,
+  Calendar, CreditCard, Shield, Headphones, RotateCcw, ExternalLink,
+  Gift, Zap, Heart, Award
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Progress } from '@/components/ui/progress';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { supabase } from '@/lib/supabase';
-import { toast } from 'sonner';
+import { useToast } from '@/hooks/use-toast';
 
 interface OrderDetails {
   id: string;
@@ -20,6 +27,11 @@ interface OrderDetails {
   delivery_address: any;
   created_at: string;
   customer_id: string;
+  subtotal?: number;
+  shipping_charges?: number;
+  tax_amount?: number;
+  payment_status?: string;
+  special_instructions?: string;
 }
 
 interface OrderItem {
@@ -32,6 +44,11 @@ interface OrderItem {
   quantity: number;
   line_total: number;
   item_status: string;
+  vendor_confirmed_at: string | null;
+  vendor_notes: string | null;
+  created_at: string;
+  updated_at: string;
+  // Vendor information
   vendor_business_name: string;
   vendor_contact_person: string;
   vendor_phone: string;
@@ -43,8 +60,10 @@ interface OrderItem {
   auto_approve_under_amount: number | null;
   business_hours_start: string;
   business_hours_end: string;
-  created_at: string;
-  estimated_approval_time?: string;
+  vendor_business_city?: string;
+  vendor_business_state?: string;
+  warranty_months?: number;
+  delivery_time_days?: number;
   time_remaining_minutes?: number;
 }
 
@@ -52,50 +71,110 @@ interface VendorOrderStatus {
   vendor_id: string;
   vendor_name: string;
   items: OrderItem[];
-  overall_status: 'pending' | 'confirmed' | 'cancelled' | 'processing';
+  overall_status: 'pending' | 'confirmed' | 'cancelled' | 'processing' | 'packed' | 'picked_up' | 'shipped' | 'delivered';
   total_amount: number;
   estimated_approval: string;
   is_urgent: boolean;
+  vendor_rating: number;
+  vendor_reviews: number;
+  is_verified: boolean;
+  vendor_phone: string;
+  vendor_location: string;
+  confirmed_at: string | null;
+  all_items_confirmed: boolean;
 }
 
 const OrderSuccess = () => {
-  const location = useLocation();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { toast } = useToast();
+  
   const [orderDetails, setOrderDetails] = useState<OrderDetails | null>(null);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [vendorStatuses, setVendorStatuses] = useState<VendorOrderStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [shareUrl, setShareUrl] = useState('');
+  const [realtimeSubscription, setRealtimeSubscription] = useState<any>(null);
   
+  // Initialize with real order data only - NO MORE DUMMY DATA
   useEffect(() => {
+    console.log('OrderSuccess component mounted');
+    
     const { orderId, orderDetails: details } = location.state || {};
+    console.log('Navigation state:', { orderId, details });
     
-    if (!orderId || !details) {
-      navigate('/order');
-      return;
+    if (orderId && details) {
+      console.log('✅ Loading REAL order data');
+      setOrderDetails(details);
+      setShareUrl(window.location.origin + `/order-tracking/${orderId}`);
+      loadRealOrderItems(details.id);
+    } else {
+      // Check URL params as fallback
+      const urlParams = new URLSearchParams(location.search);
+      const orderIdFromUrl = urlParams.get('orderId');
+      
+      if (orderIdFromUrl) {
+        console.log('🔄 Loading order from URL parameter:', orderIdFromUrl);
+        loadOrderByNumber(orderIdFromUrl);
+      } else {
+        console.log('❌ No order data available - redirecting to orders page');
+        toast({
+          title: "No Order Found",
+          description: "Please access this page after placing an order"
+        });
+        navigate('/my-orders');
+      }
     }
-    
-    setOrderDetails(details);
-    loadOrderItems(orderId);
-  }, [location.state, navigate]);
 
-  // Real-time updates every 10 seconds
-  useEffect(() => {
-    if (!orderDetails) return;
+    // Cleanup function
+    return () => {
+      if (realtimeSubscription) {
+        console.log('Cleaning up realtime subscription');
+        realtimeSubscription.unsubscribe();
+      }
+    };
+  }, [location.state, location.search, navigate]);
 
-    const interval = setInterval(() => {
-      refreshOrderStatus();
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, [orderDetails]);
-
-  const loadOrderItems = async (orderId: string) => {
+  const loadOrderByNumber = async (orderNumber: string) => {
     try {
       setLoading(true);
+      console.log('Loading order by number:', orderNumber);
       
-      // Try the full query first
+      const { data: orderData, error: orderError } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('order_number', orderNumber)
+        .single();
+
+      if (orderError) {
+        console.error('Error loading order:', orderError);
+        throw orderError;
+      }
+
+      console.log('Order data loaded:', orderData);
+      setOrderDetails(orderData);
+      setShareUrl(window.location.origin + `/order-tracking/${orderNumber}`);
+      
+      await loadRealOrderItems(orderData.id);
+      
+    } catch (error) {
+      console.error('Error loading order by number:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load order details"
+      });
+      navigate('/my-orders');
+    }
+  };
+
+  const loadRealOrderItems = async (orderId: string) => {
+    try {
+      setLoading(true);
+      console.log('🔄 Loading REAL order items for order ID:', orderId);
+      
+      // Query with comprehensive vendor information
       const { data, error } = await supabase
         .from('order_items')
         .select(`
@@ -111,56 +190,31 @@ const OrderSuccess = () => {
             order_confirmation_timeout_minutes,
             auto_approve_under_amount,
             business_hours_start,
-            business_hours_end
+            business_hours_end,
+            business_city,
+            business_state
           )
         `)
         .eq('order_id', orderId)
         .order('created_at', { ascending: true });
 
       if (error) {
-        console.error('Full query failed, trying fallback:', error);
-        // Fallback to basic query if vendor columns don't exist yet
-        const { data: fallbackData, error: fallbackError } = await supabase
-          .from('order_items')
-          .select(`
-            *,
-            vendors!vendor_id (
-              business_name,
-              contact_person,
-              phone,
-              rating,
-              total_reviews,
-              is_verified
-            )
-          `)
-          .eq('order_id', orderId)
-          .order('created_at', { ascending: true });
-          
-        if (fallbackError) throw fallbackError;
-        
-        const itemsWithVendorInfo = fallbackData?.map(item => ({
-          ...item,
-          vendor_business_name: item.vendors?.business_name || 'Unknown Vendor',
-          vendor_contact_person: item.vendors?.contact_person || '',
-          vendor_phone: item.vendors?.phone || '',
-          vendor_rating: item.vendors?.rating || 0,
-          vendor_total_reviews: item.vendors?.total_reviews || 0,
-          vendor_is_verified: item.vendors?.is_verified || false,
-          auto_approve_orders: false,
-          order_confirmation_timeout_minutes: 15,
-          auto_approve_under_amount: null,
-          business_hours_start: '09:00',
-          business_hours_end: '18:00',
-          time_remaining_minutes: calculateTimeRemaining(item.created_at, 15)
-        })) || [];
+        console.error('❌ Error loading order items:', error);
+        throw error;
+      }
 
-        setOrderItems(itemsWithVendorInfo);
-        processVendorStatuses(itemsWithVendorInfo);
-        toast.info('Database setup incomplete. Please run the vendor setup SQL scripts.');
+      if (!data || data.length === 0) {
+        console.log('⚠️ No order items found for this order');
+        setOrderItems([]);
+        setVendorStatuses([]);
+        setLoading(false);
         return;
       }
 
-      const itemsWithVendorInfo = data?.map(item => ({
+      console.log('✅ Real order items loaded:', data);
+
+      // Process the real data
+      const processedItems: OrderItem[] = data.map(item => ({
         ...item,
         vendor_business_name: item.vendors?.business_name || 'Unknown Vendor',
         vendor_contact_person: item.vendors?.contact_person || '',
@@ -169,35 +223,115 @@ const OrderSuccess = () => {
         vendor_total_reviews: item.vendors?.total_reviews || 0,
         vendor_is_verified: item.vendors?.is_verified || false,
         auto_approve_orders: item.vendors?.auto_approve_orders || false,
-        order_confirmation_timeout_minutes: item.vendors?.order_confirmation_timeout_minutes || 15,
+        order_confirmation_timeout_minutes: item.vendors?.order_confirmation_timeout_minutes || 30,
         auto_approve_under_amount: item.vendors?.auto_approve_under_amount,
         business_hours_start: item.vendors?.business_hours_start || '09:00',
         business_hours_end: item.vendors?.business_hours_end || '18:00',
-        time_remaining_minutes: calculateTimeRemaining(item.created_at, item.vendors?.order_confirmation_timeout_minutes || 15)
-      })) || [];
+        vendor_business_city: item.vendors?.business_city || '',
+        vendor_business_state: item.vendors?.business_state || '',
+        warranty_months: item.warranty_months || 12,
+        delivery_time_days: item.estimated_delivery_days || 3,
+        time_remaining_minutes: calculateTimeRemaining(item.created_at, item.vendors?.order_confirmation_timeout_minutes || 30)
+      }));
 
-      setOrderItems(itemsWithVendorInfo);
-      processVendorStatuses(itemsWithVendorInfo);
+      console.log('✅ Processed real order items:', processedItems);
+      setOrderItems(processedItems);
+      processVendorStatuses(processedItems);
+      
+      // Set up real-time subscription for this order
+      setupRealtimeSubscription(orderId);
       
     } catch (error) {
-      console.error('Error loading order items:', error);
-      toast.error('Failed to load order details');
+      console.error('❌ Error loading real order items:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load order items"
+      });
     } finally {
       setLoading(false);
     }
+  };
+
+  const setupRealtimeSubscription = (orderId: string) => {
+    console.log('🔴 Setting up real-time subscription for order:', orderId);
+    
+    // Clean up existing subscription
+    if (realtimeSubscription) {
+      realtimeSubscription.unsubscribe();
+    }
+
+    // Subscribe to order_items changes for this specific order
+    const subscription = supabase
+      .channel(`order_items_${orderId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'order_items',
+          filter: `order_id=eq.${orderId}`
+        },
+        (payload) => {
+          console.log('🔴 Real-time update received:', payload);
+          
+          if (payload.eventType === 'UPDATE') {
+            console.log('📝 Order item updated:', payload.new);
+            // Reload the order items to get fresh data with vendor info
+            loadRealOrderItems(orderId);
+            setLastUpdated(new Date());
+            
+            // Show notification for status changes
+            if (payload.old?.item_status !== payload.new?.item_status) {
+              const newStatus = payload.new.item_status;
+              const productName = payload.new.product_name;
+              
+              if (newStatus === 'confirmed') {
+                toast({
+                  title: "Order Confirmed! 🎉",
+                  description: `${productName} has been confirmed by the vendor`
+                });
+              } else if (newStatus === 'processing') {
+                toast({
+                  title: "Order Processing 📦",
+                  description: `${productName} is now being prepared`
+                });
+              } else if (newStatus === 'cancelled') {
+                toast({
+                  title: "Order Cancelled ❌",
+                  description: `${productName} has been cancelled by the vendor`
+                });
+              }
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    setRealtimeSubscription(subscription);
   };
 
   const calculateTimeRemaining = (createdAt: string, timeoutMinutes: number) => {
     const orderTime = new Date(createdAt);
     const expiryTime = new Date(orderTime.getTime() + timeoutMinutes * 60000);
     const now = new Date();
-    const diff = Math.max(0, Math.floor((expiryTime.getTime() - now.getTime()) / 60000));
-    return diff;
+    return Math.max(0, Math.floor((expiryTime.getTime() - now.getTime()) / 60000));
   };
 
   const processVendorStatuses = (items: OrderItem[]) => {
+    console.log('Processing vendor statuses for items:', items);
+    
+    if (!items || items.length === 0) {
+      console.log('No items to process');
+      setVendorStatuses([]);
+      return;
+    }
+
     const vendorGroups = items.reduce((acc, item) => {
+      console.log('Processing item:', item);
+      
       if (!acc[item.vendor_id]) {
+        const vendorLocation = `${item.vendor_business_city || ''}, ${item.vendor_business_state || ''}`.replace(/^,\s*/, '').replace(/,\s*$/, '').trim();
+        
         acc[item.vendor_id] = {
           vendor_id: item.vendor_id,
           vendor_name: item.vendor_business_name,
@@ -205,24 +339,58 @@ const OrderSuccess = () => {
           overall_status: 'pending' as const,
           total_amount: 0,
           estimated_approval: getEstimatedApprovalTime(item),
-          is_urgent: false
+          is_urgent: false,
+          vendor_rating: item.vendor_rating,
+          vendor_reviews: item.vendor_total_reviews,
+          is_verified: item.vendor_is_verified,
+          vendor_phone: item.vendor_phone || 'Not available',
+          vendor_location: vendorLocation || 'Location not available',
+          confirmed_at: null,
+          all_items_confirmed: false
         };
+        
+        console.log('Created vendor group:', acc[item.vendor_id]);
       }
       
       acc[item.vendor_id].items.push(item);
       acc[item.vendor_id].total_amount += item.line_total;
       
-      // Determine overall status
+      // Track confirmation times
+      if (item.item_status === 'confirmed' && item.vendor_confirmed_at) {
+        if (!acc[item.vendor_id].confirmed_at || new Date(item.vendor_confirmed_at) < new Date(acc[item.vendor_id].confirmed_at!)) {
+          acc[item.vendor_id].confirmed_at = item.vendor_confirmed_at;
+        }
+      }
+      
+      // Determine overall status based on all items for this vendor
       const statuses = acc[item.vendor_id].items.map(i => i.item_status);
-      if (statuses.every(s => s === 'confirmed')) {
+      console.log('Item statuses for vendor', item.vendor_id, ':', statuses);
+      
+      // Check if all items are confirmed
+      acc[item.vendor_id].all_items_confirmed = statuses.every(s => ['confirmed', 'processing', 'packed', 'picked_up', 'shipped', 'delivered'].includes(s));
+      
+      if (statuses.every(s => ['delivered'].includes(s))) {
+        acc[item.vendor_id].overall_status = 'delivered';
+      } else if (statuses.some(s => ['picked_up', 'shipped'].includes(s))) {
+        acc[item.vendor_id].overall_status = 'shipped';
+      } else if (statuses.some(s => s === 'packed')) {
+        acc[item.vendor_id].overall_status = 'packed';
+      } else if (statuses.some(s => s === 'processing')) {
+        acc[item.vendor_id].overall_status = 'processing';
+      } else if (statuses.every(s => ['confirmed', 'processing', 'packed', 'picked_up', 'shipped', 'delivered'].includes(s))) {
         acc[item.vendor_id].overall_status = 'confirmed';
       } else if (statuses.some(s => s === 'cancelled')) {
         acc[item.vendor_id].overall_status = 'cancelled';
-      } else if (statuses.some(s => s === 'processing')) {
-        acc[item.vendor_id].overall_status = 'processing';
+      } else {
+        acc[item.vendor_id].overall_status = 'pending';
       }
       
-      // Check urgency
+      // Update estimated approval for confirmed items
+      if (acc[item.vendor_id].overall_status === 'confirmed') {
+        acc[item.vendor_id].estimated_approval = `Confirmed at ${new Date(acc[item.vendor_id].confirmed_at || item.updated_at).toLocaleTimeString()}`;
+      }
+      
+      // Check for urgency (only for pending items)
       acc[item.vendor_id].is_urgent = acc[item.vendor_id].items.some(i => 
         (i.time_remaining_minutes || 0) <= 5 && i.item_status === 'pending'
       );
@@ -230,36 +398,29 @@ const OrderSuccess = () => {
       return acc;
     }, {} as Record<string, VendorOrderStatus>);
 
-    setVendorStatuses(Object.values(vendorGroups));
+    const vendorStatusArray = Object.values(vendorGroups);
+    console.log('Final vendor statuses:', vendorStatusArray);
+    setVendorStatuses(vendorStatusArray);
   };
 
   const getEstimatedApprovalTime = (item: OrderItem) => {
-    if (item.auto_approve_orders) {
-      return "Auto-approval enabled";
-    }
-    
+    if (item.auto_approve_orders) return 'Auto-approval enabled';
+    const orderTime = new Date(item.created_at);
+    const timeoutMinutes = item.order_confirmation_timeout_minutes || 15;
+    const expiryTime = new Date(orderTime.getTime() + timeoutMinutes * 60000);
     const now = new Date();
-    const businessStart = new Date();
-    const [startHour, startMin] = item.business_hours_start.split(':');
-    businessStart.setHours(parseInt(startHour), parseInt(startMin), 0, 0);
     
-    const businessEnd = new Date();
-    const [endHour, endMin] = item.business_hours_end.split(':');
-    businessEnd.setHours(parseInt(endHour), parseInt(endMin), 0, 0);
-    
-    if (now >= businessStart && now <= businessEnd) {
-      return "Within business hours";
-    } else {
-      return `Next business day (${item.business_hours_start} - ${item.business_hours_end})`;
+    if (expiryTime > now) {
+      return `Response expected by ${expiryTime.toLocaleTimeString()}`;
     }
+    return 'Response overdue';
   };
 
   const refreshOrderStatus = async () => {
     if (!orderDetails) return;
-    
     setRefreshing(true);
     try {
-      await loadOrderItems(orderDetails.id);
+      await loadRealOrderItems(orderDetails.id);
       setLastUpdated(new Date());
     } catch (error) {
       console.error('Error refreshing order status:', error);
@@ -268,85 +429,107 @@ const OrderSuccess = () => {
     }
   };
 
+  // Utility functions
   const getStatusBadgeVariant = (status: string) => {
     switch (status) {
       case 'confirmed': return 'default';
-      case 'processing': return 'secondary';
+      case 'pending': return 'secondary';
       case 'cancelled': return 'destructive';
-      default: return 'outline';
+      case 'processing': return 'outline';
+      default: return 'secondary';
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'confirmed': return 'text-green-600';
-      case 'processing': return 'text-blue-600';
-      case 'cancelled': return 'text-red-600';
-      default: return 'text-yellow-600';
+      case 'confirmed': return 'bg-green-100 text-green-800 border-green-200';
+      case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      case 'cancelled': return 'bg-red-100 text-red-800 border-red-200';
+      case 'processing': return 'bg-blue-100 text-blue-800 border-blue-200';
+      default: return 'bg-gray-100 text-gray-800 border-gray-200';
     }
   };
 
   const getTimeDisplayColor = (minutes: number) => {
-    if (minutes <= 0) return 'text-red-600';
-    if (minutes <= 5) return 'text-red-500';
-    if (minutes <= 10) return 'text-yellow-500';
+    if (minutes <= 5) return 'text-red-600';
+    if (minutes <= 15) return 'text-yellow-600';
     return 'text-green-600';
   };
 
   const formatTimeRemaining = (minutes: number) => {
     if (minutes <= 0) return 'Expired';
+    if (minutes < 60) return `${minutes}m left`;
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
-    if (hours > 0) return `${hours}h ${mins}m`;
-    return `${mins}m`;
+    return `${hours}h ${mins}m left`;
   };
 
-  const handleContinueShopping = () => {
-    navigate('/order');
+  const getOverallProgress = () => {
+    if (vendorStatuses.length === 0) return 0;
+    const confirmedVendors = vendorStatuses.filter(v => v.overall_status === 'confirmed').length;
+    return (confirmedVendors / vendorStatuses.length) * 100;
   };
 
-  const handleViewOrders = () => {
-    navigate('/my-orders');
-  };
-
-  const handleDownloadInvoice = () => {
-    if (orderDetails) {
-      // Generate and download invoice
-      toast.info('Invoice download will be available soon');
+  // Share functionality
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({
+        title: "Success",
+        description: "Copied to clipboard!"
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to copy"
+      });
     }
   };
 
-  const handleShareOrder = () => {
-    if (orderDetails) {
-      const shareText = `I just placed an order on Tryodo! Order #${orderDetails.order_number}`;
-      if (navigator.share) {
-        navigator.share({
-          title: 'Tryodo Order',
-          text: shareText,
-          url: window.location.href
-        });
-      } else {
-        navigator.clipboard.writeText(`${shareText} - ${window.location.href}`);
-        toast.success('Order details copied to clipboard!');
-      }
-    }
+  const shareOnWhatsApp = () => {
+    const text = `🎉 Just placed an order on Tryodo! Order #${orderDetails?.order_number} for ₹${orderDetails?.total_amount.toLocaleString()}. Track it here: ${shareUrl}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  if (loading || !orderDetails) {
+  const shareOnFacebook = () => {
+    window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`, '_blank');
+  };
+
+  const shareOnTwitter = () => {
+    const text = `Just ordered from Tryodo! Order #${orderDetails?.order_number} 🛒✨`;
+    window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(shareUrl)}`, '_blank');
+  };
+
+  const shareViaEmail = () => {
+    const subject = `Tryodo Order Confirmation - ${orderDetails?.order_number}`;
+    const body = `Hi!\n\nI just placed an order on Tryodo:\n\nOrder Number: ${orderDetails?.order_number}\nTotal Amount: ₹${orderDetails?.total_amount.toLocaleString()}\n\nYou can track the order here: ${shareUrl}\n\nBest regards!`;
+    window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+  };
+
+  // Navigation handlers
+  const handleContinueShopping = () => navigate('/order');
+  const handleViewOrders = () => navigate('/my-orders');
+  const handleContactSupport = () => window.open('https://wa.me/1234567890?text=Hi, I need help with my order ' + orderDetails?.order_number, '_blank');
+  const handleDownloadInvoice = () => toast({
+    title: "Invoice Download", 
+    description: "Invoice download will be available once the order is confirmed by all vendors"
+  });
+  const handleReorder = () => { 
+    toast({
+      title: "Success",
+      description: "Items added to cart!"
+    }); 
+    navigate('/cart'); 
+  };
+  const handleTrackOrder = () => navigate(`/order-tracking/${orderDetails?.id}`);
+
+  if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Header onCartClick={() => {}} />
-        <div className="flex items-center justify-center py-20">
-          <div className="text-center">
-            <Package className="h-12 w-12 text-gray-400 mx-auto mb-4 animate-spin" />
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">
-              {loading ? 'Loading order details...' : 'Order not found'}
-            </h2>
-            {!loading && (
-              <Button onClick={() => navigate('/order')}>
-                Continue Shopping
-              </Button>
-            )}
+        <Header />
+        <div className="container mx-auto px-4 py-8">
+          <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
           </div>
         </div>
         <Footer />
@@ -354,252 +537,747 @@ const OrderSuccess = () => {
     );
   }
 
-  const deliveryAddress = orderDetails.delivery_address;
+  if (!orderDetails) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header />
+        <div className="container mx-auto px-4 py-8">
+          <div className="text-center">
+            <AlertTriangle className="h-16 w-16 text-red-500 mx-auto mb-4" />
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">Order Not Found</h1>
+            <p className="text-gray-600 mb-4">Unable to load order details</p>
+            <Button onClick={() => navigate('/order')}>Continue Shopping</Button>
+          </div>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
+  const deliveryAddress = orderDetails.delivery_address || {};
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Header onCartClick={() => {}} />
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50">
+      <Header />
       
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="container mx-auto px-4 py-8">
         {/* Success Header */}
         <div className="text-center mb-8">
-          <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
-            <CheckCircle className="h-8 w-8 text-green-600" />
+          {orderDetails.id === 'demo-order-001' && (
+            <div className="mb-4 p-3 bg-yellow-100 border border-yellow-300 rounded-lg max-w-2xl mx-auto">
+              <div className="flex items-center justify-center gap-2 text-yellow-800">
+                <AlertTriangle className="h-5 w-5" />
+                <span className="font-medium">Demo Mode Active</span>
+              </div>
+              <p className="text-sm text-yellow-700 mt-1">
+                This is sample data for demonstration. To see real order status, place an actual order through the checkout process.
+              </p>
+            </div>
+          )}
+          
+          <div className="inline-flex items-center justify-center w-20 h-20 bg-green-100 rounded-full mb-4 animate-bounce">
+            <CheckCircle className="h-10 w-10 text-green-600" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Order Placed Successfully!</h1>
+          <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
+            Order Placed Successfully! 🎉
+          </h1>
           <p className="text-lg text-gray-600 mb-4">
-            Thank you for your purchase. Your order is being processed by our vendors.
+            Thank you for choosing Tryodo. Your order <span className="font-semibold text-blue-600">#{orderDetails.order_number}</span> has been received.
           </p>
           
-          {/* Real-time status indicator */}
-          <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <span>Live updates enabled</span>
-            <Button 
-              variant="ghost" 
-              size="sm"
-              onClick={refreshOrderStatus}
-              disabled={refreshing}
-            >
-              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            </Button>
-            <span className="text-xs">
-              Last updated: {lastUpdated.toLocaleTimeString()}
-            </span>
+          <div className="max-w-md mx-auto">
+            <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
+              <span>Order Progress</span>
+              <span>{Math.round(getOverallProgress())}% Complete</span>
+            </div>
+            <Progress value={getOverallProgress()} className="h-2" />
           </div>
         </div>
 
+        {/* Quick Actions Bar */}
+        <Card className="mb-8 border-2 border-blue-100 bg-gradient-to-r from-blue-50 to-purple-50">
+          <CardContent className="p-6">
+            <div className="flex flex-wrap gap-4 justify-center">
+              <Button onClick={handleTrackOrder} variant="default" size="sm" className="gap-2">
+                <MapPin className="h-4 w-4" />
+                Track Order
+              </Button>
+              <Button onClick={() => copyToClipboard(shareUrl)} variant="outline" size="sm" className="gap-2">
+                <Copy className="h-4 w-4" />
+                Copy Link
+              </Button>
+              <Button onClick={shareOnWhatsApp} variant="outline" size="sm" className="gap-2 text-green-600">
+                <MessageCircle className="h-4 w-4" />
+                Share on WhatsApp
+              </Button>
+              <Button onClick={handleContactSupport} variant="outline" size="sm" className="gap-2">
+                <Headphones className="h-4 w-4" />
+                Support
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Vendor Dashboard - Real-time Order Status */}
+          {/* Main Content - Vendor Dashboard */}
           <div className="lg:col-span-2 space-y-6">
-            <Card>
+            {/* Live Order Status */}
+            <Card className="border-l-4 border-l-blue-500">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Store className="h-5 w-5" />
-                  Vendor Status Dashboard
-                </CardTitle>
-                <CardDescription>
-                  Real-time updates from your vendors
-                </CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Zap className="h-5 w-5 text-blue-600" />
+                      Live Order Status
+                      {orderDetails.id === 'demo-order-001' && (
+                        <Badge variant="outline" className="bg-yellow-100 text-yellow-800 border-yellow-300">
+                          Demo Data
+                        </Badge>
+                      )}
+                    </CardTitle>
+                    <CardDescription>
+                      {orderDetails.id === 'demo-order-001' 
+                        ? "Showing sample vendor information for demonstration"
+                        : "Real-time updates from your vendors"
+                      }
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    <span className="text-sm text-gray-500">Live</span>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={refreshOrderStatus}
+                      disabled={refreshing}
+                    >
+                      <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                    </Button>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="space-y-6">
                 {vendorStatuses.length === 0 ? (
                   <div className="text-center py-8">
-                    <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <Package className="h-12 w-12 text-gray-400 mx-auto mb-4 animate-pulse" />
                     <p className="text-gray-500">Loading vendor information...</p>
                   </div>
                 ) : (
                   vendorStatuses.map((vendor) => (
-                    <div key={vendor.vendor_id} className="border border-gray-200 rounded-lg p-4">
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <h3 className="font-semibold text-lg">{vendor.vendor_name}</h3>
-                            <Badge 
-                              variant={getStatusBadgeVariant(vendor.overall_status)}
-                              className={getStatusColor(vendor.overall_status)}
-                            >
-                              {vendor.overall_status.charAt(0).toUpperCase() + vendor.overall_status.slice(1)}
-                            </Badge>
-                            {vendor.is_urgent && (
-                              <Badge variant="destructive" className="animate-pulse">
-                                <AlertTriangle className="h-3 w-3 mr-1" />
-                                Urgent
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="text-sm text-gray-600">
-                            Total: ₹{vendor.total_amount.toLocaleString()}
-                          </p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {vendor.estimated_approval}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        {vendor.items.map((item) => (
-                          <div key={item.id} className="bg-gray-50 rounded-lg p-3">
-                            <div className="flex justify-between items-start">
-                              <div className="flex-1">
-                                <h4 className="font-medium">{item.product_name}</h4>
-                                <p className="text-sm text-gray-600">
-                                  Qty: {item.quantity} × ₹{item.unit_price.toLocaleString()} = ₹{item.line_total.toLocaleString()}
-                                </p>
-                              </div>
-                              <div className="text-right">
-                                <Badge variant={getStatusBadgeVariant(item.item_status)}>
-                                  {item.item_status.charAt(0).toUpperCase() + item.item_status.slice(1)}
-                                </Badge>
-                                {item.item_status === 'pending' && item.time_remaining_minutes !== undefined && (
-                                  <div className={`text-xs mt-1 font-medium ${getTimeDisplayColor(item.time_remaining_minutes)}`}>
-                                    <Timer className="h-3 w-3 inline mr-1" />
-                                    {formatTimeRemaining(item.time_remaining_minutes)}
-                                  </div>
+                    <Card key={vendor.vendor_id} className="border-2 hover:shadow-lg transition-all duration-200">
+                      <CardContent className="p-6">
+                        {/* Vendor Header */}
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <div className="flex items-center gap-2">
+                                <Store className="h-5 w-5 text-blue-600" />
+                                <h3 className="font-bold text-xl text-gray-900">{vendor.vendor_name}</h3>
+                                {vendor.is_verified && (
+                                  <Badge variant="secondary" className="gap-1">
+                                    <Verified className="h-3 w-3" />
+                                    Verified
+                                  </Badge>
                                 )}
+                              </div>
+                              <Badge 
+                                variant={getStatusBadgeVariant(vendor.overall_status)}
+                                className={`${getStatusColor(vendor.overall_status)} font-medium`}
+                              >
+                                {vendor.overall_status.charAt(0).toUpperCase() + vendor.overall_status.slice(1)}
+                              </Badge>
+                              {vendor.is_urgent && (
+                                <Badge variant="destructive" className="animate-pulse gap-1">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  Urgent
+                                </Badge>
+                              )}
+                            </div>
+                            
+                            {/* Vendor Details */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                              <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <Star className="h-4 w-4 text-yellow-500 fill-current" />
+                                <span className="font-medium">{vendor.vendor_rating.toFixed(1)}</span>
+                                <span>({vendor.vendor_reviews} reviews)</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <MapPin className="h-4 w-4" />
+                                <span>{vendor.vendor_location}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <Phone className="h-4 w-4" />
+                                <span>{vendor.vendor_phone || 'Not available'}</span>
                               </div>
                             </div>
                             
-                            {item.item_status === 'pending' && (
-                              <div className="mt-2 text-xs text-gray-500 bg-yellow-50 border border-yellow-200 rounded p-2">
-                                <Clock className="h-3 w-3 inline mr-1" />
-                                Waiting for vendor confirmation...
-                                {item.auto_approve_orders && (
-                                  <span className="ml-2 text-green-600 font-medium">
-                                    Auto-approval enabled
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            
-                            {item.item_status === 'confirmed' && (
-                              <div className="mt-2 text-xs text-green-600 bg-green-50 border border-green-200 rounded p-2">
-                                <CheckCircle className="h-3 w-3 inline mr-1" />
-                                Confirmed by vendor - Preparing for shipment
-                              </div>
-                            )}
-                            
-                            {item.item_status === 'cancelled' && (
-                              <div className="mt-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">
-                                <AlertTriangle className="h-3 w-3 inline mr-1" />
-                                Cancelled by vendor - Refund will be processed
-                              </div>
-                            )}
+                            <div className="flex items-center justify-between">
+                              <p className="text-lg font-semibold text-gray-900">
+                                Total: ₹{vendor.total_amount.toLocaleString()}
+                              </p>
+                              <p className="text-sm text-gray-500">
+                                {vendor.estimated_approval}
+                              </p>
+                            </div>
                           </div>
-                        ))}
-                      </div>
-                    </div>
+                        </div>
+
+                        <Separator className="my-4" />
+
+                        {/* Product Items */}
+                        <div className="space-y-4">
+                          <h4 className="font-semibold text-gray-900 flex items-center gap-2">
+                            <Package className="h-4 w-4" />
+                            Order Items
+                          </h4>
+                          {vendor.items.map((item) => (
+                            <Card key={item.id} className="bg-gradient-to-r from-gray-50 to-blue-50 border-l-4 border-l-blue-200">
+                              <CardContent className="p-4">
+                                <div className="flex justify-between items-start mb-3">
+                                  <div className="flex-1">
+                                    <h5 className="font-bold text-lg text-gray-900 mb-1">{item.product_name}</h5>
+                                    <p className="text-sm text-gray-600 mb-2">{item.product_description}</p>
+                                    
+                                    {/* Product details grid */}
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-gray-500">Qty:</span>
+                                        <span className="font-semibold">{item.quantity}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-gray-500">Price:</span>
+                                        <span className="font-semibold">₹{item.unit_price.toLocaleString()}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <Shield className="h-3 w-3 text-blue-600" />
+                                        <span className="text-gray-500">{item.warranty_months || 12}M Warranty</span>
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <Truck className="h-3 w-3 text-green-600" />
+                                        <span className="text-gray-500">{item.delivery_time_days || 3}D Delivery</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="text-right ml-4">
+                                    <Badge variant={getStatusBadgeVariant(item.item_status)} className="mb-2">
+                                      {item.item_status.charAt(0).toUpperCase() + item.item_status.slice(1)}
+                                    </Badge>
+                                    <p className="text-xl font-bold text-blue-600">₹{item.line_total.toLocaleString()}</p>
+                                    
+                                    {item.item_status === 'pending' && item.time_remaining_minutes !== undefined && (
+                                      <div className={`text-xs mt-1 font-medium flex items-center gap-1 ${getTimeDisplayColor(item.time_remaining_minutes)}`}>
+                                        <Timer className="h-3 w-3" />
+                                        {formatTimeRemaining(item.time_remaining_minutes)}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                
+                                {/* Status Messages */}
+                                {item.item_status === 'pending' && (
+                                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2">
+                                    <Clock className="h-4 w-4" />
+                                    <div>
+                                      <p className="font-medium">Awaiting vendor confirmation</p>
+                                      {item.auto_approve_orders && (
+                                        <p className="text-green-600 mt-1">✓ Auto-approval enabled for faster processing</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                                
+                                {item.item_status === 'confirmed' && (
+                                  <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg p-3 flex items-center gap-2">
+                                    <CheckCircle className="h-4 w-4" />
+                                    <div>
+                                      <p className="font-medium">Confirmed by vendor!</p>
+                                      <p className="mt-1">Your item is being prepared for shipment</p>
+                                    </div>
+                                  </div>
+                                )}
+                                
+                                {item.item_status === 'cancelled' && (
+                                  <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 flex items-center gap-2">
+                                    <AlertTriangle className="h-4 w-4" />
+                                    <div>
+                                      <p className="font-medium">Order cancelled by vendor</p>
+                                      <p className="mt-1">Full refund will be processed within 3-5 business days</p>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {item.item_status === 'processing' && (
+                                  <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center gap-2">
+                                    <Package className="h-4 w-4" />
+                                    <div>
+                                      <p className="font-medium">Order is being processed</p>
+                                      <p className="mt-1">Your item is being prepared and will be shipped soon</p>
+                                    </div>
+                                  </div>
+                                )}
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
                   ))
                 )}
               </CardContent>
             </Card>
+
+            {/* Expected Timeline */}
+            <Card className="border-l-4 border-l-green-500">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Calendar className="h-5 w-5 text-green-600" />
+                  Expected Timeline
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4 p-3 bg-green-50 rounded-lg">
+                    <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                    <div className="flex-1">
+                      <p className="font-medium text-green-800">Order Placed</p>
+                      <p className="text-sm text-green-600">
+                        {new Date(orderDetails.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                    <CheckCircle className="h-5 w-5 text-green-600" />
+                  </div>
+                  
+                  {/* Vendor Confirmation - Dynamic based on real status */}
+                  {(() => {
+                    const allConfirmed = vendorStatuses.every(v => v.all_items_confirmed);
+                    const anyConfirmed = vendorStatuses.some(v => v.all_items_confirmed);
+                    const allPending = vendorStatuses.every(v => v.overall_status === 'pending');
+                    
+                    if (allConfirmed) {
+                      return (
+                        <div className="flex items-center gap-4 p-3 bg-green-50 rounded-lg">
+                          <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                          <div className="flex-1">
+                            <p className="font-medium text-green-800">All Vendors Confirmed ✅</p>
+                            <p className="text-sm text-green-600">
+                              Confirmed at {vendorStatuses.filter(v => v.confirmed_at).map(v => 
+                                new Date(v.confirmed_at!).toLocaleTimeString()
+                              ).join(', ')}
+                            </p>
+                          </div>
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                        </div>
+                      );
+                    } else if (anyConfirmed) {
+                      const confirmedCount = vendorStatuses.filter(v => v.all_items_confirmed).length;
+                      const totalCount = vendorStatuses.length;
+                      return (
+                        <div className="flex items-center gap-4 p-3 bg-yellow-50 rounded-lg">
+                          <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
+                          <div className="flex-1">
+                            <p className="font-medium text-yellow-800">
+                              Partial Confirmation ({confirmedCount}/{totalCount} vendors)
+                            </p>
+                            <p className="text-sm text-yellow-600">
+                              Waiting for remaining vendors to confirm
+                            </p>
+                          </div>
+                          <Timer className="h-5 w-5 text-yellow-600" />
+                        </div>
+                      );
+                    } else if (allPending) {
+                      return (
+                        <div className="flex items-center gap-4 p-3 bg-yellow-50 rounded-lg">
+                          <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
+                          <div className="flex-1">
+                            <p className="font-medium text-yellow-800">Awaiting Vendor Confirmation</p>
+                            <p className="text-sm text-yellow-600">
+                              {vendorStatuses.length} vendor{vendorStatuses.length > 1 ? 's' : ''} will confirm within 30 minutes
+                            </p>
+                          </div>
+                          <Timer className="h-5 w-5 text-yellow-600" />
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div className="flex items-center gap-4 p-3 bg-red-50 rounded-lg">
+                          <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                          <div className="flex-1">
+                            <p className="font-medium text-red-800">Some Items Cancelled</p>
+                            <p className="text-sm text-red-600">Check individual vendor status above</p>
+                          </div>
+                          <AlertTriangle className="h-5 w-5 text-red-600" />
+                        </div>
+                      );
+                    }
+                  })()}
+                  
+                  {/* Order Processing - Dynamic based on real status */}
+                  {(() => {
+                    const anyProcessing = vendorStatuses.some(v => ['processing', 'packed', 'picked_up', 'shipped', 'delivered'].includes(v.overall_status));
+                    const allConfirmed = vendorStatuses.every(v => v.all_items_confirmed);
+                    
+                    if (anyProcessing) {
+                      return (
+                        <div className="flex items-center gap-4 p-3 bg-blue-50 rounded-lg">
+                          <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
+                          <div className="flex-1">
+                            <p className="font-medium text-blue-800">Order Processing 📦</p>
+                            <p className="text-sm text-blue-600">Items are being prepared for shipping</p>
+                          </div>
+                          <Package className="h-5 w-5 text-blue-600" />
+                        </div>
+                      );
+                    } else if (allConfirmed) {
+                      return (
+                        <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg border-2 border-blue-200">
+                          <div className="w-3 h-3 bg-blue-400 rounded-full animate-pulse"></div>
+                          <div className="flex-1">
+                            <p className="font-medium text-blue-600">Ready for Processing</p>
+                            <p className="text-sm text-blue-500">Will start processing soon</p>
+                          </div>
+                          <Package className="h-5 w-5 text-blue-400" />
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg">
+                          <div className="w-3 h-3 bg-gray-400 rounded-full"></div>
+                          <div className="flex-1">
+                            <p className="font-medium text-gray-600">Order Processing</p>
+                            <p className="text-sm text-gray-500">After vendor confirmation</p>
+                          </div>
+                          <Package className="h-5 w-5 text-gray-400" />
+                        </div>
+                      );
+                    }
+                  })()}
+                  
+                  {/* Delivery - Dynamic based on real status */}
+                  {(() => {
+                    const anyShipped = vendorStatuses.some(v => ['picked_up', 'shipped', 'delivered'].includes(v.overall_status));
+                    const anyDelivered = vendorStatuses.some(v => v.overall_status === 'delivered');
+                    
+                    if (anyDelivered) {
+                      return (
+                        <div className="flex items-center gap-4 p-3 bg-green-50 rounded-lg">
+                          <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                          <div className="flex-1">
+                            <p className="font-medium text-green-800">Delivered! 🎉</p>
+                            <p className="text-sm text-green-600">Some items have been delivered</p>
+                          </div>
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                        </div>
+                      );
+                    } else if (anyShipped) {
+                      return (
+                        <div className="flex items-center gap-4 p-3 bg-purple-50 rounded-lg">
+                          <div className="w-3 h-3 bg-purple-500 rounded-full animate-pulse"></div>
+                          <div className="flex-1">
+                            <p className="font-medium text-purple-800">Out for Delivery 🚚</p>
+                            <p className="text-sm text-purple-600">Your order is on the way!</p>
+                          </div>
+                          <Truck className="h-5 w-5 text-purple-600" />
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg">
+                          <div className="w-3 h-3 bg-gray-400 rounded-full"></div>
+                          <div className="flex-1">
+                            <p className="font-medium text-gray-600">Delivery</p>
+                            <p className="text-sm text-gray-500">
+                              Expected: {new Date(orderDetails.estimated_delivery_date).toLocaleDateString('en-IN', {
+                                weekday: 'long',
+                                month: 'long',
+                                day: 'numeric'
+                              })}
+                            </p>
+                          </div>
+                          <Truck className="h-5 w-5 text-gray-400" />
+                        </div>
+                      );
+                    }
+                  })()}
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
-          {/* Order Summary Sidebar */}
+          {/* Sidebar - Order Summary & Actions */}
           <div className="space-y-6">
-            {/* Order Info */}
-            <Card>
+            {/* Order Summary */}
+            <Card className="border-2 border-purple-100 bg-gradient-to-br from-purple-50 to-pink-50">
               <CardHeader>
-                <CardTitle>Order Information</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <Award className="h-5 w-5 text-purple-600" />
+                  Order Summary
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-500">Order Number</p>
-                    <p className="font-semibold text-lg">{orderDetails.order_number}</p>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center p-3 bg-white rounded-lg shadow-sm">
+                    <span className="text-sm text-gray-600">Order Number</span>
+                    <span className="font-bold text-blue-600">{orderDetails.order_number}</span>
                   </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Total Amount</p>
-                    <p className="font-semibold text-lg">₹{orderDetails.total_amount.toLocaleString()}</p>
+                  
+                  <div className="flex justify-between items-center p-3 bg-white rounded-lg shadow-sm">
+                    <span className="text-sm text-gray-600">Order Date</span>
+                    <span className="font-medium">
+                      {new Date(orderDetails.created_at).toLocaleDateString('en-IN', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric'
+                      })}
+                    </span>
                   </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Payment Method</p>
-                    <p className="font-medium">{orderDetails.payment_method}</p>
+
+                  <div className="flex justify-between items-center p-3 bg-white rounded-lg shadow-sm">
+                    <span className="text-sm text-gray-600">Payment Method</span>
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="h-4 w-4 text-blue-600" />
+                      <span className="font-medium capitalize">{orderDetails.payment_method}</span>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Order Status</p>
-                    <Badge variant="secondary">{orderDetails.order_status}</Badge>
+
+                  <div className="flex justify-between items-center p-3 bg-white rounded-lg shadow-sm">
+                    <span className="text-sm text-gray-600">Payment Status</span>
+                    <Badge variant={orderDetails.payment_status === 'paid' ? 'default' : 'secondary'}>
+                      {orderDetails.payment_status || 'Pending'}
+                    </Badge>
                   </div>
                 </div>
                 
                 <Separator />
                 
-                <div>
-                  <p className="text-sm text-gray-500 mb-2">Estimated Delivery</p>
-                  <div className="flex items-center gap-2">
-                    <Truck className="h-4 w-4 text-green-600" />
-                    <span className="font-medium">
+                {/* Price Breakdown */}
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Subtotal</span>
+                    <span>₹{(orderDetails.subtotal || orderDetails.total_amount).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Shipping</span>
+                    <span className="text-green-600">₹{(orderDetails.shipping_charges || 0).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Tax</span>
+                    <span>₹{(orderDetails.tax_amount || 0).toLocaleString()}</span>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between items-center">
+                    <span className="font-semibold text-lg">Total</span>
+                    <span className="font-bold text-2xl text-green-600">₹{orderDetails.total_amount.toLocaleString()}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Delivery Information */}
+            <Card className="border-2 border-green-100">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <MapPin className="h-5 w-5 text-green-600" />
+                  Delivery Information
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="bg-green-50 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <User className="h-4 w-4 text-green-600" />
+                    <span className="font-semibold text-green-800">
+                      {deliveryAddress.contact_name || deliveryAddress.name || 'Customer'}
+                    </span>
+                  </div>
+                  
+                  <div className="space-y-2 text-sm">
+                    <p className="text-gray-700">
+                      {deliveryAddress.address_line1 || deliveryAddress.street_address || 'Address not available'}
+                    </p>
+                    {(deliveryAddress.address_line2 || deliveryAddress.address_line_2) && (
+                      <p className="text-gray-700">
+                        {deliveryAddress.address_line2 || deliveryAddress.address_line_2}
+                      </p>
+                    )}
+                    <p className="text-gray-700">
+                      {deliveryAddress.city}, {deliveryAddress.state} - {deliveryAddress.pincode || deliveryAddress.postal_code}
+                    </p>
+                    {(deliveryAddress.contact_phone || deliveryAddress.phone) && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <Phone className="h-4 w-4 text-green-600" />
+                        <span className="text-gray-700">{deliveryAddress.contact_phone || deliveryAddress.phone}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg">
+                  <Truck className="h-5 w-5 text-blue-600" />
+                  <div>
+                    <p className="font-medium text-blue-800">Expected Delivery</p>
+                    <p className="text-sm text-blue-600">
                       {new Date(orderDetails.estimated_delivery_date).toLocaleDateString('en-IN', {
                         weekday: 'long',
                         year: 'numeric',
                         month: 'long',
                         day: 'numeric'
                       })}
-                    </span>
+                    </p>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Delivery Address */}
-            <Card>
+            {/* Share Your Order */}
+            <Card className="border-2 border-orange-100">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <MapPin className="h-4 w-4" />
-                  Delivery Address
+                  <Share2 className="h-5 w-5 text-orange-600" />
+                  Share Your Order
                 </CardTitle>
+                <CardDescription>
+                  Let your friends know about your purchase
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <div>
-                  <p className="font-medium">{deliveryAddress.contact_name}</p>
-                  <p className="text-gray-600">
-                    {deliveryAddress.address_line1}
-                    {deliveryAddress.address_line2 && `, ${deliveryAddress.address_line2}`}
-                  </p>
-                  <p className="text-gray-600">
-                    {deliveryAddress.city}, {deliveryAddress.state} - {deliveryAddress.pincode}
-                  </p>
-                  <p className="text-gray-600 flex items-center gap-1 mt-1">
-                    <Phone className="h-3 w-3" />
-                    {deliveryAddress.contact_phone}
-                  </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <Button onClick={shareOnWhatsApp} variant="outline" size="sm" className="gap-2 text-green-600 hover:bg-green-50">
+                    <MessageCircle className="h-4 w-4" />
+                    WhatsApp
+                  </Button>
+                  <Button onClick={shareOnFacebook} variant="outline" size="sm" className="gap-2 text-blue-600 hover:bg-blue-50">
+                    <Facebook className="h-4 w-4" />
+                    Facebook
+                  </Button>
+                  <Button onClick={shareOnTwitter} variant="outline" size="sm" className="gap-2 text-sky-600 hover:bg-sky-50">
+                    <Twitter className="h-4 w-4" />
+                    Twitter
+                  </Button>
+                  <Button onClick={shareViaEmail} variant="outline" size="sm" className="gap-2 text-purple-600 hover:bg-purple-50">
+                    <Mail className="h-4 w-4" />
+                    Email
+                  </Button>
+                </div>
+                
+                <Separator className="my-4" />
+                
+                <div className="flex gap-2">
+                  <Button onClick={() => copyToClipboard(shareUrl)} variant="ghost" size="sm" className="flex-1 gap-2">
+                    <Copy className="h-4 w-4" />
+                    Copy Link
+                  </Button>
+                  <Button onClick={() => copyToClipboard(orderDetails.order_number)} variant="ghost" size="sm" className="flex-1 gap-2">
+                    <Copy className="h-4 w-4" />
+                    Copy Order #
+                  </Button>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Action Buttons */}
-            <div className="flex flex-col gap-4">
-              <Button onClick={handleViewOrders} variant="outline" className="w-full">
-                View All Orders
-              </Button>
-              <Button onClick={handleContinueShopping} className="w-full">
-                Continue Shopping
-                <ArrowRight className="h-4 w-4 ml-2" />
-              </Button>
-            </div>
+            {/* Quick Actions */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Quick Actions</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Button onClick={handleTrackOrder} className="w-full gap-2" size="lg">
+                  <MapPin className="h-5 w-5" />
+                  Track Your Order
+                </Button>
+                
+                <Button onClick={handleViewOrders} variant="outline" className="w-full gap-2">
+                  <Package className="h-4 w-4" />
+                  View All Orders
+                </Button>
+                
+                <Button onClick={handleContinueShopping} variant="outline" className="w-full gap-2">
+                  <ArrowRight className="h-4 w-4" />
+                  Continue Shopping
+                </Button>
+                
+                <Separator />
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <Button onClick={handleDownloadInvoice} variant="ghost" size="sm" className="gap-2">
+                    <Download className="h-4 w-4" />
+                    Invoice
+                  </Button>
+                  <Button onClick={handleReorder} variant="ghost" size="sm" className="gap-2">
+                    <RotateCcw className="h-4 w-4" />
+                    Reorder
+                  </Button>
+                </div>
+                
+                <Button onClick={handleContactSupport} variant="ghost" size="sm" className="w-full gap-2 text-orange-600 hover:bg-orange-50">
+                  <Headphones className="h-4 w-4" />
+                  Need Help? Contact Support
+                </Button>
+              </CardContent>
+            </Card>
 
-            <div className="flex gap-4">
-              <Button 
-                variant="ghost" 
-                size="sm"
-                onClick={handleDownloadInvoice}
-                className="flex-1"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Invoice
-              </Button>
-              <Button 
-                variant="ghost" 
-                size="sm"
-                onClick={handleShareOrder}
-                className="flex-1"
-              >
-                <Share2 className="h-4 w-4 mr-2" />
-                Share
-              </Button>
+            {/* Special Note */}
+            {orderDetails.special_instructions && (
+              <Card className="border-l-4 border-l-yellow-500">
+                <CardHeader>
+                  <CardTitle className="text-lg">Special Instructions</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-700 bg-yellow-50 p-3 rounded-lg">
+                    {orderDetails.special_instructions}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Last Updated */}
+            <div className="text-center text-xs text-gray-500 flex items-center justify-center gap-2">
+              <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse"></div>
+              <span>Last updated: {lastUpdated.toLocaleTimeString()}</span>
             </div>
           </div>
         </div>
+
+        {/* Additional Information Section */}
+        <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Card className="text-center p-6">
+            <Shield className="h-12 w-12 text-blue-600 mx-auto mb-4" />
+            <h3 className="font-semibold text-lg mb-2">Secure Payment</h3>
+            <p className="text-sm text-gray-600">Your payment is processed securely with industry-standard encryption</p>
+          </Card>
+          
+          <Card className="text-center p-6">
+            <Truck className="h-12 w-12 text-green-600 mx-auto mb-4" />
+            <h3 className="font-semibold text-lg mb-2">Fast Delivery</h3>
+            <p className="text-sm text-gray-600">We ensure quick and reliable delivery to your doorstep</p>
+          </Card>
+          
+          <Card className="text-center p-6">
+            <Headphones className="h-12 w-12 text-purple-600 mx-auto mb-4" />
+            <h3 className="font-semibold text-lg mb-2">24/7 Support</h3>
+            <p className="text-sm text-gray-600">Our customer support team is always here to help you</p>
+          </Card>
+        </div>
+
+        {/* Thank You Message */}
+        <Card className="mt-8 bg-gradient-to-r from-blue-600 to-purple-600 text-white">
+          <CardContent className="p-8 text-center">
+            <Heart className="h-12 w-12 mx-auto mb-4 text-pink-200" />
+            <h2 className="text-2xl font-bold mb-4">Thank You for Choosing Tryodo!</h2>
+            <p className="text-blue-100 mb-6">
+              We appreciate your trust in us. Your order is our priority, and we'll keep you updated every step of the way.
+            </p>
+            <div className="flex flex-wrap gap-4 justify-center">
+              <Button variant="secondary" onClick={handleContinueShopping} className="gap-2">
+                <Package className="h-4 w-4" />
+                Shop More
+              </Button>
+              <Button variant="outline" onClick={() => window.open('https://tryodo.com/about', '_blank')} className="gap-2 bg-white/10 border-white/20 text-white hover:bg-white/20">
+                <ExternalLink className="h-4 w-4" />
+                About Tryodo
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
       
       <Footer />

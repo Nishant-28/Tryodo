@@ -9,6 +9,9 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
 import { Eye, EyeOff, Loader2, Shield, Users, Store, ArrowLeft, Smartphone, Zap, Truck } from 'lucide-react';
 import { toast } from 'sonner';
+import { Toaster } from "@/components/ui/sonner";
+import { ProfileFixButton } from '@/components/ProfileFixButton';
+
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -22,43 +25,121 @@ const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Test function to check database connection
+  const testConnection = async () => {
+    toast.info('🔍 Testing database connection...');
+    try {
+      console.log('🔍 Testing database connection...');
+      const { testDbConnection } = await import('@/lib/supabase');
+      const result = await testDbConnection();
+      console.log('🔍 Database test result:', result);
+      
+      if (result.success) {
+        const message = result.message || 'Database connection successful!';
+        toast.success(`✅ ${message}`);
+        
+        if (result.hasSession !== undefined) {
+          toast.info(`Session status: ${result.hasSession ? 'Active' : 'No active session'}`);
+        }
+      } else {
+        const errorMessage = result.error || 'Unknown error';
+        toast.error(`❌ Database connection failed: ${errorMessage}`);
+        console.error('Database connection error:', errorMessage);
+      }
+    } catch (error) {
+      console.error('❌ Database test error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      toast.error(`❌ Database test failed: ${errorMessage}`);
+    }
+  };
+
   // Redirect if already logged in
   useEffect(() => {
     if (user && profile) {
+      console.log('🔄 Login redirect: User and profile available', { 
+        userEmail: user.email, 
+        profileRole: profile.role 
+      });
+      
       const roleRedirects = {
         customer: '/',
         vendor: '/vendor-dashboard',
         admin: '/admin-dashboard',
-        delivery_boy: '/delivery-partner-dashboard',
+        delivery_partner: '/delivery-partner-dashboard',
       };
       
-      const from = location.state?.from?.pathname || roleRedirects[profile.role];
+      const targetRedirect = roleRedirects[profile.role];
+      const from = location.state?.from?.pathname || targetRedirect;
+      
+      console.log('🎯 Redirecting to:', from, 'for role:', profile.role);
       navigate(from, { replace: true });
+    } else if (user && !profile) {
+      console.log('⚠️ User exists but no profile yet, waiting...');
     }
   }, [user, profile, navigate, location]);
+
+  const validateForm = () => {
+    const newErrors: Record<string, string> = {};
+
+    if (!email.trim()) {
+      newErrors.email = 'Email is required';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      newErrors.email = 'Please enter a valid email address';
+    }
+
+    if (!password) {
+      newErrors.password = 'Password is required';
+    } else if (password.length < 6) {
+      newErrors.password = 'Password must be at least 6 characters';
+    }
+
+    setError(Object.keys(newErrors).length > 0 ? Object.values(newErrors)[0] : '');
+    return Object.keys(newErrors).length === 0;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // Validate form before submission
+    if (!validateForm()) {
+      return;
+    }
+
     setLoading(true);
 
     try {
-      if (!email || !password) {
-        setError('Please fill in all fields');
-        return;
-      }
-
-      const result = await signIn(email, password);
+      console.log('🔐 Attempting sign in for:', email);
+      
+      // Show loading toast
+      const loadingToast = toast.loading('Signing you in...');
+      
+      const result = await signIn(email.trim().toLowerCase(), password);
+      console.log('🔐 Sign in result:', result);
+      
+      // Dismiss loading toast
+      toast.dismiss(loadingToast);
       
       if (result.success) {
-        // The auth context will handle profile fetching
-        // Just redirect - the useEffect will handle the rest
+        console.log('✅ Sign in successful, waiting for profile...');
+        toast.success('Welcome back! Redirecting...');
+        
+        // Clear form
+        setEmail('');
+        setPassword('');
+        
+        // The auth context will handle profile fetching and redirection
       } else {
-        setError(result.error || 'Login failed');
+        console.error('❌ Sign in failed:', result.error);
+        const errorMessage = result.error || 'Login failed. Please try again.';
+        setError(errorMessage);
+        toast.error(errorMessage);
       }
     } catch (err) {
-      setError('An unexpected error occurred');
-      console.error('Login error:', err);
+      console.error('❌ Unexpected login error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
+      setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -87,7 +168,7 @@ const Login = () => {
         gradient: 'from-orange-500 to-red-600',
         bgGradient: 'from-orange-50 to-red-50',
       },
-      delivery_boy: {
+      delivery_partner: {
         icon: <Truck className="h-6 w-6" />,
         title: 'Delivery Partner',
         description: 'Manage your orders and deliveries',
@@ -157,6 +238,8 @@ const Login = () => {
               </CardDescription>
             </CardHeader>
 
+      
+
             <CardContent>
               <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
                 <TabsList className="grid w-full grid-cols-4 mb-6">
@@ -172,13 +255,13 @@ const Login = () => {
                     <Shield className="h-4 w-4 mr-1" />
                     Admin
                   </TabsTrigger>
-                  <TabsTrigger value="delivery_boy" className="text-xs">
-                    <Truck className="h-4 w-4 mr-1" />
-                    Delivery
-                  </TabsTrigger>
+                                  <TabsTrigger value="delivery_partner" className="text-xs">
+                  <Truck className="h-4 w-4 mr-1" />
+                  Delivery
+                </TabsTrigger>
                 </TabsList>
 
-                {['customer', 'vendor', 'admin', 'delivery_boy'].map((role) => (
+                {['customer', 'vendor', 'admin', 'delivery_partner'].map((role) => (
                   <TabsContent key={role} value={role} className="space-y-4">
                     <div className={`p-4 rounded-lg bg-gradient-to-r ${getRoleInfo(role).bgGradient} border-l-4 border-l-blue-500`}>
                       <div className="flex items-center space-x-3">
@@ -206,10 +289,23 @@ const Login = () => {
                           type="email"
                           placeholder="Enter your email"
                           value={email}
-                          onChange={(e) => setEmail(e.target.value)}
+                          onChange={(e) => {
+                            setEmail(e.target.value);
+                            if (error && (error.includes('email') || error.includes('Email'))) {
+                              setError('');
+                            }
+                          }}
+                          onBlur={() => {
+                            if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                              setError('Please enter a valid email address');
+                            }
+                          }}
                           disabled={loading}
-                          className="h-12"
+                          className={`h-12 ${error && (error.includes('email') || error.includes('Email')) ? 'border-red-500 focus:border-red-500' : ''}`}
                           required
+                          autoComplete="email"
+                          autoCapitalize="none"
+                          autoCorrect="off"
                         />
                       </div>
 
@@ -221,10 +317,21 @@ const Login = () => {
                             type={showPassword ? 'text' : 'password'}
                             placeholder="Enter your password"
                             value={password}
-                            onChange={(e) => setPassword(e.target.value)}
+                            onChange={(e) => {
+                              setPassword(e.target.value);
+                              if (error && (error.includes('password') || error.includes('Password') || error.includes('credentials'))) {
+                                setError('');
+                              }
+                            }}
+                            onBlur={() => {
+                              if (password && password.length < 6) {
+                                setError('Password must be at least 6 characters');
+                              }
+                            }}
                             disabled={loading}
-                            className="h-12 pr-12"
+                            className={`h-12 pr-12 ${error && (error.includes('password') || error.includes('Password') || error.includes('credentials')) ? 'border-red-500 focus:border-red-500' : ''}`}
                             required
+                            autoComplete="current-password"
                           />
                           <Button
                             type="button"
@@ -233,6 +340,7 @@ const Login = () => {
                             className="absolute right-0 top-0 h-12 px-3 hover:bg-transparent"
                             onClick={() => setShowPassword(!showPassword)}
                             disabled={loading}
+                            tabIndex={-1}
                           >
                             {showPassword ? (
                               <EyeOff className="h-4 w-4 text-gray-400" />
@@ -250,12 +358,23 @@ const Login = () => {
                         >
                           Forgot password?
                         </Link>
+                        {process.env.NODE_ENV === 'development' && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={testConnection}
+                            className="text-xs"
+                          >
+                            Test DB
+                          </Button>
+                        )}
                       </div>
 
                       <Button
                         type="submit"
-                        className={`w-full h-12 bg-gradient-to-r ${currentRoleInfo.gradient} hover:opacity-90 text-white font-semibold`}
-                        disabled={loading}
+                        className={`w-full h-12 bg-gradient-to-r ${currentRoleInfo.gradient} hover:opacity-90 text-white font-semibold transition-all duration-200 ${loading ? 'opacity-75 cursor-not-allowed' : ''}`}
+                        disabled={loading || !email.trim() || !password}
                       >
                         {loading ? (
                           <>
@@ -265,7 +384,7 @@ const Login = () => {
                         ) : (
                           <>
                             <Zap className="mr-2 h-4 w-4" />
-                            Sign In as {role.charAt(0).toUpperCase() + role.slice(1)}
+                            Sign In as {selectedTab.charAt(0).toUpperCase() + selectedTab.slice(1).replace('_', ' ')}
                           </>
                         )}
                       </Button>
@@ -287,6 +406,9 @@ const Login = () => {
               </p>
             </CardFooter>
           </Card>
+
+          {/* Profile Fix Button (only shows if user is logged in but has no profile) */}
+          <ProfileFixButton className="mt-6" />
 
           {/* Additional Info */}
           <div className="mt-8 text-center">

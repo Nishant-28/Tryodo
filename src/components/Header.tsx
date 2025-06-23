@@ -16,10 +16,11 @@ import {
 
 interface HeaderProps {
   cartItems?: number;
-  onCartClick: () => void;
+  onCartClick?: () => void;
+  hideCartOnMobile?: boolean;
 }
 
-const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
+const Header = ({ cartItems = 0, onCartClick, hideCartOnMobile = true }: HeaderProps) => {
   const { user, profile, signOut, loading } = useAuth();
   const navigate = useNavigate();
 
@@ -42,7 +43,7 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
       case 'admin': return Building;
       case 'vendor': return Store;
       case 'customer': return UserCircle;
-      case 'delivery_boy': return Package;
+      case 'delivery_partner': return Package;
       default: return User;
     }
   };
@@ -52,35 +53,35 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
   // Don't render header for non-authenticated users on protected pages
   if (!user) {
     return (
-      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-sm border-b border-gray-200 safe-area-pt">
-        <div className="container-mobile mx-auto px-4 py-3">
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm border-b border-gray-100 shadow-sm">
+        <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-3">
               <Link to="/login" className="touch-manipulation">
-                <img src="/Tryodo_Full_LOGO.png" alt="Tryodo Logo" className="h-16 sm:h-20 w-auto" />
+                <img src="/Tryodo_Full_LOGO.png" alt="Tryodo Logo" className="h-12 sm:h-16 w-auto" />
               </Link>
               <div className="hidden sm:block">
-                <span className="text-xs sm:text-sm text-gray-500">Electronics Marketplace</span>
+                <span className="text-sm text-gray-500 font-medium">Electronics Marketplace</span>
               </div>
             </div>
 
-            <nav className="hidden md:flex items-center space-x-6 lg:space-x-8">
-              <Link to="/about" className="text-gray-700 hover:text-blue-600 transition-colors font-medium touch-manipulation py-2">
+            <nav className="hidden md:flex items-center space-x-8">
+              <Link to="/about" className="text-gray-700 hover:text-blue-600 transition-colors font-medium py-2">
                 About
               </Link>
-              <Link to="/contact" className="text-gray-700 hover:text-blue-600 transition-colors font-medium touch-manipulation py-2">
+              <Link to="/contact" className="text-gray-700 hover:text-blue-600 transition-colors font-medium py-2">
                 Contact
               </Link>
             </nav>
 
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-3">
               <Link to="/login">
-                <Button variant="ghost" size="sm" className="min-h-touch touch-manipulation animate-press">
+                <Button variant="ghost" size="sm" className="min-h-touch touch-manipulation hover:bg-blue-50 hover:text-blue-600">
                   Sign In
                 </Button>
               </Link>
               <Link to="/signup">
-                <Button size="sm" className="bg-blue-600 hover:bg-blue-700 min-h-touch touch-manipulation animate-press">
+                <Button size="sm" className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 min-h-touch touch-manipulation shadow-md">
                   Sign Up
                 </Button>
               </Link>
@@ -92,45 +93,45 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
   }
 
   return (
-    <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-sm border-b border-gray-200 safe-area-pt">
-      <div className="container-mobile mx-auto px-4 py-3">
+    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm border-b border-gray-100 shadow-sm">
+      <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           {/* Logo */}
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-3">
             <Link 
               to={
                 profile?.role === 'customer' ? '/' : 
                 profile?.role === 'vendor' ? '/vendor-dashboard' : 
-                profile?.role === 'delivery_boy' ? '/delivery-partner-dashboard' :
+                profile?.role === 'delivery_partner' ? '/delivery-partner-dashboard' :
                 '/admin-dashboard'
               }
               className="touch-manipulation"
             >
-              <img src="/Tryodo_Full_LOGO.png" alt="Tryodo Logo" className="h-16 sm:h-20 w-auto" />
+              <img src="/Tryodo_Full_LOGO.png" alt="Tryodo Logo" className="h-12 sm:h-16 w-auto" />
             </Link>
             <div className="hidden sm:block">
-              <span className="text-xs sm:text-sm text-gray-500">Electronics Marketplace</span>
+              <span className="text-sm text-gray-500 font-medium">Electronics Marketplace</span>
             </div>
           </div>
 
-          {/* Role-specific Navigation */}
-          <nav className="hidden md:flex items-center space-x-6 lg:space-x-8">
+          {/* Desktop Navigation - Hidden on mobile for customers */}
+          <nav className={`hidden ${profile?.role === 'customer' ? 'lg:flex' : 'md:flex'} items-center space-x-8`}>
             {/* Customer Navigation */}
             {profile?.role === 'customer' && (
               <>
-                <Link to="/" className="text-gray-700 hover:text-blue-600 transition-colors font-medium touch-manipulation py-2">
+                <Link to="/" className="text-gray-700 hover:text-blue-600 transition-colors font-medium py-2">
                   Home
                 </Link>
-                <Link to="/order" className="text-gray-700 hover:text-blue-600 transition-colors font-medium touch-manipulation py-2">
+                <Link to="/order" className="text-gray-700 hover:text-blue-600 transition-colors font-medium py-2">
                   Order
                 </Link>
-                <Link to="/my-orders" className="text-gray-700 hover:text-blue-600 transition-colors font-medium touch-manipulation py-2">
+                <Link to="/my-orders" className="text-gray-700 hover:text-blue-600 transition-colors font-medium py-2">
                   My Orders
                 </Link>
-                <Link to="/about" className="text-gray-700 hover:text-blue-600 transition-colors font-medium touch-manipulation py-2">
+                <Link to="/about" className="text-gray-700 hover:text-blue-600 transition-colors font-medium py-2">
                   About
                 </Link>
-                <Link to="/contact" className="text-gray-700 hover:text-blue-600 transition-colors font-medium touch-manipulation py-2">
+                <Link to="/contact" className="text-gray-700 hover:text-blue-600 transition-colors font-medium py-2">
                   Contact
                 </Link>
               </>
@@ -139,7 +140,7 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
             {/* Vendor Navigation */}
             {profile?.role === 'vendor' && (
               <>
-                <Link to="/vendor-dashboard" className="text-green-600 hover:text-green-700 transition-colors font-medium touch-manipulation py-2">
+                <Link to="/vendor-dashboard" className="text-green-600 hover:text-green-700 transition-colors font-medium py-2">
                   Dashboard
                 </Link>
               </>
@@ -148,16 +149,16 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
             {/* Admin Navigation */}
             {profile?.role === 'admin' && (
               <>
-                <Link to="/admin-dashboard" className="text-purple-600 hover:text-purple-700 transition-colors font-medium touch-manipulation py-2">
+                <Link to="/admin-dashboard" className="text-purple-600 hover:text-purple-700 transition-colors font-medium py-2">
                   Dashboard
                 </Link>
               </>
             )}
 
             {/* Delivery Partner Navigation */}
-            {profile?.role === 'delivery_boy' && (
+            {profile?.role === 'delivery_partner' && (
               <>
-                <Link to="/delivery-partner-dashboard" className="text-orange-600 hover:text-orange-700 transition-colors font-medium touch-manipulation py-2">
+                <Link to="/delivery-partner-dashboard" className="text-orange-600 hover:text-orange-700 transition-colors font-medium py-2">
                   Dashboard
                 </Link>
               </>
@@ -165,18 +166,18 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
           </nav>
 
           {/* Actions */}
-          <div className="flex items-center space-x-2">
-            {/* Customer-only cart */}
-            {profile?.role === 'customer' && (
+          <div className="flex items-center space-x-3">
+            {/* Customer-only cart - Hidden on mobile if hideCartOnMobile is true */}
+            {profile?.role === 'customer' && onCartClick && (
               <Button 
                 variant="ghost" 
                 size="sm" 
-                className="relative min-h-touch min-w-touch touch-manipulation animate-press" 
+                className={`relative min-h-touch min-w-touch touch-manipulation active:scale-95 transition-transform hover:bg-orange-50 hover:text-orange-600 ${hideCartOnMobile ? 'hidden sm:flex' : 'flex'} items-center justify-center`}
                 onClick={onCartClick}
               >
                 <ShoppingCart className="h-5 w-5" />
                 {cartItems > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-medium">
+                  <span className="absolute -top-1 -right-1 bg-gradient-to-r from-orange-500 to-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-medium shadow-lg animate-pulse">
                     {cartItems > 99 ? '99+' : cartItems}
                   </span>
                 )}
@@ -190,191 +191,91 @@ const Header = ({ cartItems = 0, onCartClick }: HeaderProps) => {
                   <Button 
                     variant="ghost" 
                     size="sm" 
-                    className="flex items-center space-x-2 min-h-touch touch-manipulation animate-press"
+                    className="flex items-center space-x-2 min-h-touch touch-manipulation active:scale-95 transition-transform hover:bg-orange-50 hover:text-orange-600"
                   >
                     <RoleIcon className="h-5 w-5" />
-                    <span className="hidden sm:block text-sm truncate max-w-20 lg:max-w-32">
+                    <span className="hidden sm:block text-sm truncate max-w-20 lg:max-w-32 font-medium">
                       {profile.full_name || profile.email.split('@')[0]}
                     </span>
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 rounded-mobile">
-                  <DropdownMenuLabel className="flex flex-col py-3">
-                    <span className="font-medium text-sm">
-                      {profile.full_name || profile.email.split('@')[0]}
-                    </span>
-                    <span className="text-xs text-gray-500 capitalize">{profile.role}</span>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>
+                    <div className="flex flex-col space-y-1">
+                      <p className="text-sm font-medium leading-none">
+                        {profile.full_name || 'User'}
+                      </p>
+                      <p className="text-xs leading-none text-muted-foreground">
+                        {profile.email}
+                      </p>
+                      <p className="text-xs leading-none text-muted-foreground capitalize">
+                        {profile.role.replace('_', ' ')}
+                      </p>
+                    </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   
                   {/* Role-specific menu items */}
-                  {profile.role === 'customer' && (
+                  {profile?.role === 'customer' && (
                     <>
-                      <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                        <Link to="/profile" className="flex items-center py-3">
-                          <UserCircle className="mr-3 h-4 w-4" />
+                      <DropdownMenuItem asChild>
+                        <Link to="/profile" className="flex items-center cursor-pointer">
+                          <User className="mr-2 h-4 w-4" />
                           Profile
                         </Link>
                       </DropdownMenuItem>
-                      <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                        <Link to="/my-orders" className="flex items-center py-3">
-                          <Package className="mr-3 h-4 w-4" />
+                      <DropdownMenuItem asChild>
+                        <Link to="/my-orders" className="flex items-center cursor-pointer">
+                          <Package className="mr-2 h-4 w-4" />
                           My Orders
-                        </Link>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                        <Link to="/profile" className="flex items-center py-3">
-                          <Settings className="mr-3 h-4 w-4" />
-                          Settings
                         </Link>
                       </DropdownMenuItem>
                     </>
                   )}
-                  
-                  {profile.role === 'vendor' && (
-                    <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                      <Link to="/vendor-dashboard" className="flex items-center py-3">
-                        <Store className="mr-3 h-4 w-4" />
-                        Vendor Dashboard
-                      </Link>
-                    </DropdownMenuItem>
+
+                  {profile?.role === 'vendor' && (
+                    <>
+                      <DropdownMenuItem asChild>
+                        <Link to="/vendor-dashboard" className="flex items-center cursor-pointer">
+                          <Store className="mr-2 h-4 w-4" />
+                          Dashboard
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link to="/vendor/add-product" className="flex items-center cursor-pointer">
+                          <Package className="mr-2 h-4 w-4" />
+                          Add Product
+                        </Link>
+                      </DropdownMenuItem>
+                    </>
                   )}
-                  
-                  {profile.role === 'admin' && (
-                    <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                      <Link to="/admin-dashboard" className="flex items-center py-3">
-                        <Building className="mr-3 h-4 w-4" />
+
+                  {profile?.role === 'admin' && (
+                    <DropdownMenuItem asChild>
+                      <Link to="/admin-dashboard" className="flex items-center cursor-pointer">
+                        <Building className="mr-2 h-4 w-4" />
                         Admin Dashboard
                       </Link>
                     </DropdownMenuItem>
                   )}
-                  
-                  {profile.role === 'delivery_boy' && (
-                    <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                      <Link to="/delivery-partner-dashboard" className="flex items-center py-3">
-                        <Package className="mr-3 h-4 w-4" />
-                        Delivery Dashboard
+
+                  {profile?.role === 'delivery_partner' && (
+                    <DropdownMenuItem asChild>
+                      <Link to="/delivery-partner-dashboard" className="flex items-center cursor-pointer">
+                        <Package className="mr-2 h-4 w-4" />
+                        Dashboard
                       </Link>
                     </DropdownMenuItem>
                   )}
-                  
+
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem 
-                    onClick={handleSignOut} 
-                    className="text-red-600 focus:text-red-600 touch-manipulation min-h-touch py-3"
-                  >
-                    <LogOut className="mr-3 h-4 w-4" />
+                  <DropdownMenuItem onClick={handleSignOut} className="text-red-600 focus:text-red-600">
+                    <LogOut className="mr-2 h-4 w-4" />
                     Sign Out
                   </DropdownMenuItem>
-                  
-                  {/* Debug option in development */}
-                  {process.env.NODE_ENV === 'development' && (
-                    <DropdownMenuItem 
-                      onClick={() => {
-                        console.log('🔧 Force auth reset triggered');
-                        forceAuthReset();
-                      }} 
-                      className="text-orange-600 touch-manipulation min-h-touch py-3"
-                    >
-                      <Bug className="mr-3 h-4 w-4" />
-                      Force Reset Auth
-                    </DropdownMenuItem>
-                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
-
-            {/* Mobile menu */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="md:hidden min-h-touch min-w-touch touch-manipulation animate-press"
-                >
-                  <Menu className="h-5 w-5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 rounded-mobile">
-                <DropdownMenuLabel className="py-3">
-                  <span className="font-medium text-sm">Navigation</span>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                
-                {/* Customer mobile menu */}
-                {profile?.role === 'customer' && (
-                  <>
-                    <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                      <Link to="/" className="py-3">
-                        <UserCircle className="mr-3 h-4 w-4" />
-                        Home
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                      <Link to="/order" className="py-3">
-                        <Search className="mr-3 h-4 w-4" />
-                        Order
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                      <Link to="/my-orders" className="py-3">
-                        <Package className="mr-3 h-4 w-4" />
-                        My Orders
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                      <Link to="/about" className="py-3">
-                        <Shield className="mr-3 h-4 w-4" />
-                        About
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                      <Link to="/contact" className="py-3">
-                        <User className="mr-3 h-4 w-4" />
-                        Contact
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                      <Link to="/profile" className="py-3">
-                        <Settings className="mr-3 h-4 w-4" />
-                        Profile
-                      </Link>
-                    </DropdownMenuItem>
-                  </>
-                )}
-
-                {/* Vendor mobile menu */}
-                {profile?.role === 'vendor' && (
-                  <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                    <Link to="/vendor-dashboard" className="py-3">
-                      <Store className="mr-3 h-4 w-4" />
-                      Dashboard
-                    </Link>
-                  </DropdownMenuItem>
-                )}
-
-                {/* Admin mobile menu */}
-                {profile?.role === 'admin' && (
-                  <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                    <Link to="/admin-dashboard" className="py-3">
-                      <Building className="mr-3 h-4 w-4" />
-                      Dashboard
-                    </Link>
-                  </DropdownMenuItem>
-                )}
-
-                {/* Delivery Partner mobile menu */}
-                {profile?.role === 'delivery_boy' && (
-                  <DropdownMenuItem asChild className="touch-manipulation min-h-touch">
-                    <Link to="/delivery-partner-dashboard" className="py-3">
-                      <Package className="mr-3 h-4 w-4" />
-                      Dashboard
-                    </Link>
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
           </div>
         </div>
       </div>

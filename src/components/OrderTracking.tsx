@@ -15,40 +15,9 @@ interface OrderTrackingProps {
 }
 
 interface TrackingData {
-  order_id: string;
-  order_number: string;
-  current_status: string;
-  customer_name: string;
-  customer_phone: string;
-  vendor_name: string;
-  vendor_phone: string;
-  delivery_partner_name?: string;
-  delivery_partner_phone?: string;
-  pickup_otp?: string;
-  delivery_otp?: string;
-  created_at: string;
-  confirmed_at?: string;
-  assigned_at?: string;
-  picked_up_at?: string;
-  out_for_delivery_at?: string;
-  delivered_at?: string;
-  estimated_delivery: string;
-  delivery_address: any;
-  tracking_updates: TrackingUpdate[];
-  live_location?: {
-    latitude: number;
-    longitude: number;
-    address: string;
-    updated_at: string;
-  };
-}
-
-interface TrackingUpdate {
-  id: string;
-  status: string;
-  message: string;
-  timestamp: string;
-  location?: string;
+  order: any;
+  deliveryPartnerOrder: any;
+  deliveryPartner: any;
 }
 
 const OrderTracking = ({ orderId }: OrderTrackingProps) => {
@@ -58,47 +27,94 @@ const OrderTracking = ({ orderId }: OrderTrackingProps) => {
 
   useEffect(() => {
     loadTracking();
-    const interval = setInterval(loadTracking, 30000); // Update every 30 seconds
-    return () => clearInterval(interval);
   }, [orderId]);
 
   const loadTracking = async () => {
     try {
       setLoading(true);
       setError(null);
+      
+      console.log('🔍 OrderTracking: Loading tracking for order:', orderId);
 
-      // Fetch comprehensive tracking data
-      const { data, error } = await supabase
-        .from('order_tracking_view')
-        .select(`
-          *,
-          order_tracking_updates (
-            id,
-            status,
-            message,
-            timestamp,
-            location
-          ),
-          delivery_partner_location (
-            latitude,
-            longitude,
-            address,
-            updated_at
-          )
-        `)
-        .eq('order_id', orderId)
+      // Fetch order details - this should always work for customers
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('id', orderId)
         .single();
 
-      if (error) throw error;
+      if (orderError) {
+        console.error('❌ OrderTracking: Order fetch error:', orderError);
+        throw orderError;
+      }
 
+      console.log('✅ OrderTracking: Order fetched:', order);
+
+      // Try to fetch order items (non-critical)
+      let orderItems = [];
+      try {
+        const { data: items, error: itemsError } = await supabase
+          .from('order_items')
+          .select(`
+            *,
+            vendor:vendors (
+              id,
+              business_name,
+              contact_phone
+            )
+          `)
+          .eq('order_id', orderId);
+
+        if (itemsError) {
+          console.warn('⚠️ OrderTracking: Order items fetch error:', itemsError);
+        } else {
+          orderItems = items || [];
+          console.log('✅ OrderTracking: Order items fetched:', orderItems);
+        }
+      } catch (err) {
+        console.warn('⚠️ OrderTracking: Order items query failed, continuing without items');
+      }
+
+      // Try to fetch delivery partner order details (non-critical due to RLS)
+      let deliveryPartnerOrder = null;
+      let deliveryPartner = null;
+      
+      try {
+        const { data: dpOrder, error: deliveryError } = await supabase
+          .from('delivery_partner_orders')
+          .select(`
+            *,
+            delivery_partner:delivery_partners (
+              id,
+              profile:profiles (
+                full_name,
+                phone
+              )
+            )
+          `)
+          .eq('order_id', orderId)
+          .maybeSingle();
+
+        if (deliveryError) {
+          console.warn('⚠️ OrderTracking: Delivery partner fetch error (might be RLS):', deliveryError);
+        } else {
+          deliveryPartnerOrder = dpOrder;
+          deliveryPartner = dpOrder?.delivery_partner || null;
+          console.log('✅ OrderTracking: Delivery partner order fetched:', deliveryPartnerOrder);
+        }
+      } catch (err) {
+        console.warn('⚠️ OrderTracking: Delivery partner query failed (likely RLS), continuing without delivery info');
+      }
+
+      // Always set tracking data, even if some parts failed
       setTracking({
-        ...data,
-        tracking_updates: data.order_tracking_updates || [],
-        live_location: data.delivery_partner_location?.[0]
+        order: { ...order, order_items: orderItems },
+        deliveryPartnerOrder,
+        deliveryPartner
       });
     } catch (error: any) {
-      console.error('Failed to load tracking:', error);
-      setError('Failed to load tracking information');
+      console.error('❌ OrderTracking: Failed to load tracking:', error);
+      setError(`Failed to load tracking information: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -107,48 +123,50 @@ const OrderTracking = ({ orderId }: OrderTrackingProps) => {
   const getStatusSteps = () => {
     if (!tracking) return [];
     
+    const { order, deliveryPartnerOrder } = tracking;
+    
     const steps = [
       {
         key: 'confirmed',
         title: 'Order Confirmed',
-        description: 'Your order has been confirmed by the vendor',
-        timestamp: tracking.confirmed_at,
+        description: 'Your order has been confirmed',
+        timestamp: order.order_status !== 'pending' ? order.created_at : null,
         icon: CheckCircle,
-        completed: true
+        completed: order.order_status !== 'pending'
       },
       {
         key: 'assigned_to_delivery',
         title: 'Assigned to Delivery Partner',
-        description: tracking.delivery_partner_name 
-          ? `Assigned to ${tracking.delivery_partner_name}` 
+        description: deliveryPartnerOrder?.delivery_partner?.profile?.full_name 
+          ? `Assigned to ${deliveryPartnerOrder.delivery_partner.profile.full_name}` 
           : 'Waiting for delivery partner assignment',
-        timestamp: tracking.assigned_at,
+        timestamp: deliveryPartnerOrder?.assigned_at,
         icon: User,
-        completed: !!tracking.assigned_at
+        completed: !!deliveryPartnerOrder
       },
       {
         key: 'picked_up',
         title: 'Picked Up',
-        description: 'Order picked up from vendor using OTP verification',
-        timestamp: tracking.picked_up_at,
+        description: 'Order picked up from vendor',
+        timestamp: deliveryPartnerOrder?.picked_up_at,
         icon: Package,
-        completed: !!tracking.picked_up_at
+        completed: !!deliveryPartnerOrder?.picked_up_at
       },
       {
         key: 'out_for_delivery',
         title: 'Out for Delivery',
         description: 'Your order is on the way to your location',
-        timestamp: tracking.out_for_delivery_at,
+        timestamp: order.order_status === 'out_for_delivery' ? order.updated_at : null,
         icon: Truck,
-        completed: !!tracking.out_for_delivery_at
+        completed: ['out_for_delivery', 'delivered'].includes(order.order_status)
       },
       {
         key: 'delivered',
         title: 'Delivered',
-        description: 'Order delivered successfully with OTP verification',
-        timestamp: tracking.delivered_at,
+        description: 'Order delivered successfully',
+        timestamp: deliveryPartnerOrder?.delivered_at || order.actual_delivery_date,
         icon: CheckCircle,
-        completed: !!tracking.delivered_at
+        completed: order.order_status === 'delivered'
       }
     ];
 
@@ -218,6 +236,7 @@ const OrderTracking = ({ orderId }: OrderTrackingProps) => {
     );
   }
 
+  const { order, deliveryPartnerOrder, deliveryPartner } = tracking;
   const steps = getStatusSteps();
   const progress = getDeliveryProgress();
 
@@ -237,79 +256,61 @@ const OrderTracking = ({ orderId }: OrderTrackingProps) => {
             {steps.map((step, index) => (
               <div 
                 key={step.key}
-                className={`text-center p-2 rounded-lg text-xs border ${
+                className={`text-center p-3 rounded-lg text-xs ${
                   step.completed 
-                    ? 'bg-green-50 text-green-800 border-green-200' 
-                    : index === steps.findIndex(s => !s.completed)
-                      ? 'bg-blue-50 text-blue-800 border-blue-200'
-                      : 'bg-gray-50 text-gray-500 border-gray-200'
+                    ? 'bg-green-100 text-green-800' 
+                    : 'bg-gray-100 text-gray-500'
                 }`}
               >
-                <step.icon className="h-4 w-4 mx-auto mb-1" />
+                <step.icon className="h-5 w-5 mx-auto mb-1" />
                 <div className="font-medium">{step.title}</div>
+                <div className="text-xs opacity-75 mt-1">
+                  {step.timestamp ? formatTimeAgo(step.timestamp) : 'Pending'}
+                </div>
               </div>
             ))}
           </div>
         </CardContent>
       </Card>
 
-      {/* OTP Information */}
-      {(tracking.pickup_otp || tracking.delivery_otp) && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Shield className="h-5 w-5 mr-2" />
-              OTP Information
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {tracking.pickup_otp && !tracking.picked_up_at && (
-              <div className="bg-blue-50 rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-medium text-blue-900">Pickup OTP</h4>
-                    <p className="text-sm text-blue-700">For delivery partner to collect from vendor</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl font-bold text-blue-600">{tracking.pickup_otp}</span>
-                    <Button 
-                      size="sm" 
-                      variant="outline"
-                      onClick={() => copyOTP(tracking.pickup_otp!, 'Pickup')}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-            
-            {tracking.delivery_otp && tracking.out_for_delivery_at && !tracking.delivered_at && (
-              <div className="bg-green-50 rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-medium text-green-900">Delivery OTP</h4>
-                    <p className="text-sm text-green-700">Share with delivery partner upon arrival</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl font-bold text-green-600">{tracking.delivery_otp}</span>
-                    <Button 
-                      size="sm" 
-                      variant="outline"
-                      onClick={() => copyOTP(tracking.delivery_otp!, 'Delivery')}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      {/* Order Details */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Order Details</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <span className="font-medium">Order Number:</span> #{order.order_number}
+            </div>
+            <div>
+              <span className="font-medium">Status:</span> 
+              <Badge className="ml-2" variant="outline">
+                {order.order_status.replace('_', ' ').toUpperCase()}
+              </Badge>
+            </div>
+            <div>
+              <span className="font-medium">Total Amount:</span> ₹{order.total_amount}
+            </div>
+            <div>
+              <span className="font-medium">Payment Status:</span>
+              <Badge className="ml-2" variant="outline">
+                {order.payment_status.replace('_', ' ').toUpperCase()}
+              </Badge>
+            </div>
+          </div>
 
-      {/* Delivery Partner Information */}
-      {tracking.delivery_partner_name && (
+          {order.estimated_delivery_date && (
+            <div>
+              <span className="font-medium">Estimated Delivery:</span> {' '}
+              {new Date(order.estimated_delivery_date).toLocaleDateString('en-IN')}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Delivery Partner Info */}
+      {deliveryPartner && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center">
@@ -317,91 +318,61 @@ const OrderTracking = ({ orderId }: OrderTrackingProps) => {
               Delivery Partner
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <User className="h-4 w-4 text-gray-500" />
-                  <span className="font-medium">{tracking.delivery_partner_name}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Phone className="h-4 w-4 text-gray-500" />
-                  <span>{tracking.delivery_partner_phone}</span>
-                </div>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <User className="h-4 w-4 text-blue-600" />
+                <span>{deliveryPartner.profile?.full_name || 'N/A'}</span>
               </div>
-              
-              {tracking.live_location && (
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Navigation className="h-4 w-4 text-gray-500" />
-                    <span className="font-medium">Live Location</span>
+              <div className="flex items-center gap-2">
+                <Phone className="h-4 w-4 text-blue-600" />
+                <span>{deliveryPartner.profile?.phone || 'N/A'}</span>
+              </div>
+            </div>
+
+            {/* OTP Information */}
+            {deliveryPartnerOrder && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                {deliveryPartnerOrder.pickup_otp && (
+                  <div className="bg-blue-50 p-3 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-medium text-blue-900">Pickup OTP</div>
+                        <div className="text-lg font-bold text-blue-600">{deliveryPartnerOrder.pickup_otp}</div>
+                      </div>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => copyOTP(deliveryPartnerOrder.pickup_otp, 'Pickup')}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
-                  <p className="text-sm text-gray-600">{tracking.live_location.address}</p>
-                  <p className="text-xs text-gray-500">
-                    Updated {formatTimeAgo(tracking.live_location.updated_at)}
-                  </p>
-                </div>
-          )}
-        </div>
+                )}
+
+                {deliveryPartnerOrder.delivery_otp && (
+                  <div className="bg-green-50 p-3 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-medium text-green-900">Delivery OTP</div>
+                        <div className="text-lg font-bold text-green-600">{deliveryPartnerOrder.delivery_otp}</div>
+                      </div>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => copyOTP(deliveryPartnerOrder.delivery_otp, 'Delivery')}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
-
-      {/* Detailed Timeline */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Order Timeline</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {steps.map((step, index) => (
-              <div key={step.key} className="flex items-start gap-4">
-                <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-                  step.completed 
-                    ? 'bg-green-100 text-green-600' 
-                    : index === steps.findIndex(s => !s.completed)
-                      ? 'bg-blue-100 text-blue-600'
-                      : 'bg-gray-100 text-gray-400'
-                }`}>
-                  <step.icon className="h-4 w-4" />
-                </div>
-                
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-medium text-gray-900">{step.title}</h4>
-                    <span className="text-sm text-gray-500">{formatTimeAgo(step.timestamp)}</span>
-                  </div>
-                  <p className="text-sm text-gray-600 mt-1">{step.description}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-          
-          {/* Additional tracking updates */}
-          {tracking.tracking_updates.length > 0 && (
-            <div className="mt-6 pt-6 border-t">
-              <h4 className="font-medium mb-4">Additional Updates</h4>
-              <div className="space-y-3">
-                {tracking.tracking_updates.map((update) => (
-                  <div key={update.id} className="flex items-start gap-3">
-                    <div className="w-2 h-2 bg-blue-600 rounded-full mt-2"></div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium text-sm">{update.status}</span>
-                        <span className="text-xs text-gray-500">{formatTimeAgo(update.timestamp)}</span>
-                      </div>
-                      <p className="text-sm text-gray-600">{update.message}</p>
-                      {update.location && (
-                        <p className="text-xs text-gray-500 mt-1">📍 {update.location}</p>
-                      )}
-                    </div>
-          </div>
-        ))}
-      </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       {/* Delivery Address */}
       <Card>
@@ -413,17 +384,10 @@ const OrderTracking = ({ orderId }: OrderTrackingProps) => {
         </CardHeader>
         <CardContent>
           <div className="text-sm">
-            <p className="font-medium">{tracking.customer_name}</p>
-            <p className="text-gray-600">{tracking.customer_phone}</p>
-            <div className="mt-2">
-              <p>{tracking.delivery_address?.address_line1}</p>
-              {tracking.delivery_address?.address_line2 && (
-                <p>{tracking.delivery_address.address_line2}</p>
-              )}
-              <p>
-                {tracking.delivery_address?.city}, {tracking.delivery_address?.state} - {tracking.delivery_address?.pincode}
-              </p>
-            </div>
+            {order.delivery_address?.address_line1}
+            {order.delivery_address?.address_line2 && `, ${order.delivery_address.address_line2}`}
+            <br />
+            {order.delivery_address?.city}, {order.delivery_address?.state} - {order.delivery_address?.pincode}
           </div>
         </CardContent>
       </Card>

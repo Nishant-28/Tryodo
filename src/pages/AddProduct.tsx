@@ -40,7 +40,6 @@ interface QualityType {
   id: string;
   name: string;
   description?: string;
-  category_id: string;
   sort_order: number;
 }
 
@@ -124,41 +123,75 @@ const AddProduct = () => {
 
   useEffect(() => {
     if (profile) {
+      console.log('AddProduct: Current profile:', profile);
       if (profile.role === 'vendor') {
         const fetchVendorId = async () => {
           try {
-            // First get the profile ID from the profiles table
-            const { data: profileData, error: profileError } = await supabase
-              .from('profiles')
-              .select('id')
-              .eq('user_id', profile.user_id)
-              .single();
+            console.log('AddProduct: Fetching vendor ID for profile:', profile);
+            
+            // The profile object already contains the profile ID from the database
+            const profileId = profile.id;
+            console.log('AddProduct: Using profile ID:', profileId);
 
-            if (profileError || !profileData) {
-              return;
-            }
-
-            // Then get vendor ID using the profile ID
+            // Get vendor ID using the profile ID directly
             const { data: vendorData, error: vendorError } = await supabase
               .from('vendors')
-              .select('id')
-              .eq('profile_id', profileData.id)
+              .select('id, business_name')
+              .eq('profile_id', profileId)
               .single();
 
-            if (vendorError || !vendorData) {
+            console.log('AddProduct: Vendor query result:', { vendorData, vendorError });
+
+            if (vendorError) {
+              console.error('AddProduct: Vendor query error:', vendorError);
+              toast({
+                title: "Error",
+                description: "Could not find vendor account. Please contact support.",
+                variant: "destructive",
+              });
               return;
             }
 
+            if (!vendorData) {
+              console.error('AddProduct: No vendor data found');
+              toast({
+                title: "Error", 
+                description: "Vendor account not found. Please contact support.",
+                variant: "destructive",
+              });
+              return;
+            }
+
+            console.log('AddProduct: Setting vendor ID:', vendorData.id);
             setVendorId(vendorData.id);
+            
+            toast({
+              title: "Success",
+              description: `Connected to vendor account: ${vendorData.business_name}`,
+            });
           } catch (error) {
-            // Error handled silently
+            console.error('AddProduct: Error fetching vendor ID:', error);
+            toast({
+              title: "Error",
+              description: "Failed to load vendor information.",
+              variant: "destructive",
+            });
           }
         };
 
         fetchVendorId();
+      } else {
+        console.log('AddProduct: User is not a vendor, role:', profile.role);
+        toast({
+          title: "Access Denied",
+          description: "Only vendors can add products.",
+          variant: "destructive",
+        });
       }
+    } else {
+      console.log('AddProduct: No profile available');
     }
-  }, [profile]);
+  }, [profile, toast]);
 
   // Load master data on component mount
   useEffect(() => {
@@ -256,10 +289,8 @@ const AddProduct = () => {
     return selectedBrand === '' || model.brand_id === selectedBrand;
   });
 
-  // Filter quality types when category changes
-  const filteredQualityTypes = qualityTypes.filter(qt => 
-    selectedCategory === '' || qt.category_id === selectedCategory
-  );
+  // Quality types are global and apply to all categories, so no filtering needed
+  const filteredQualityTypes = qualityTypes;
 
   // Filter generic products when category changes
   const filteredGenericProducts = genericProducts.filter(gp => 
@@ -748,7 +779,7 @@ const AddProduct = () => {
                     <Select
                       value={phoneForm.category_id}
                       onValueChange={(value) => {
-                        setPhoneForm(prev => ({ ...prev, category_id: value, quality_type_id: '' }));
+                        setPhoneForm(prev => ({ ...prev, category_id: value }));
                         setSelectedCategory(value);
                       }}
                     >
@@ -770,7 +801,6 @@ const AddProduct = () => {
                     <Select
                       value={phoneForm.quality_type_id}
                       onValueChange={(value) => setPhoneForm(prev => ({ ...prev, quality_type_id: value }))}
-                      disabled={!phoneForm.category_id}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select quality type" />
@@ -788,9 +818,6 @@ const AddProduct = () => {
                         ))}
                       </SelectContent>
                     </Select>
-                    {phoneForm.category_id && filteredQualityTypes.length === 0 && (
-                      <p className="text-sm text-gray-500 mt-1">No quality types available for this category</p>
-                    )}
                   </div>
                 </div>
 
@@ -1028,7 +1055,6 @@ const AddProduct = () => {
                   <Select
                     value={genericForm.quality_type_id}
                     onValueChange={(value) => setGenericForm(prev => ({ ...prev, quality_type_id: value }))}
-                    disabled={!selectedCategory}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select quality type" />
@@ -1046,9 +1072,6 @@ const AddProduct = () => {
                       ))}
                     </SelectContent>
                   </Select>
-                  {selectedCategory && filteredQualityTypes.length === 0 && (
-                    <p className="text-sm text-gray-500 mt-1">No quality types available for this category</p>
-                  )}
                 </div>
 
                 {/* Pricing */}

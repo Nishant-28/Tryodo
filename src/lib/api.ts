@@ -1200,41 +1200,79 @@ export class OrderAPI {
       
       console.log('User authenticated:', user.email);
       
-      // First try using the RPC function to bypass CORS restrictions
+      // Use upsert approach to avoid CORS issues
       try {
-        const { data, error } = await supabase.rpc('update_order_item_status', {
-          item_id: orderItemId,
-          new_status: status
-        });
+        const { data, error } = await supabase
+          .from('order_items')
+          .upsert({
+            id: orderItemId,
+            item_status: status,
+            updated_at: new Date().toISOString()
+          }, {
+            onConflict: 'id'
+          })
+          .select()
+          .single();
 
-        if (!error) {
-          console.log('Update successful via RPC:', data);
-          return { success: true, data, message: 'Order item status updated successfully' };
-        } else {
-          console.warn('RPC function not available, falling back to direct update:', error);
+        if (error) {
+          console.error('Upsert error:', error);
+          
+          // Try alternative approach with rpc call if available
+          try {
+            const { data: rpcData, error: rpcError } = await supabase.rpc('update_order_item_status', {
+              item_id: orderItemId,
+              new_status: status
+            });
+
+            if (rpcError) throw rpcError;
+            
+            console.log('Update successful via RPC:', rpcData);
+            return { success: true, data: rpcData, message: 'Order item status updated successfully' };
+          } catch (rpcErr) {
+            console.warn('RPC also failed:', rpcErr);
+            throw error; // Throw original upsert error
+          }
         }
-      } catch (rpcError: any) {
-        console.warn('RPC function failed, falling back to direct update:', rpcError);
+
+        console.log('Update successful via upsert:', data);
+        return { success: true, data, message: 'Order item status updated successfully' };
+      } catch (error: any) {
+        // Final fallback: Try to get current item and update with all required fields
+        console.warn('Upsert failed, trying full record update:', error);
+        
+        // First get the current order item
+        const { data: currentItem, error: getError } = await supabase
+          .from('order_items')
+          .select('*')
+          .eq('id', orderItemId)
+          .single();
+
+        if (getError || !currentItem) {
+          console.error('Failed to get current order item:', getError);
+          return { success: false, error: 'Order item not found' };
+        }
+
+        // Update with all required fields
+        const { data: updateData, error: updateError } = await supabase
+          .from('order_items')
+          .upsert({
+            ...currentItem,
+            item_status: status,
+            updated_at: new Date().toISOString()
+          }, {
+            onConflict: 'id'
+          })
+          .select()
+          .single();
+
+        if (updateError) {
+          console.error('Final fallback failed:', updateError);
+          return { success: false, error: updateError.message || 'Failed to update order item status' };
+        }
+
+        console.log('Update successful via full record upsert:', updateData);
+        return { success: true, data: updateData, message: 'Order item status updated successfully' };
       }
-
-      // Fallback to direct table update
-      const { data, error } = await supabase
-        .from('order_items')
-        .update({ 
-          item_status: status, 
-          updated_at: new Date().toISOString() 
-        })
-        .eq('id', orderItemId)
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Direct update error:', error);
-        throw error;
-      }
-
-      console.log('Update successful via direct update:', data);
-      return { success: true, data, message: 'Order item status updated successfully' };
     } catch (error: any) {
       console.error('OrderAPI.updateOrderItemStatus error:', error);
       return { success: false, error: error.message || 'Failed to update order item status' };
