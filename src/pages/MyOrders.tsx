@@ -337,22 +337,29 @@ const MyOrders = () => {
 
         {/* Order Tabs */}
         <div className="mb-6">
-          <div className="flex space-x-1 bg-white p-1 rounded-lg shadow-sm border overflow-x-auto">
+          <div className="flex flex-wrap gap-2 bg-white p-2 rounded-lg shadow-sm border md:space-x-1 md:flex-nowrap md:p-1 md:gap-0">
             {orderTabs.map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
                 className={cn(
-                  "px-4 py-2 text-sm font-medium rounded-md whitespace-nowrap flex items-center gap-2 transition-all",
+                  "flex-1 md:flex-initial px-3 py-2 text-xs md:text-sm font-medium rounded-md whitespace-nowrap flex items-center justify-center gap-1 md:gap-2 transition-all",
                   activeTab === tab.key
                     ? "bg-blue-600 text-white shadow-sm"
                     : "text-gray-700 hover:bg-gray-100"
                 )}
               >
-                {tab.label}
+                <span className="hidden sm:inline">{tab.label}</span>
+                <span className="sm:hidden">
+                  {tab.key === 'all' ? 'All' : 
+                   tab.key === 'pending' ? 'Pend' :
+                   tab.key === 'confirmed' ? 'Conf' :
+                   tab.key === 'out_for_delivery' ? 'OFD' :
+                   'Deliv'}
+                </span>
                 {tab.count > 0 && (
                   <span className={cn(
-                    "px-2 py-0.5 rounded-full text-xs font-medium",
+                    "px-1.5 py-0.5 rounded-full text-xs font-medium",
                     activeTab === tab.key
                       ? "bg-blue-500 text-white"
                       : "bg-gray-200 text-gray-700"

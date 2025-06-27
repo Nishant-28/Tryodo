@@ -169,10 +169,10 @@ export class SmartphoneAPI {
               name,
               description
             ),
-            quality_categories (
+            category_qualities (
               id,
-              name,
-              description
+              quality_name,
+              quality_description
             )
           )
         `)
@@ -314,8 +314,8 @@ export class VendorAPI {
             categories (
               name
             ),
-            quality_categories (
-              name
+            category_qualities (
+              quality_name
             )
           )
         `)
@@ -365,9 +365,9 @@ export class VendorAPI {
           categories (
             name
           ),
-          quality_categories (
-            name,
-            description
+          category_qualities (
+            quality_name,
+            quality_description
           )
         `)
         .eq('vendor_id', vendorId)
@@ -440,7 +440,7 @@ export class CategoryAPI {
   static async getQualityCategories(): Promise<ApiResponse<any[]>> {
     try {
       const { data, error } = await supabase
-        .from('quality_categories')
+        .from('category_qualities')
         .select('*')
         .eq('is_active', true)
         .order('sort_order');
@@ -491,8 +491,8 @@ export class ComparisonAPI {
               business_name,
               rating
             ),
-            quality_categories (
-              name
+            category_qualities (
+              quality_name
             )
           )
         `)
@@ -609,11 +609,12 @@ export class AnalyticsAPI {
 // Order API
 export class OrderAPI {
   /**
-   * Get customer orders with detailed tracking information
+   * Get customer orders with optimized query
    */
   static async getCustomerOrders(customerId: string): Promise<ApiResponse<any[]>> {
     try {
-      const { data, error } = await supabase
+      // OPTIMIZED: Two efficient queries instead of excessively deep joins
+      const { data: orders, error } = await supabase
         .from('orders')
         .select(`
           *,
@@ -633,49 +634,85 @@ export class OrderAPI {
 
       if (error) throw error;
 
-      // Enhance orders with delivery tracking information
-      const enhancedOrders = await Promise.all(
-        (data || []).map(async (order) => {
-          // Get delivery partner information if order is assigned
-          let deliveryInfo = null;
-          try {
-            const { data: deliveryData } = await supabase
-              .from('delivery_partner_orders')
-              .select(`
-                *,
-                delivery_partner:delivery_partners (
-                  id,
-                  profile:profiles (
-                    full_name,
-                    phone
-                  )
-                )
-              `)
-              .eq('order_id', order.id)
-              .single();
+      if (!orders || orders.length === 0) {
+        return {
+          success: true,
+          data: [],
+          message: 'No orders found'
+        };
+      }
 
-            if (deliveryData?.delivery_partner) {
-              deliveryInfo = {
-                delivery_partner_id: deliveryData.delivery_partner.id,
-                delivery_partner_name: deliveryData.delivery_partner.profile?.full_name,
-                delivery_partner_phone: deliveryData.delivery_partner.profile?.phone,
-                pickup_otp: deliveryData.pickup_otp,
-                delivery_otp: deliveryData.delivery_otp,
-                delivery_assigned_at: deliveryData.assigned_at,
-                delivery_status: deliveryData.status
-              };
-            }
-          } catch (e) {
-            // Delivery partner not assigned yet
+             // Get delivery partner info for all orders in a single query
+       const orderIds = orders.map(order => order.id);
+       const { data: deliveryData } = await supabase
+         .from('delivery_partner_orders')
+         .select('order_id, pickup_otp, delivery_otp, assigned_at, status, delivery_partner_id')
+         .in('order_id', orderIds);
+
+               // Get delivery partner profiles separately to avoid deep nesting
+        const deliveryPartnerIds = deliveryData?.map(d => d.delivery_partner_id).filter(Boolean) || [];
+        const partnerProfiles = new Map();
+        
+        if (deliveryPartnerIds.length > 0) {
+          const { data: partners } = await supabase
+            .from('delivery_partners')
+            .select('id, profile_id')
+            .in('id', deliveryPartnerIds);
+          
+          // Get profile details separately
+          const profileIds = partners?.map(p => p.profile_id).filter(Boolean) || [];
+          if (profileIds.length > 0) {
+            const { data: profiles } = await supabase
+              .from('profiles')
+              .select('id, full_name, phone')
+              .in('id', profileIds);
+            
+            // Create profile lookup map
+            const profileMap = new Map();
+            profiles?.forEach(profile => {
+              profileMap.set(profile.id, profile);
+            });
+            
+            // Combine partner and profile data
+            partners?.forEach(partner => {
+              const profile = profileMap.get(partner.profile_id);
+              partnerProfiles.set(partner.id, {
+                id: partner.id,
+                profile: profile
+              });
+            });
           }
+        }
 
-          return {
-            ...order,
-            ...deliveryInfo,
-            current_delivery_status: this.getCurrentDeliveryStatus(order, deliveryInfo)
+      // Create a map for quick lookup of delivery data by order_id
+      const deliveryMap = new Map();
+      deliveryData?.forEach(item => {
+        deliveryMap.set(item.order_id, item);
+      });
+
+      // Transform the results
+      const enhancedOrders = orders.map((order) => {
+        const deliveryInfo = deliveryMap.get(order.id);
+        let deliveryDetails = null;
+
+        if (deliveryInfo?.delivery_partner) {
+          deliveryDetails = {
+            delivery_partner_id: deliveryInfo.delivery_partner.id,
+            delivery_partner_name: deliveryInfo.delivery_partner.profile?.full_name,
+            delivery_partner_phone: deliveryInfo.delivery_partner.profile?.phone,
+            pickup_otp: deliveryInfo.pickup_otp,
+            delivery_otp: deliveryInfo.delivery_otp,
+            delivery_assigned_at: deliveryInfo.assigned_at,
+            delivery_status: deliveryInfo.status
           };
-        })
-      );
+        }
+
+        return {
+          ...order,
+          ...deliveryDetails,
+          current_delivery_status: this.getCurrentDeliveryStatus(order, deliveryDetails)
+        };
+      });
 
       return {
         success: true,
@@ -1356,6 +1393,845 @@ export class TryodoAPI {
       },
       message: 'Tryodo API information'
     };
+  }
+}
+
+// ============================================================================
+// TRANSACTION AND COMMISSION MANAGEMENT API
+// ============================================================================
+
+export class TransactionAPI {
+  /**
+   * Get all transactions with filtering
+   */
+  static async getTransactions(filters?: {
+    startDate?: string;
+    endDate?: string;
+    transactionType?: string;
+    status?: string;
+    vendorId?: string;
+    deliveryPartnerId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ApiResponse<any[]>> {
+    try {
+      let query = supabase
+        .from('transactions')
+        .select(`
+          *,
+          order:orders(order_number, customer_id),
+          order_item:order_items(product_name, vendor_id),
+          commission_rule:commission_rules(commission_percentage, category_id),
+          commission_override:vendor_commission_overrides(commission_percentage, vendor_id)
+        `)
+        .order('transaction_date', { ascending: false });
+
+      if (filters) {
+        if (filters.startDate) {
+          query = query.gte('transaction_date', filters.startDate);
+        }
+        if (filters.endDate) {
+          query = query.lte('transaction_date', filters.endDate);
+        }
+        if (filters.transactionType) {
+          query = query.eq('transaction_type', filters.transactionType);
+        }
+        if (filters.status) {
+          query = query.eq('transaction_status', filters.status);
+        }
+        if (filters.vendorId) {
+          query = query.eq('to_party_id', filters.vendorId).eq('to_party_type', 'vendor');
+        }
+        if (filters.deliveryPartnerId) {
+          query = query.eq('to_party_id', filters.deliveryPartnerId).eq('to_party_type', 'delivery_partner');
+        }
+        if (filters.limit) {
+          query = query.limit(filters.limit);
+        }
+        if (filters.offset) {
+          query = query.range(filters.offset, filters.offset + (filters.limit || 50) - 1);
+        }
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved ${data?.length || 0} transactions`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch transactions'
+      };
+    }
+  }
+
+  /**
+   * Get daily transaction summary
+   */
+  static async getDailyTransactionSummary(
+    startDate?: string,
+    endDate?: string
+  ): Promise<ApiResponse<any[]>> {
+    try {
+      let query = supabase
+        .from('daily_transaction_summary')
+        .select('*')
+        .order('transaction_day', { ascending: false });
+
+      if (startDate) {
+        query = query.gte('transaction_day', startDate);
+      }
+      if (endDate) {
+        query = query.lte('transaction_day', endDate);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved daily summary for ${data?.length || 0} days`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch daily transaction summary'
+      };
+    }
+  }
+
+  /**
+   * Create manual transaction (for adjustments, refunds, etc.)
+   */
+  static async createManualTransaction(transactionData: {
+    orderId: string;
+    orderItemId?: string;
+    transactionType: string;
+    grossAmount: number;
+    commissionAmount?: number;
+    netAmount: number;
+    fromPartyType?: string;
+    fromPartyId?: string;
+    toPartyType: string;
+    toPartyId: string;
+    description: string;
+    paymentMethod?: string;
+    metadata?: any;
+  }): Promise<ApiResponse<any>> {
+    try {
+      // Generate unique transaction number with microseconds, random component, and party info
+      const now = new Date();
+      const timestamp = now.toISOString().replace(/[-:T.]/g, '').slice(0, 14); // YYYYMMDDHHMMSS
+      const microseconds = now.getTime().toString().slice(-6);
+      const randomSuffix = Math.floor(Math.random() * 999999).toString().padStart(6, '0');
+      const orderSuffix = transactionData.orderId.slice(0, 8);
+      
+      const transactionNumber = `TXN-${timestamp}-${microseconds}-${orderSuffix}-${randomSuffix}`;
+
+      const { data, error } = await supabase
+        .from('transactions')
+        .insert([{
+          transaction_number: transactionNumber,
+          ...transactionData,
+          transaction_status: 'completed',
+          processed_at: new Date().toISOString(),
+          completed_at: new Date().toISOString()
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: 'Manual transaction created successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to create manual transaction'
+      };
+    }
+  }
+
+  /**
+   * Process order completion manually (trigger the automated function)
+   */
+  static async processOrderCompletion(orderId: string): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase.rpc('process_order_completion', {
+        p_order_id: orderId
+      });
+
+      if (error) throw error;
+
+      const result = data[0];
+      
+      return {
+        success: result.success,
+        data: result,
+        message: result.message
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to process order completion'
+      };
+    }
+  }
+}
+
+export class CommissionAPI {
+  /**
+   * Get all commission rules
+   */
+  static async getCommissionRules(): Promise<ApiResponse<any[]>> {
+    try {
+      const { data, error } = await supabase
+        .from('commission_rules')
+        .select(`
+          *,
+          category:categories(name, id),
+          created_by_profile:profiles(full_name)
+        `)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved ${data?.length || 0} commission rules`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch commission rules'
+      };
+    }
+  }
+
+  /**
+   * Create or update commission rule
+   */
+  static async upsertCommissionRule(ruleData: {
+    id?: string;
+    categoryId: string;
+    commissionPercentage: number;
+    minimumCommission?: number;
+    maximumCommission?: number;
+    effectiveFrom?: string;
+    effectiveUntil?: string;
+    notes?: string;
+    createdBy: string;
+  }): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase
+        .from('commission_rules')
+        .upsert([{
+          id: ruleData.id,
+          category_id: ruleData.categoryId,
+          commission_percentage: ruleData.commissionPercentage,
+          minimum_commission: ruleData.minimumCommission || 0,
+          maximum_commission: ruleData.maximumCommission,
+          effective_from: ruleData.effectiveFrom || new Date().toISOString(),
+          effective_until: ruleData.effectiveUntil,
+          notes: ruleData.notes,
+          created_by: ruleData.createdBy
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: ruleData.id ? 'Commission rule updated successfully' : 'Commission rule created successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to save commission rule'
+      };
+    }
+  }
+
+  /**
+   * Get vendor commission overrides
+   */
+  static async getVendorCommissionOverrides(vendorId?: string): Promise<ApiResponse<any[]>> {
+    try {
+      let query = supabase
+        .from('vendor_commission_overrides')
+        .select(`
+          *,
+          vendor:vendors(business_name),
+          category:categories(name),
+          created_by_profile:profiles(full_name)
+        `)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+
+      if (vendorId) {
+        query = query.eq('vendor_id', vendorId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved ${data?.length || 0} vendor commission overrides`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch vendor commission overrides'
+      };
+    }
+  }
+
+  /**
+   * Create vendor-specific commission override
+   */
+  static async createVendorCommissionOverride(overrideData: {
+    vendorId: string;
+    categoryId: string;
+    commissionPercentage: number;
+    minimumCommission?: number;
+    maximumCommission?: number;
+    effectiveFrom?: string;
+    effectiveUntil?: string;
+    reason?: string;
+    createdBy: string;
+  }): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase
+        .from('vendor_commission_overrides')
+        .insert([{
+          vendor_id: overrideData.vendorId,
+          category_id: overrideData.categoryId,
+          commission_percentage: overrideData.commissionPercentage,
+          minimum_commission: overrideData.minimumCommission || 0,
+          maximum_commission: overrideData.maximumCommission,
+          effective_from: overrideData.effectiveFrom || new Date().toISOString(),
+          effective_until: overrideData.effectiveUntil,
+          reason: overrideData.reason,
+          created_by: overrideData.createdBy
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: 'Vendor commission override created successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to create vendor commission override'
+      };
+    }
+  }
+
+  /**
+   * Calculate commission for a given amount
+   */
+  static async calculateCommission(
+    vendorId: string,
+    categoryId: string,
+    amount: number
+  ): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase.rpc('calculate_commission', {
+        p_vendor_id: vendorId,
+        p_category_id: categoryId,
+        p_amount: amount
+      });
+
+      if (error) throw error;
+
+      const result = data[0];
+
+      return {
+        success: true,
+        data: {
+          commissionRate: result.commission_rate,
+          commissionAmount: result.commission_amount,
+          vendorEarning: result.vendor_earning,
+          ruleType: result.rule_type,
+          ruleId: result.rule_id
+        },
+        message: 'Commission calculated successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to calculate commission'
+      };
+    }
+  }
+
+  /**
+   * Get commission transactions for reporting
+   */
+  static async getCommissionTransactions(filters?: {
+    startDate?: string;
+    endDate?: string;
+    vendorId?: string;
+    categoryId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ApiResponse<any[]>> {
+    try {
+      let query = supabase
+        .from('commission_transactions')
+        .select(`
+          *,
+          transaction:transactions(transaction_number, transaction_date),
+          vendor:vendors(business_name),
+          category:categories(name),
+          order:orders(order_number)
+        `)
+        .order('calculated_at', { ascending: false });
+
+      if (filters) {
+        if (filters.startDate) {
+          query = query.gte('calculated_at', filters.startDate);
+        }
+        if (filters.endDate) {
+          query = query.lte('calculated_at', filters.endDate);
+        }
+        if (filters.vendorId) {
+          query = query.eq('vendor_id', filters.vendorId);
+        }
+        if (filters.categoryId) {
+          query = query.eq('category_id', filters.categoryId);
+        }
+        if (filters.limit) {
+          query = query.limit(filters.limit);
+        }
+        if (filters.offset) {
+          query = query.range(filters.offset, filters.offset + (filters.limit || 50) - 1);
+        }
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved ${data?.length || 0} commission transactions`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch commission transactions'
+      };
+    }
+  }
+}
+
+export class WalletAPI {
+  /**
+   * Get vendor wallet details
+   */
+  static async getVendorWallet(vendorId: string): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase
+        .from('vendor_wallets')
+        .select(`
+          *,
+          vendor:vendors(business_name, contact_phone)
+        `)
+        .eq('vendor_id', vendorId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') throw error;
+
+      if (!data) {
+        // Create wallet if it doesn't exist
+        const { data: newWallet, error: createError } = await supabase
+          .from('vendor_wallets')
+          .insert([{ vendor_id: vendorId }])
+          .select(`
+            *,
+            vendor:vendors(business_name, contact_phone)
+          `)
+          .single();
+
+        if (createError) throw createError;
+
+        return {
+          success: true,
+          data: newWallet,
+          message: 'Vendor wallet created and retrieved successfully'
+        };
+      }
+
+      return {
+        success: true,
+        data,
+        message: 'Vendor wallet retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch vendor wallet'
+      };
+    }
+  }
+
+  /**
+   * Get delivery partner wallet details
+   */
+  static async getDeliveryPartnerWallet(deliveryPartnerId: string): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase
+        .from('delivery_partner_wallets')
+        .select(`
+          *,
+          delivery_partner:delivery_partners(
+            profiles(full_name, phone)
+          )
+        `)
+        .eq('delivery_partner_id', deliveryPartnerId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') throw error;
+
+      if (!data) {
+        // Create wallet if it doesn't exist
+        const { data: newWallet, error: createError } = await supabase
+          .from('delivery_partner_wallets')
+          .insert([{ delivery_partner_id: deliveryPartnerId }])
+          .select(`
+            *,
+            delivery_partner:delivery_partners(
+              profiles(full_name, phone)
+            )
+          `)
+          .single();
+
+        if (createError) throw createError;
+
+        return {
+          success: true,
+          data: newWallet,
+          message: 'Delivery partner wallet created and retrieved successfully'
+        };
+      }
+
+      return {
+        success: true,
+        data,
+        message: 'Delivery partner wallet retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch delivery partner wallet'
+      };
+    }
+  }
+
+  /**
+   * Get platform wallet details
+   */
+  static async getPlatformWallet(): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase
+        .from('platform_wallet')
+        .select('*')
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: 'Platform wallet retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch platform wallet'
+      };
+    }
+  }
+
+  /**
+   * Get all vendor wallets for admin dashboard
+   */
+  static async getAllVendorWallets(): Promise<ApiResponse<any[]>> {
+    try {
+      const { data, error } = await supabase
+        .from('vendor_performance_summary')
+        .select('*')
+        .order('total_sales', { ascending: false });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved ${data?.length || 0} vendor wallets`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch vendor wallets'
+      };
+    }
+  }
+
+  /**
+   * Get all delivery partner wallets for admin dashboard
+   */
+  static async getAllDeliveryPartnerWallets(): Promise<ApiResponse<any[]>> {
+    try {
+      const { data, error } = await supabase
+        .from('delivery_partner_earnings_summary')
+        .select('*')
+        .order('total_earned', { ascending: false });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved ${data?.length || 0} delivery partner wallets`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch delivery partner wallets'
+      };
+    }
+  }
+}
+
+export class PayoutAPI {
+  /**
+   * Get all payouts with filtering
+   */
+  static async getPayouts(filters?: {
+    recipientType?: 'vendor' | 'delivery_partner';
+    recipientId?: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ApiResponse<any[]>> {
+    try {
+      let query = supabase
+        .from('payouts')
+        .select(`
+          *,
+          processed_by_profile:profiles(full_name)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (filters) {
+        if (filters.recipientType) {
+          query = query.eq('recipient_type', filters.recipientType);
+        }
+        if (filters.recipientId) {
+          query = query.eq('recipient_id', filters.recipientId);
+        }
+        if (filters.status) {
+          query = query.eq('payout_status', filters.status);
+        }
+        if (filters.startDate) {
+          query = query.gte('created_at', filters.startDate);
+        }
+        if (filters.endDate) {
+          query = query.lte('created_at', filters.endDate);
+        }
+        if (filters.limit) {
+          query = query.limit(filters.limit);
+        }
+        if (filters.offset) {
+          query = query.range(filters.offset, filters.offset + (filters.limit || 50) - 1);
+        }
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved ${data?.length || 0} payouts`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch payouts'
+      };
+    }
+  }
+
+  /**
+   * Create a new payout
+   */
+  static async createPayout(payoutData: {
+    recipientType: 'vendor' | 'delivery_partner';
+    recipientId: string;
+    payoutAmount: number;
+    payoutMethod: 'bank_transfer' | 'upi' | 'cash' | 'cheque';
+    periodStart: string;
+    periodEnd: string;
+    includedTransactions?: string[];
+    scheduledDate?: string;
+    bankDetails?: any;
+    notes?: string;
+    processedBy: string;
+  }): Promise<ApiResponse<any>> {
+    try {
+      // Generate unique payout number with microseconds and random component
+      const now = new Date();
+      const timestamp = now.toISOString().replace(/[-:T.]/g, '').slice(0, 14); // YYYYMMDDHHMMSS
+      const microseconds = now.getTime().toString().slice(-6);
+      const randomSuffix = Math.floor(Math.random() * 999999).toString().padStart(6, '0');
+      const recipientSuffix = payoutData.recipientId.slice(0, 8);
+      
+      const payoutNumber = `PAY-${timestamp}-${payoutData.recipientType.toUpperCase()}-${recipientSuffix}-${randomSuffix}`;
+
+      const { data, error } = await supabase
+        .from('payouts')
+        .insert([{
+          payout_number: payoutNumber,
+          ...payoutData,
+          payout_status: 'pending',
+          transaction_count: payoutData.includedTransactions?.length || 0
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: 'Payout created successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to create payout'
+      };
+    }
+  }
+
+  /**
+   * Update payout status
+   */
+  static async updatePayoutStatus(
+    payoutId: string,
+    status: 'processing' | 'completed' | 'failed' | 'cancelled',
+    paymentReference?: string,
+    processedBy?: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      const updateData: any = {
+        payout_status: status,
+        updated_at: new Date().toISOString()
+      };
+
+      if (status === 'processing') {
+        updateData.processed_date = new Date().toISOString();
+        updateData.processed_by = processedBy;
+      } else if (status === 'completed') {
+        updateData.completed_date = new Date().toISOString();
+        updateData.payment_reference = paymentReference;
+      }
+
+      const { data, error } = await supabase
+        .from('payouts')
+        .update(updateData)
+        .eq('id', payoutId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: `Payout ${status} successfully`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to update payout status'
+      };
+    }
+  }
+
+  /**
+   * Calculate pending payout amount for a recipient
+   */
+  static async calculatePendingPayout(
+    recipientType: 'vendor' | 'delivery_partner',
+    recipientId: string,
+    periodStart?: string,
+    periodEnd?: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      let walletTable, walletIdField;
+      
+      if (recipientType === 'vendor') {
+        walletTable = 'vendor_wallets';
+        walletIdField = 'vendor_id';
+      } else {
+        walletTable = 'delivery_partner_wallets';
+        walletIdField = 'delivery_partner_id';
+      }
+
+      const { data, error } = await supabase
+        .from(walletTable)
+        .select('available_balance, total_earned, total_paid_out')
+        .eq(walletIdField, recipientId)
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: {
+          availableBalance: data.available_balance,
+          totalEarned: data.total_earned,
+          totalPaidOut: data.total_paid_out,
+          pendingAmount: data.available_balance
+        },
+        message: 'Pending payout calculated successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to calculate pending payout'
+      };
+    }
   }
 }
 

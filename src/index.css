@@ -102,19 +102,26 @@
     /* Enhanced scrolling for mobile */
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
+    /* Prevent zoom on input focus */
+    -webkit-touch-callout: none;
+    -webkit-text-size-adjust: 100%;
   }
 
-  /* Mobile-friendly tap targets */
+  /* Enhanced mobile-friendly tap targets */
   button, [role="button"], input[type="submit"], input[type="button"] {
-    min-height: 44px;
-    min-width: 44px;
+    min-height: 48px;
+    min-width: 48px;
     touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
 
-  /* Improved touch feedback */
+  /* Enhanced touch feedback with better performance */
   button:active, [role="button"]:active {
-    transform: scale(0.98);
-    transition: transform 0.1s ease;
+    transform: scale(0.97);
+    transition: transform 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
   }
 
   /* Better text selection on mobile */
@@ -123,17 +130,21 @@
     user-select: text;
   }
 
-  /* Prevent zoom on input focus */
+  /* Prevent zoom on input focus - enhanced for better UX */
   input[type="text"], input[type="email"], input[type="password"], 
   input[type="number"], input[type="tel"], input[type="url"], 
   input[type="search"], textarea, select {
     font-size: 16px;
+    min-height: 48px;
+    border-radius: 12px;
+    padding: 12px 16px;
   }
 
   /* Enhanced focus visibility for touch users */
   *:focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
+    border-radius: 8px;
   }
 
   /* Mobile-optimized scrollbars */
@@ -148,11 +159,28 @@
 
   ::-webkit-scrollbar-thumb {
     background: hsl(var(--border));
-    border-radius: 3px;
+    border-radius: 6px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
     background: hsl(var(--muted-foreground));
+  }
+
+  /* Safe area support for notched devices */
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .safe-area-left {
+    padding-left: env(safe-area-inset-left);
+  }
+
+  .safe-area-right {
+    padding-right: env(safe-area-inset-right);
   }
 }
 
@@ -207,75 +235,184 @@
     background-color: rgba(255, 107, 53, 0.05);
   }
 
-  /* Touch-friendly button styles */
-  .btn-touch {
-    @apply min-h-[44px] min-w-[44px] px-6 py-3 rounded-xl font-medium transition-all duration-200 ease-out;
-    @apply active:scale-[0.98] active:duration-75;
+  /* Enhanced touch-friendly button styles */
+  .btn-mobile {
+    @apply min-h-[48px] min-w-[48px] px-6 py-3 rounded-xl font-medium transition-all duration-200 ease-out;
+    @apply active:scale-[0.96] active:duration-75;
     @apply focus:outline-none focus:ring-2 focus:ring-offset-2;
+    @apply shadow-sm active:shadow-none;
     touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Primary mobile button */
+  .btn-mobile-primary {
+    @apply btn-mobile bg-gradient-to-r from-blue-600 to-blue-700 text-white;
+    @apply hover:from-blue-700 hover:to-blue-800 active:from-blue-800 active:to-blue-900;
+    @apply focus:ring-blue-500 shadow-lg;
+  }
+
+  /* Secondary mobile button */
+  .btn-mobile-secondary {
+    @apply btn-mobile border-2 border-gray-300 bg-white text-gray-700;
+    @apply hover:bg-gray-50 hover:border-gray-400 active:bg-gray-100;
+    @apply focus:ring-gray-500;
+  }
+
+  /* Danger mobile button */
+  .btn-mobile-danger {
+    @apply btn-mobile bg-gradient-to-r from-red-600 to-red-700 text-white;
+    @apply hover:from-red-700 hover:to-red-800 active:from-red-800 active:to-red-900;
+    @apply focus:ring-red-500 shadow-lg;
+  }
+
+  /* Success mobile button */
+  .btn-mobile-success {
+    @apply btn-mobile bg-gradient-to-r from-green-600 to-green-700 text-white;
+    @apply hover:from-green-700 hover:to-green-800 active:from-green-800 active:to-green-900;
+    @apply focus:ring-green-500 shadow-lg;
   }
 
   /* Mobile-optimized card component */
   .card-mobile {
     @apply p-4 rounded-xl border bg-card text-card-foreground shadow-sm;
     @apply active:scale-[0.99] transition-transform duration-150;
+    @apply hover:shadow-md;
     touch-action: manipulation;
   }
 
-  /* Touch-friendly input fields */
-  .input-touch {
-    @apply min-h-[44px] px-4 py-3 text-base rounded-xl border;
+  /* Enhanced touch-friendly input fields */
+  .input-mobile {
+    @apply min-h-[48px] px-4 py-3 text-base rounded-xl border-2;
     @apply focus:ring-2 focus:ring-offset-1 focus:border-transparent;
+    @apply bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500/20;
+    touch-action: manipulation;
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+
+  /* Mobile navigation styles with enhanced touch targets */
+  .nav-mobile {
+    @apply fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-md border-t;
+    @apply flex items-center justify-center;
+    @apply safe-area-bottom;
+    z-index: 50;
+    min-height: 64px;
+    /* Perfect symmetrical spacing */
+    padding: 8px 16px;
+  }
+
+  .nav-mobile-item {
+    @apply flex flex-col items-center justify-center;
+    @apply py-2 rounded-xl transition-all duration-200;
+    @apply active:scale-95 active:bg-gray-100/50;
+    @apply focus:outline-none focus:ring-2 focus:ring-blue-500/20;
+    /* Perfect symmetrical sizing for all items */
+    min-width: 56px;
+    min-height: 56px;
+    /* Equal flex distribution with consistent spacing */
+    flex: 1;
+    max-width: 72px;
+    /* Ensure consistent margins between items */
+    margin: 0 2px;
     touch-action: manipulation;
   }
 
-  /* Mobile navigation styles */
-  .nav-mobile {
-    @apply fixed bottom-0 left-0 right-0 bg-background border-t;
-    @apply flex items-center justify-around px-2 py-2;
-    @apply safe-area-pb;
-    z-index: 50;
-  }
-
-  /* Safe area support for notched devices */
-  .safe-area-pt {
-    padding-top: env(safe-area-inset-top);
-  }
-
-  .safe-area-pb {
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-
-  .safe-area-pl {
-    padding-left: env(safe-area-inset-left);
-  }
-
-  .safe-area-pr {
-    padding-right: env(safe-area-inset-right);
-  }
-
-  /* Improved mobile spacing */
+  /* Enhanced mobile spacing utilities */
   .container-mobile {
     @apply px-4 sm:px-6 lg:px-8;
+    @apply pb-safe-bottom;
   }
 
   /* Touch-friendly spacing for interactive elements */
   .touch-spacing {
-    @apply space-y-4 *:min-h-[44px];
+    @apply space-y-4;
+  }
+
+  .touch-spacing > * {
+    @apply min-h-[48px];
+  }
+
+  /* Modal/Dialog optimizations for mobile */
+  .modal-mobile {
+    @apply fixed inset-0 z-50 flex items-end sm:items-center justify-center;
+    @apply px-4 pb-safe-bottom sm:p-0;
+  }
+
+  .modal-mobile .modal-content {
+    @apply w-full max-w-lg rounded-t-2xl sm:rounded-xl bg-white;
+    @apply max-h-[90vh] overflow-y-auto;
+    @apply shadow-2xl;
+  }
+
+  /* Floating Action Button for mobile */
+  .fab-mobile {
+    @apply fixed bottom-20 right-4 z-40;
+    @apply h-14 w-14 rounded-full shadow-lg;
+    @apply bg-blue-600 text-white hover:bg-blue-700;
+    @apply active:scale-95 transition-all duration-200;
+    @apply focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:ring-offset-2;
+    touch-action: manipulation;
+  }
+
+  /* Quantity control buttons */
+  .quantity-btn {
+    @apply h-10 w-10 min-h-[40px] min-w-[40px] rounded-lg;
+    @apply border-2 border-gray-300 bg-white flex items-center justify-center;
+    @apply hover:bg-gray-50 hover:border-gray-400 active:bg-gray-100;
+    @apply transition-all duration-150 active:scale-95;
+    @apply focus:outline-none focus:ring-2 focus:ring-blue-500/20;
+    touch-action: manipulation;
+  }
+
+  /* List item with touch optimization */
+  .list-item-mobile {
+    @apply p-4 border-b border-gray-200/60 active:bg-gray-50;
+    @apply transition-colors duration-150;
+    touch-action: manipulation;
+    min-height: 64px;
+  }
+
+  /* Loading states for better UX */
+  .loading-overlay {
+    @apply fixed inset-0 bg-black/20 backdrop-blur-sm z-50;
+    @apply flex items-center justify-center;
+  }
+
+  .loading-spinner-mobile {
+    @apply h-8 w-8 animate-spin rounded-full border-4 border-gray-200;
+    @apply border-t-blue-600;
+  }
+
+  /* Empty state styling */
+  .empty-state-mobile {
+    @apply flex flex-col items-center justify-center py-12 px-6;
+    @apply text-center text-gray-500;
+  }
+
+  .empty-state-mobile .icon {
+    @apply h-16 w-16 mb-4 text-gray-300;
+  }
+
+  .empty-state-mobile h3 {
+    @apply text-lg font-medium text-gray-900 mb-2;
+  }
+
+  .empty-state-mobile p {
+    @apply text-sm text-gray-500 mb-6;
   }
 }
 
 @layer utilities {
-  /* Responsive text sizing optimized for mobile */
-  .text-mobile-xs { font-size: 0.75rem; line-height: 1rem; }
-  .text-mobile-sm { font-size: 0.875rem; line-height: 1.25rem; }
-  .text-mobile-base { font-size: 1rem; line-height: 1.5rem; }
-  .text-mobile-lg { font-size: 1.125rem; line-height: 1.75rem; }
-  .text-mobile-xl { font-size: 1.25rem; line-height: 1.75rem; }
-  .text-mobile-2xl { font-size: 1.5rem; line-height: 2rem; }
-  .text-mobile-3xl { font-size: 1.875rem; line-height: 2.25rem; }
+  /* Enhanced responsive text sizing optimized for mobile readability */
+  .text-mobile-xs { font-size: 0.75rem; line-height: 1.2rem; }
+  .text-mobile-sm { font-size: 0.875rem; line-height: 1.4rem; }
+  .text-mobile-base { font-size: 1rem; line-height: 1.6rem; }
+  .text-mobile-lg { font-size: 1.125rem; line-height: 1.8rem; }
+  .text-mobile-xl { font-size: 1.25rem; line-height: 1.9rem; }
+  .text-mobile-2xl { font-size: 1.5rem; line-height: 2.2rem; }
+  .text-mobile-3xl { font-size: 1.875rem; line-height: 2.5rem; }
 
-  /* Touch-friendly utilities */
+  /* Enhanced touch-friendly utilities */
   .touch-action-manipulation {
     touch-action: manipulation;
   }
@@ -292,9 +429,26 @@
     touch-action: none;
   }
 
+  /* Haptic feedback classes */
+  .haptic-light:active {
+    animation: haptic-pulse-light 0.1s ease-out;
+  }
+
+  .haptic-medium:active {
+    animation: haptic-pulse-medium 0.15s ease-out;
+  }
+
+  .haptic-heavy:active {
+    animation: haptic-pulse-heavy 0.2s ease-out;
+  }
+
   /* Mobile-optimized animations */
   .animate-press {
-    @apply active:scale-95 transition-transform duration-75;
+    @apply active:scale-[0.96] transition-transform duration-75;
+  }
+
+  .animate-press-light {
+    @apply active:scale-[0.98] transition-transform duration-100;
   }
 
   .animate-bounce-subtle {
@@ -305,30 +459,125 @@
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.05); }
   }
+
+  @keyframes haptic-pulse-light {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(0.98); }
+  }
+
+  @keyframes haptic-pulse-medium {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(0.96); }
+  }
+
+  @keyframes haptic-pulse-heavy {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(0.94); }
+  }
+
+  /* Safe area utilities */
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+  .pt-safe { padding-top: env(safe-area-inset-top); }
+  .pl-safe { padding-left: env(safe-area-inset-left); }
+  .pr-safe { padding-right: env(safe-area-inset-right); }
+
+  .mb-safe { margin-bottom: env(safe-area-inset-bottom); }
+  .mt-safe { margin-top: env(safe-area-inset-top); }
+  .ml-safe { margin-left: env(safe-area-inset-left); }
+  .mr-safe { margin-right: env(safe-area-inset-right); }
+
+  /* Bottom navigation spacing */
+  .bottom-nav-spacing {
+    margin-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
 }
 
-/* Mobile-specific media queries */
+/* Mobile-specific optimizations */
 @media (max-width: 640px) {
   .container {
     padding-left: 1rem;
     padding-right: 1rem;
   }
 
-  /* Optimize button sizes for mobile */
-  button, [role="button"] {
+  /* Enhance button sizes for mobile touch */
+  button:not(.btn-mobile), [role="button"]:not(.btn-mobile) {
     min-height: 48px;
+    min-width: 48px;
     padding: 12px 16px;
+    border-radius: 12px;
   }
 
   /* Better spacing for mobile cards */
   .card {
     margin-bottom: 1rem;
+    border-radius: 16px;
   }
 
   /* Mobile-optimized modal/dialog positioning */
   [role="dialog"] {
     margin: 1rem;
     max-height: calc(100vh - 2rem);
+    border-radius: 16px;
+  }
+
+  /* Improve mobile form elements */
+  input, textarea, select {
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 16px;
+  }
+
+  /* Better mobile typography */
+  h1 { font-size: 1.875rem; line-height: 2.25rem; }
+  h2 { font-size: 1.5rem; line-height: 2rem; }
+  h3 { font-size: 1.25rem; line-height: 1.75rem; }
+  h4 { font-size: 1.125rem; line-height: 1.5rem; }
+
+  /* Mobile vendor dashboard improvements */
+  .vendor-dashboard-header {
+    @apply flex flex-col gap-4 p-4;
+  }
+  
+  .vendor-dashboard-actions {
+    @apply grid grid-cols-3 gap-2 w-full;
+  }
+  
+  .vendor-dashboard-actions button {
+    @apply flex-col items-center justify-center p-3 h-auto min-h-[64px];
+  }
+  
+  .vendor-dashboard-actions button .icon {
+    @apply mb-1;
+  }
+  
+  .vendor-dashboard-actions button .text {
+    @apply text-xs text-center leading-tight;
+  }
+
+  /* Mobile tabs improvements */
+  .vendor-tabs-mobile {
+    @apply flex flex-wrap gap-1 p-1;
+  }
+  
+  .vendor-tabs-mobile > * {
+    @apply flex-1 min-w-[60px] text-xs px-2 py-3 text-center;
+  }
+
+  /* Better mobile grid layouts */
+  .mobile-grid-fix {
+    @apply grid grid-cols-1 gap-4;
+  }
+
+  .mobile-grid-fix.sm-2 {
+    @apply sm:grid-cols-2;
+  }
+
+  .mobile-grid-fix.sm-3 {
+    @apply sm:grid-cols-3;
+  }
+
+  .mobile-grid-fix.sm-4 {
+    @apply sm:grid-cols-4;
   }
 }
 
@@ -342,11 +591,18 @@
   /* Enhance focus states for touch */
   button:focus, [role="button"]:focus {
     transform: scale(1.02);
+    transition: transform 0.15s ease-out;
   }
 
   /* Better tap feedback */
   .tap-highlight {
-    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+    -webkit-tap-highlight-color: rgba(59, 130, 246, 0.1);
+  }
+
+  /* Prevent text selection on interactive elements */
+  button, [role="button"], .nav-mobile-item {
+    -webkit-user-select: none;
+    user-select: none;
   }
 }
 
@@ -360,5 +616,20 @@
   .mobile-landscape-compact .container {
     padding-top: 0.5rem;
     padding-bottom: 0.5rem;
+  }
+
+  /* Adjust navigation for landscape */
+  .nav-mobile {
+    min-height: 56px;
+  }
+
+  .nav-mobile-item {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Compact modals in landscape */
+  .modal-mobile .modal-content {
+    max-height: 85vh;
   }
 }

@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Package, Smartphone, Cable, Upload, Plus, Minus } from 'lucide-react';
+import { ArrowLeft, Package, Smartphone, Cable, Upload, Plus, Download, FileSpreadsheet, AlertCircle, CheckCircle, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from '@/components/ui/use-toast';
+import { Textarea } from '@/components/ui/textarea';
 import Header from '@/components/Header';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
@@ -17,13 +18,11 @@ import { useAuth } from '@/contexts/AuthContext';
 interface Brand {
   id: string;
   name: string;
-  logo_url?: string;
 }
 
 interface Model {
   id: string;
   model_name: string;
-  model_number?: string;
   brand_id: string;
   brand_name?: string;
 }
@@ -31,16 +30,37 @@ interface Model {
 interface Category {
   id: string;
   name: string;
-  description?: string;
-  icon?: string;
-  gradient?: string;
 }
 
 interface QualityType {
   id: string;
   name: string;
   description?: string;
-  sort_order: number;
+  category_id?: string;
+  category_name?: string;
+}
+
+// Category-specific quality type mapping
+const CATEGORY_QUALITY_MAPPING: Record<string, string[]> = {
+  'Batteries': ['Ckoza', 'ORG', 'NFIT', 'RC', 'OG', 'Tray', 'Care', 'Foxconn'],
+  'Displays': ['Original', 'OEM', 'A+ Grade', 'TFT', 'Copy'],
+  'Charging Connector': ['Original', 'OEM', 'Compatible'],
+  'Speakers': ['Original', 'OEM', 'Compatible'],
+  'Camera Lens': ['Original', 'OEM', 'Compatible'],
+  'Back Camera': ['Original', 'OEM', 'Compatible'],
+  'Charging Connector Flex (PCB Board)': ['Original', 'OEM', 'Compatible'],
+  'Ear Speaker': ['Original', 'OEM', 'Compatible'],
+  'LCD Flex Cable': ['Original', 'OEM', 'Compatible'],
+  'Main Board Flex Cable': ['Original', 'OEM', 'Compatible'],
+  'ON OFF Flex (PCB)': ['Original', 'OEM', 'Compatible'],
+  'Volume Button Flex Cable': ['Original', 'OEM', 'Compatible'],
+  'Ringer': ['Original', 'OEM', 'Compatible'],
+  'Back Panel': ['Original', 'OEM', 'A+ Grade', 'B+ Grade'],
+  'Battery Connector': ['Original', 'OEM', 'Compatible'],
+  'Power Button Outer': ['Original', 'OEM', 'Compatible'],
+  'Volume Button Outer': ['Original', 'OEM', 'Compatible'],
+  'Sim Tray Holder': ['Original', 'OEM', 'Compatible'],
+  'Glue Paste': ['3M', 'Tesa', 'Generic'],
 }
 
 interface GenericProduct {
@@ -48,7 +68,6 @@ interface GenericProduct {
   name: string;
   description?: string;
   category_id: string;
-  specifications?: any;
 }
 
 interface PhoneProductForm {
@@ -59,9 +78,6 @@ interface PhoneProductForm {
   original_price: string;
   warranty_months: string;
   stock_quantity: string;
-  delivery_time_days: string;
-  product_images: string[];
-  specifications: { [key: string]: string };
 }
 
 interface GenericProductForm {
@@ -71,9 +87,20 @@ interface GenericProductForm {
   original_price: string;
   warranty_months: string;
   stock_quantity: string;
-  delivery_time_days: string;
-  product_images: string[];
-  specifications: { [key: string]: string };
+}
+
+interface BulkUploadRow {
+  brand: string;
+  model: string;
+  category: string;
+  quality: string;
+  price: string;
+  original_price?: string;
+  warranty?: string;
+  stock: string;
+  status?: 'pending' | 'success' | 'error';
+  error?: string;
+  row_number: number;
 }
 
 const AddProduct = () => {
@@ -82,20 +109,19 @@ const AddProduct = () => {
   const { profile } = useAuth();
   
   const [vendorId, setVendorId] = useState<string | null>(null);
-  // State for master data
   const [brands, setBrands] = useState<Brand[]>([]);
   const [models, setModels] = useState<Model[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [qualityTypes, setQualityTypes] = useState<QualityType[]>([]);
+  const [filteredQualityTypes, setFilteredQualityTypes] = useState<QualityType[]>([]);
   const [genericProducts, setGenericProducts] = useState<GenericProduct[]>([]);
   
-  // State for form data
   const [activeTab, setActiveTab] = useState('phone');
   const [selectedBrand, setSelectedBrand] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [loading, setLoading] = useState(false);
   
-  // Form states
+  // Form states - simplified without delivery_time_days, product_images, specifications
   const [phoneForm, setPhoneForm] = useState<PhoneProductForm>({
     model_id: '',
     category_id: '',
@@ -103,10 +129,7 @@ const AddProduct = () => {
     price: '',
     original_price: '',
     warranty_months: '6',
-    stock_quantity: '',
-    delivery_time_days: '3',
-    product_images: [''],
-    specifications: {}
+    stock_quantity: ''
   });
   
   const [genericForm, setGenericForm] = useState<GenericProductForm>({
@@ -115,328 +138,160 @@ const AddProduct = () => {
     price: '',
     original_price: '',
     warranty_months: '6',
-    stock_quantity: '',
-    delivery_time_days: '3',
-    product_images: [''],
-    specifications: {}
+    stock_quantity: ''
+  });
+
+  // Bulk upload states
+  const [bulkUploadData, setBulkUploadData] = useState<BulkUploadRow[]>([]);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadResults, setUploadResults] = useState<{success: number, failed: number, errors: string[]}>({
+    success: 0,
+    failed: 0,
+    errors: []
   });
 
   useEffect(() => {
-    if (profile) {
-      console.log('AddProduct: Current profile:', profile);
-      if (profile.role === 'vendor') {
-        const fetchVendorId = async () => {
-          try {
-            console.log('AddProduct: Fetching vendor ID for profile:', profile);
-            
-            // The profile object already contains the profile ID from the database
-            const profileId = profile.id;
-            console.log('AddProduct: Using profile ID:', profileId);
-
-            // Get vendor ID using the profile ID directly
-            const { data: vendorData, error: vendorError } = await supabase
-              .from('vendors')
-              .select('id, business_name')
-              .eq('profile_id', profileId)
-              .single();
-
-            console.log('AddProduct: Vendor query result:', { vendorData, vendorError });
-
-            if (vendorError) {
-              console.error('AddProduct: Vendor query error:', vendorError);
-              toast({
-                title: "Error",
-                description: "Could not find vendor account. Please contact support.",
-                variant: "destructive",
-              });
-              return;
-            }
-
-            if (!vendorData) {
-              console.error('AddProduct: No vendor data found');
-              toast({
-                title: "Error", 
-                description: "Vendor account not found. Please contact support.",
-                variant: "destructive",
-              });
-              return;
-            }
-
-            console.log('AddProduct: Setting vendor ID:', vendorData.id);
-            setVendorId(vendorData.id);
-            
-            toast({
-              title: "Success",
-              description: `Connected to vendor account: ${vendorData.business_name}`,
-            });
-          } catch (error) {
-            console.error('AddProduct: Error fetching vendor ID:', error);
-            toast({
-              title: "Error",
-              description: "Failed to load vendor information.",
-              variant: "destructive",
-            });
-          }
-        };
-
-        fetchVendorId();
-      } else {
-        console.log('AddProduct: User is not a vendor, role:', profile.role);
-        toast({
-          title: "Access Denied",
-          description: "Only vendors can add products.",
-          variant: "destructive",
-        });
-      }
-    } else {
-      console.log('AddProduct: No profile available');
+    if (profile?.role === 'vendor') {
+      fetchVendorId();
     }
-  }, [profile, toast]);
+  }, [profile]);
 
-  // Load master data on component mount
   useEffect(() => {
-    const loadMasterData = async () => {
-      try {
-        const { data: brandsData, error: brandsError } = await supabase
-          .from('brands')
-          .select('*')
-          .order('name');
-
-        if (brandsError) {
-          throw brandsError;
-        }
-        setBrands(brandsData || []);
-        console.log("Brands loaded:", brandsData);
-
-        // Load models with brand names
-        const { data: modelsData, error: modelsError } = await supabase
-          .from('smartphone_models')
-          .select(`
-            *,
-            brands!inner(name)
-          `)
-          .eq('is_active', true)
-          .order('model_name');
-        
-        if (modelsError) {
-          console.error('Error loading models:', modelsError);
-          throw modelsError;
-        }
-        const modelsWithBrandNames = modelsData?.map(model => ({
-          ...model,
-          brand_name: model.brands?.name || ''
-        })) || [];
-        setModels(modelsWithBrandNames);
-        console.log("Models loaded:", modelsWithBrandNames);
-
-        // Load categories
-        const { data: categoriesData, error: categoriesError } = await supabase
-          .from('categories')
-          .select('*')
-          .eq('is_active', true)
-          .order('sort_order', { ascending: true });
-        
-        if (categoriesError) {
-          console.error('Error loading categories:', categoriesError);
-          throw categoriesError;
-        }
-        setCategories(categoriesData || []);
-        console.log("Categories loaded:", categoriesData);
-
-        // Load quality types (corrected table name)
-        const { data: qualityTypesData, error: qualityTypesError } = await supabase
-          .from('quality_categories')
-          .select('*')
-          .eq('is_active', true)
-          .order('sort_order', { ascending: true });
-        
-        if (qualityTypesError) {
-          console.error('Error loading quality types:', qualityTypesError);
-          throw qualityTypesError;
-        }
-        setQualityTypes(qualityTypesData || []);
-        console.log("Quality types loaded:", qualityTypesData);
-
-        // Load generic products
-        const { data: genericProductsData, error: genericProductsError } = await supabase
-          .from('generic_products')
-          .select('*')
-          .eq('is_active', true)
-          .order('name');
-        
-        if (genericProductsError) {
-          console.error('Error loading generic products:', genericProductsError);
-          throw genericProductsError;
-        }
-        setGenericProducts(genericProductsData || []);
-        console.log("Generic products loaded:", genericProductsData);
-
-      } catch (error) {
-        console.error('Error loading master data:', error);
-        toast({
-          title: "Error",
-          description: "Failed to load product data. Please refresh the page.",
-          variant: "destructive",
-        });
-      }
-    };
-
     loadMasterData();
   }, []);
 
-  // Filter models when brand changes
-  const filteredModels = models.filter(model => {
-    return selectedBrand === '' || model.brand_id === selectedBrand;
-  });
+  const fetchVendorId = async () => {
+    try {
+      const { data: vendorData, error } = await supabase
+        .from('vendors')
+        .select('id, business_name')
+        .eq('profile_id', profile!.id)
+        .single();
 
-  // Quality types are global and apply to all categories, so no filtering needed
-  const filteredQualityTypes = qualityTypes;
+      if (error || !vendorData) {
+        toast({
+          title: "Error",
+          description: "Could not find vendor account. Please contact support.",
+          variant: "destructive",
+        });
+        return;
+      }
 
-  // Filter generic products when category changes
+      setVendorId(vendorData.id);
+      toast({
+        title: "Success",
+        description: `Connected to vendor account: ${vendorData.business_name}`,
+      });
+    } catch (error) {
+      console.error('Error fetching vendor ID:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load vendor information.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const loadMasterData = async () => {
+    try {
+      const [brandsResult, modelsResult, categoriesResult, qualityTypesResult, genericProductsResult] = await Promise.all([
+        supabase.from('brands').select('*').order('name'),
+        supabase.from('smartphone_models').select('*, brands!inner(name)').eq('is_active', true).order('model_name'),
+        supabase.from('categories').select('*').eq('is_active', true).order('sort_order'),
+        supabase.from('category_qualities').select('*').eq('is_active', true).order('sort_order'),
+        supabase.from('generic_products').select('*').eq('is_active', true).order('name')
+      ]);
+
+      if (brandsResult.error) throw brandsResult.error;
+      if (modelsResult.error) throw modelsResult.error;
+      if (categoriesResult.error) throw categoriesResult.error;
+      if (qualityTypesResult.error) throw qualityTypesResult.error;
+      if (genericProductsResult.error) throw genericProductsResult.error;
+
+      setBrands(brandsResult.data || []);
+      setModels(modelsResult.data?.map(model => ({
+        ...model,
+        brand_name: model.brands?.name || ''
+      })) || []);
+      setCategories(categoriesResult.data || []);
+      
+      // Use category_qualities data with correct field mapping
+      const qualityTypesData = qualityTypesResult.data?.map(qt => ({
+        id: qt.id,
+        name: qt.quality_name,
+        description: qt.quality_description,
+        category_id: qt.category_id,
+        category_name: null
+      })) || [];
+      
+      setQualityTypes(qualityTypesData);
+      setGenericProducts(genericProductsResult.data || []);
+
+    } catch (error) {
+      console.error('Error loading master data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load product data. Please refresh the page.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const filteredModels = models.filter(model => 
+    selectedBrand === '' || model.brand_id === selectedBrand
+  );
+
   const filteredGenericProducts = genericProducts.filter(gp => 
     selectedCategory === '' || gp.category_id === selectedCategory
   );
 
-  const handleImageAdd = (formType: 'phone' | 'generic') => {
-    if (formType === 'phone') {
-      setPhoneForm(prev => ({
-        ...prev,
-        product_images: [...prev.product_images, '']
-      }));
-    } else {
-      setGenericForm(prev => ({
-        ...prev,
-        product_images: [...prev.product_images, '']
-      }));
-    }
+  // Function to get category-specific quality types
+  const getCategoryQualityTypes = (categoryName: string): QualityType[] => {
+    // Filter quality types by category
+    const category = categories.find(c => c.name === categoryName);
+    if (!category) return qualityTypes;
+    
+    return qualityTypes.filter(qt => qt.category_id === category.id);
   };
 
-  const handleImageRemove = (index: number, formType: 'phone' | 'generic') => {
-    if (formType === 'phone') {
-      setPhoneForm(prev => ({
-        ...prev,
-        product_images: prev.product_images.filter((_, i) => i !== index)
-      }));
+  // Update filtered quality types when category changes
+  useEffect(() => {
+    if (selectedCategory) {
+      const category = categories.find(c => c.id === selectedCategory);
+      if (category) {
+        const categorySpecificQualityTypes = qualityTypes.filter(qt => qt.category_id === category.id);
+        setFilteredQualityTypes(categorySpecificQualityTypes);
+      } else {
+        setFilteredQualityTypes([]);
+      }
     } else {
-      setGenericForm(prev => ({
-        ...prev,
-        product_images: prev.product_images.filter((_, i) => i !== index)
-      }));
+      setFilteredQualityTypes([]);
     }
-  };
-
-  const handleImageChange = (index: number, value: string, formType: 'phone' | 'generic') => {
-    if (formType === 'phone') {
-      setPhoneForm(prev => ({
-        ...prev,
-        product_images: prev.product_images.map((img, i) => i === index ? value : img)
-      }));
-    } else {
-      setGenericForm(prev => ({
-        ...prev,
-        product_images: prev.product_images.map((img, i) => i === index ? value : img)
-      }));
-    }
-  };
-
-  const handleSpecificationAdd = (formType: 'phone' | 'generic') => {
-    const newKey = `spec_${Date.now()}`;
-    if (formType === 'phone') {
-      setPhoneForm(prev => ({
-        ...prev,
-        specifications: { ...prev.specifications, [newKey]: '' }
-      }));
-    } else {
-      setGenericForm(prev => ({
-        ...prev,
-        specifications: { ...prev.specifications, [newKey]: '' }
-      }));
-    }
-  };
-
-  const handleSpecificationRemove = (key: string, formType: 'phone' | 'generic') => {
-    if (formType === 'phone') {
-      setPhoneForm(prev => {
-        const newSpecs = { ...prev.specifications };
-        delete newSpecs[key];
-        return { ...prev, specifications: newSpecs };
-      });
-    } else {
-      setGenericForm(prev => {
-        const newSpecs = { ...prev.specifications };
-        delete newSpecs[key];
-        return { ...prev, specifications: newSpecs };
-      });
-    }
-  };
-
-  const handleSpecificationChange = (key: string, field: 'key' | 'value', value: string, formType: 'phone' | 'generic') => {
-    if (formType === 'phone') {
-      setPhoneForm(prev => {
-        if (field === 'key') {
-          const newSpecs = { ...prev.specifications };
-          const oldValue = newSpecs[key];
-          delete newSpecs[key];
-          newSpecs[value] = oldValue;
-          return { ...prev, specifications: newSpecs };
-        } else {
-          return {
-            ...prev,
-            specifications: { ...prev.specifications, [key]: value }
-          };
-        }
-      });
-    } else {
-      setGenericForm(prev => {
-        if (field === 'key') {
-          const newSpecs = { ...prev.specifications };
-          const oldValue = newSpecs[key];
-          delete newSpecs[key];
-          newSpecs[value] = oldValue;
-          return { ...prev, specifications: newSpecs };
-        } else {
-          return {
-            ...prev,
-            specifications: { ...prev.specifications, [key]: value }
-          };
-        }
-      });
-    }
-  };
+  }, [qualityTypes, selectedCategory, categories]);
 
   const validatePhoneForm = () => {
     const errors: string[] = [];
-    
     if (!phoneForm.model_id) errors.push('Please select a phone model');
     if (!phoneForm.category_id) errors.push('Please select a category');
     if (!phoneForm.quality_type_id) errors.push('Please select a quality type');
     if (!phoneForm.price || parseFloat(phoneForm.price) <= 0) errors.push('Please enter a valid price');
     if (!phoneForm.stock_quantity || parseInt(phoneForm.stock_quantity) < 0) errors.push('Please enter a valid stock quantity');
-    
     return errors;
   };
 
   const validateGenericForm = () => {
     const errors: string[] = [];
-    
     if (!genericForm.generic_product_id) errors.push('Please select a generic product');
     if (!genericForm.quality_type_id) errors.push('Please select a quality type');
     if (!genericForm.price || parseFloat(genericForm.price) <= 0) errors.push('Please enter a valid price');
     if (!genericForm.stock_quantity || parseInt(genericForm.stock_quantity) < 0) errors.push('Please enter a valid stock quantity');
-    
     return errors;
   };
 
   const submitPhoneProduct = async () => {
-    console.log('=== Starting Phone Product Submission ===');
-    console.log('Current form state:', phoneForm);
-    console.log('Vendor ID:', vendorId);
-    console.log('Selected brand:', selectedBrand);
-    console.log('Selected category:', selectedCategory);
-    
     const errors = validatePhoneForm();
     if (errors.length > 0) {
-      console.log('Validation errors:', errors);
       toast({
         title: "Validation Error",
         description: errors.join('\n'),
@@ -446,13 +301,12 @@ const AddProduct = () => {
     }
 
     if (!vendorId) {
-        console.log('No vendor ID found');
-        toast({
-            title: "Error",
-            description: "Vendor ID is missing. Cannot add product.",
-            variant: "destructive",
-        });
-        return;
+      toast({
+        title: "Error",
+        description: "Vendor ID is missing. Cannot add product.",
+        variant: "destructive",
+      });
+      return;
     }
 
     try {
@@ -467,51 +321,15 @@ const AddProduct = () => {
         original_price: phoneForm.original_price ? parseFloat(phoneForm.original_price) : null,
         warranty_months: parseInt(phoneForm.warranty_months),
         stock_quantity: parseInt(phoneForm.stock_quantity),
-        delivery_time_days: parseInt(phoneForm.delivery_time_days),
-        product_images: phoneForm.product_images.filter(img => img.trim() !== ''),
-        specifications: Object.keys(phoneForm.specifications).length > 0 ? phoneForm.specifications : null,
         is_active: true
       };
-
-      console.log('Submitting product data:', productData);
-      console.log('Product data types:', {
-        vendor_id: typeof productData.vendor_id,
-        model_id: typeof productData.model_id,
-        category_id: typeof productData.category_id,
-        quality_type_id: typeof productData.quality_type_id,
-        price: typeof productData.price,
-        warranty_months: typeof productData.warranty_months,
-        stock_quantity: typeof productData.stock_quantity,
-        delivery_time_days: typeof productData.delivery_time_days,
-        product_images: typeof productData.product_images,
-        specifications: typeof productData.specifications
-      });
-
-      // Check if auth user exists
-      const { data: authUser, error: authError } = await supabase.auth.getUser();
-      console.log('Current auth user:', authUser?.user?.id);
-      if (authError) {
-        console.error('Auth error:', authError);
-        throw new Error('Authentication required');
-      }
 
       const { data, error } = await supabase
         .from('vendor_products')
         .insert(productData)
         .select();
 
-      if (error) {
-        console.error('Database error:', error);
-        console.error('Error details:', {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint
-        });
-        throw error;
-      }
-
-      console.log('Product inserted successfully:', data);
+      if (error) throw error;
 
       toast({
         title: "Success",
@@ -526,40 +344,16 @@ const AddProduct = () => {
         price: '',
         original_price: '',
         warranty_months: '6',
-        stock_quantity: '',
-        delivery_time_days: '3',
-        product_images: [''],
-        specifications: {}
+        stock_quantity: ''
       });
-
-      // Reset selections
       setSelectedBrand('');
       setSelectedCategory('');
 
     } catch (error: any) {
       console.error('Error adding phone product:', error);
-      
-      let errorMessage = "Failed to add product. Please try again.";
-      
-      if (error?.message) {
-        if (error.message.includes('duplicate key')) {
-          errorMessage = "This product already exists. Please check if you've already added this combination.";
-        } else if (error.message.includes('violates foreign key')) {
-          errorMessage = "Invalid selection. Please refresh the page and try again.";
-        } else if (error.message.includes('violates check constraint')) {
-          errorMessage = "Invalid data entered. Please check your price and quantity values.";
-        } else if (error.message.includes('permission denied') || error.message.includes('RLS')) {
-          errorMessage = "Permission denied. Please make sure you're logged in as a vendor.";
-        } else if (error.message.includes('Authentication required')) {
-          errorMessage = "Please log in and try again.";
-        } else {
-          errorMessage = `Database error: ${error.message}`;
-        }
-      }
-      
       toast({
         title: "Error",
-        description: errorMessage,
+        description: "Failed to add product. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -579,12 +373,12 @@ const AddProduct = () => {
     }
 
     if (!vendorId) {
-        toast({
-            title: "Error",
-            description: "Vendor ID is missing. Cannot add product.",
-            variant: "destructive",
-        });
-        return;
+      toast({
+        title: "Error",
+        description: "Vendor ID is missing. Cannot add product.",
+        variant: "destructive",
+      });
+      return;
     }
 
     try {
@@ -598,31 +392,15 @@ const AddProduct = () => {
         original_price: genericForm.original_price ? parseFloat(genericForm.original_price) : null,
         warranty_months: parseInt(genericForm.warranty_months),
         stock_quantity: parseInt(genericForm.stock_quantity),
-        delivery_time_days: parseInt(genericForm.delivery_time_days),
-        product_images: genericForm.product_images.filter(img => img.trim() !== ''),
-        specifications: Object.keys(genericForm.specifications).length > 0 ? genericForm.specifications : null,
         is_active: true
       };
-
-      console.log('Submitting generic product data:', productData);
 
       const { data, error } = await supabase
         .from('vendor_generic_products')
         .insert(productData)
         .select();
 
-      if (error) {
-        console.error('Database error:', error);
-        console.error('Error details:', {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint
-        });
-        throw error;
-      }
-
-      console.log('Generic product inserted successfully:', data);
+      if (error) throw error;
 
       toast({
         title: "Success",
@@ -636,42 +414,194 @@ const AddProduct = () => {
         price: '',
         original_price: '',
         warranty_months: '6',
-        stock_quantity: '',
-        delivery_time_days: '3',
-        product_images: [''],
-        specifications: {}
+        stock_quantity: ''
       });
-
-      // Reset selections
       setSelectedCategory('');
 
     } catch (error: any) {
       console.error('Error adding generic product:', error);
-      
-      let errorMessage = "Failed to add product. Please try again.";
-      
-      if (error?.message) {
-        if (error.message.includes('duplicate key')) {
-          errorMessage = "This product already exists. Please check if you've already added this combination.";
-        } else if (error.message.includes('violates foreign key')) {
-          errorMessage = "Invalid selection. Please refresh the page and try again.";
-        } else if (error.message.includes('violates check constraint')) {
-          errorMessage = "Invalid data entered. Please check your price and quantity values.";
-        } else if (error.message.includes('permission denied') || error.message.includes('RLS')) {
-          errorMessage = "Permission denied. Please make sure you're logged in as a vendor.";
-        } else {
-          errorMessage = `Database error: ${error.message}`;
-        }
-      }
-      
       toast({
         title: "Error",
-        description: errorMessage,
+        description: "Failed to add product. Please try again.",
         variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
+  };
+
+  // CSV Upload functionality
+  const downloadSampleCSV = () => {
+    const sampleData = [
+      ['Brand', 'Model', 'Category', 'Quality', 'Price', 'Original Price (Optional)', 'Warranty Months (Optional)', 'Stock'],
+      ['Apple', 'iPhone 14', 'Displays', 'Original', '12000', '15000', '12', '10'],
+      ['Samsung', 'Galaxy S23', 'Batteries', 'ORG', '8000', '10000', '6', '25'],
+      ['OnePlus', 'OnePlus 11', 'Displays', 'TFT', '18000', '', '24', '5']
+    ];
+
+    const csvContent = sampleData.map(row => row.join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'sample_products.csv';
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleCSVUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const lines = text.split('\n');
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      
+      const expectedHeaders = ['brand', 'model', 'category', 'quality', 'price'];
+      const missingHeaders = expectedHeaders.filter(h => !headers.includes(h));
+      
+      if (missingHeaders.length > 0) {
+        toast({
+          title: "Invalid CSV Format",
+          description: `Missing required columns: ${missingHeaders.join(', ')}`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const data: BulkUploadRow[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        
+        const values = line.split(',').map(v => v.trim());
+        if (values.length < 5) continue;
+        
+        data.push({
+          brand: values[headers.indexOf('brand')] || '',
+          model: values[headers.indexOf('model')] || '',
+          category: values[headers.indexOf('category')] || '',
+          quality: values[headers.indexOf('quality')] || '',
+          price: values[headers.indexOf('price')] || '',
+          original_price: values[headers.indexOf('original price (optional)')] || values[headers.indexOf('original price')] || '',
+          warranty: values[headers.indexOf('warranty months (optional)')] || values[headers.indexOf('warranty')] || '6',
+          stock: values[headers.indexOf('stock')] || '',
+          status: 'pending',
+          row_number: i
+        });
+      }
+
+      setBulkUploadData(data);
+      toast({
+        title: "CSV Uploaded",
+        description: `Found ${data.length} products to process`,
+      });
+    };
+    reader.readAsText(file);
+  };
+
+  const processBulkUpload = async () => {
+    if (!vendorId) {
+      toast({
+        title: "Error",
+        description: "Vendor ID is missing.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadProgress(0);
+    const results = { success: 0, failed: 0, errors: [] as string[] };
+    
+    for (let i = 0; i < bulkUploadData.length; i++) {
+      const row = bulkUploadData[i];
+      
+      try {
+        // Find brand
+        const brand = brands.find(b => b.name.toLowerCase() === row.brand.toLowerCase());
+        if (!brand) {
+          throw new Error(`Brand "${row.brand}" not found`);
+        }
+
+        // Find model
+        const model = models.find(m => 
+          m.model_name.toLowerCase().includes(row.model.toLowerCase()) && 
+          m.brand_id === brand.id
+        );
+        if (!model) {
+          throw new Error(`Model "${row.model}" not found for brand "${row.brand}"`);
+        }
+
+        // Find category
+        const category = categories.find(c => c.name.toLowerCase() === row.category.toLowerCase());
+        if (!category) {
+          throw new Error(`Category "${row.category}" not found`);
+        }
+
+        // Find quality type - validate against category-specific quality types
+        const categoryQualityTypes = getCategoryQualityTypes(category.name);
+        const quality = categoryQualityTypes.find(q => q.name.toLowerCase() === row.quality.toLowerCase());
+        if (!quality) {
+          const allowedQualities = categoryQualityTypes.map(q => q.name).join(', ');
+          throw new Error(`Quality type "${row.quality}" not valid for category "${row.category}". Allowed: ${allowedQualities}`);
+        }
+
+        // Validate price and stock
+        const price = parseFloat(row.price);
+        const stock = parseInt(row.stock);
+        if (isNaN(price) || price <= 0) {
+          throw new Error(`Invalid price: ${row.price}`);
+        }
+        if (isNaN(stock) || stock < 0) {
+          throw new Error(`Invalid stock quantity: ${row.stock}`);
+        }
+
+        // Create product
+        const productData = {
+          vendor_id: vendorId,
+          model_id: model.id,
+          category_id: category.id,
+          quality_type_id: quality.id,
+          price: price,
+          original_price: row.original_price ? parseFloat(row.original_price) : null,
+          warranty_months: row.warranty ? parseInt(row.warranty) : 6,
+          stock_quantity: stock,
+          is_active: true
+        };
+
+        const { error } = await supabase
+          .from('vendor_products')
+          .insert(productData);
+
+        if (error) throw error;
+
+        results.success++;
+        setBulkUploadData(prev => prev.map((item, idx) => 
+          idx === i ? { ...item, status: 'success' as const } : item
+        ));
+
+      } catch (error: any) {
+        results.failed++;
+        results.errors.push(`Row ${row.row_number}: ${error.message}`);
+        setBulkUploadData(prev => prev.map((item, idx) => 
+          idx === i ? { ...item, status: 'error' as const, error: error.message } : item
+        ));
+      }
+
+      setUploadProgress((i + 1) / bulkUploadData.length * 100);
+    }
+
+    setUploadResults(results);
+    setIsUploading(false);
+    
+    toast({
+      title: "Bulk Upload Complete",
+      description: `Successfully added ${results.success} products. ${results.failed} failed.`,
+      variant: results.failed > 0 ? "destructive" : "default",
+    });
   };
 
   if (loading && brands.length === 0) {
@@ -705,12 +635,12 @@ const AddProduct = () => {
             Back to Dashboard
           </Button>
           
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Add New Product</h1>
-          <p className="text-gray-600">Add your products to the marketplace with competitive pricing and quality options.</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Add New Products</h1>
+          <p className="text-gray-600">Add your products individually or upload them in bulk for faster processing.</p>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="phone" className="flex items-center gap-2">
               <Smartphone className="h-4 w-4" />
               Phone Products
@@ -719,8 +649,13 @@ const AddProduct = () => {
               <Cable className="h-4 w-4" />
               Generic Products
             </TabsTrigger>
+            <TabsTrigger value="bulk" className="flex items-center gap-2">
+              <Upload className="h-4 w-4" />
+              Bulk Upload
+            </TabsTrigger>
           </TabsList>
 
+          {/* Phone Products Tab */}
           <TabsContent value="phone" className="space-y-6">
             <Card>
               <CardHeader>
@@ -733,10 +668,9 @@ const AddProduct = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Brand and Model Selection */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="brand">Brand</Label>
+                    <Label htmlFor="brand">Brand *</Label>
                     <Select value={selectedBrand} onValueChange={setSelectedBrand}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select brand" />
@@ -752,7 +686,7 @@ const AddProduct = () => {
                   </div>
                   
                   <div>
-                    <Label htmlFor="model">Phone Model</Label>
+                    <Label htmlFor="model">Phone Model *</Label>
                     <Select
                       value={phoneForm.model_id}
                       onValueChange={(value) => setPhoneForm(prev => ({ ...prev, model_id: value }))}
@@ -772,10 +706,9 @@ const AddProduct = () => {
                   </div>
                 </div>
 
-                {/* Category and Quality Selection */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="category">Category</Label>
+                    <Label htmlFor="category">Category *</Label>
                     <Select
                       value={phoneForm.category_id}
                       onValueChange={(value) => {
@@ -797,7 +730,7 @@ const AddProduct = () => {
                   </div>
                   
                   <div>
-                    <Label htmlFor="quality">Quality Type</Label>
+                    <Label htmlFor="quality">Quality Type *</Label>
                     <Select
                       value={phoneForm.quality_type_id}
                       onValueChange={(value) => setPhoneForm(prev => ({ ...prev, quality_type_id: value }))}
@@ -821,7 +754,6 @@ const AddProduct = () => {
                   </div>
                 </div>
 
-                {/* Pricing */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <Label htmlFor="price">Price (₹) *</Label>
@@ -846,8 +778,7 @@ const AddProduct = () => {
                   </div>
                 </div>
 
-                {/* Stock and Delivery */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <Label htmlFor="stock">Stock Quantity *</Label>
                     <Input
@@ -877,98 +808,6 @@ const AddProduct = () => {
                       </SelectContent>
                     </Select>
                   </div>
-                  
-                  <div>
-                    <Label htmlFor="delivery">Delivery Time (Days)</Label>
-                    <Select
-                      value={phoneForm.delivery_time_days}
-                      onValueChange={(value) => setPhoneForm(prev => ({ ...prev, delivery_time_days: value }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="1">Same Day</SelectItem>
-                        <SelectItem value="2">2 Days</SelectItem>
-                        <SelectItem value="3">3 Days</SelectItem>
-                        <SelectItem value="5">5 Days</SelectItem>
-                        <SelectItem value="7">1 Week</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {/* Product Images */}
-                <div>
-                  <Label>Product Images *</Label>
-                  <div className="space-y-3 mt-2">
-                    {phoneForm.product_images.map((image, index) => (
-                      <div key={index} className="flex gap-2">
-                        <Input
-                          placeholder="Enter image URL"
-                          value={image}
-                          onChange={(e) => handleImageChange(index, e.target.value, 'phone')}
-                        />
-                        {phoneForm.product_images.length > 1 && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={() => handleImageRemove(index, 'phone')}
-                          >
-                            <Minus className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                    ))}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => handleImageAdd('phone')}
-                      className="w-full"
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Another Image
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Specifications */}
-                <div>
-                  <Label>Product Specifications</Label>
-                  <div className="space-y-3 mt-2">
-                    {Object.entries(phoneForm.specifications).map(([key, value]) => (
-                      <div key={key} className="flex gap-2">
-                        <Input
-                          placeholder="Specification name"
-                          value={key.startsWith('spec_') ? '' : key}
-                          onChange={(e) => handleSpecificationChange(key, 'key', e.target.value, 'phone')}
-                        />
-                        <Input
-                          placeholder="Specification value"
-                          value={value}
-                          onChange={(e) => handleSpecificationChange(key, 'value', e.target.value, 'phone')}
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          onClick={() => handleSpecificationRemove(key, 'phone')}
-                        >
-                          <Minus className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => handleSpecificationAdd('phone')}
-                      className="w-full"
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Specification
-                    </Button>
-                  </div>
                 </div>
 
                 <div className="flex justify-end pt-4">
@@ -987,6 +826,7 @@ const AddProduct = () => {
             </Card>
           </TabsContent>
 
+          {/* Generic Products Tab */}
           <TabsContent value="generic" className="space-y-6">
             <Card>
               <CardHeader>
@@ -999,10 +839,9 @@ const AddProduct = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Category and Generic Product Selection */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="genericCategory">Category</Label>
+                    <Label htmlFor="genericCategory">Category *</Label>
                     <Select
                       value={selectedCategory}
                       onValueChange={(value) => {
@@ -1024,7 +863,7 @@ const AddProduct = () => {
                   </div>
                   
                   <div>
-                    <Label htmlFor="genericProduct">Generic Product</Label>
+                    <Label htmlFor="genericProduct">Generic Product *</Label>
                     <Select
                       value={genericForm.generic_product_id}
                       onValueChange={(value) => setGenericForm(prev => ({ ...prev, generic_product_id: value }))}
@@ -1049,9 +888,8 @@ const AddProduct = () => {
                   </div>
                 </div>
 
-                {/* Quality Type */}
                 <div>
-                  <Label htmlFor="genericQuality">Quality Type</Label>
+                  <Label htmlFor="genericQuality">Quality Type *</Label>
                   <Select
                     value={genericForm.quality_type_id}
                     onValueChange={(value) => setGenericForm(prev => ({ ...prev, quality_type_id: value }))}
@@ -1074,7 +912,6 @@ const AddProduct = () => {
                   </Select>
                 </div>
 
-                {/* Pricing */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <Label htmlFor="genericPrice">Price (₹) *</Label>
@@ -1099,8 +936,7 @@ const AddProduct = () => {
                   </div>
                 </div>
 
-                {/* Stock and Delivery */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <Label htmlFor="genericStock">Stock Quantity *</Label>
                     <Input
@@ -1130,98 +966,6 @@ const AddProduct = () => {
                       </SelectContent>
                     </Select>
                   </div>
-                  
-                  <div>
-                    <Label htmlFor="genericDelivery">Delivery Time (Days)</Label>
-                    <Select
-                      value={genericForm.delivery_time_days}
-                      onValueChange={(value) => setGenericForm(prev => ({ ...prev, delivery_time_days: value }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="1">Same Day</SelectItem>
-                        <SelectItem value="2">2 Days</SelectItem>
-                        <SelectItem value="3">3 Days</SelectItem>
-                        <SelectItem value="5">5 Days</SelectItem>
-                        <SelectItem value="7">1 Week</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {/* Product Images */}
-                <div>
-                  <Label>Product Images *</Label>
-                  <div className="space-y-3 mt-2">
-                    {genericForm.product_images.map((image, index) => (
-                      <div key={index} className="flex gap-2">
-                        <Input
-                          placeholder="Enter image URL"
-                          value={image}
-                          onChange={(e) => handleImageChange(index, e.target.value, 'generic')}
-                        />
-                        {genericForm.product_images.length > 1 && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={() => handleImageRemove(index, 'generic')}
-                          >
-                            <Minus className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                    ))}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => handleImageAdd('generic')}
-                      className="w-full"
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Another Image
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Specifications */}
-                <div>
-                  <Label>Product Specifications</Label>
-                  <div className="space-y-3 mt-2">
-                    {Object.entries(genericForm.specifications).map(([key, value]) => (
-                      <div key={key} className="flex gap-2">
-                        <Input
-                          placeholder="Specification name"
-                          value={key.startsWith('spec_') ? '' : key}
-                          onChange={(e) => handleSpecificationChange(key, 'key', e.target.value, 'generic')}
-                        />
-                        <Input
-                          placeholder="Specification value"
-                          value={value}
-                          onChange={(e) => handleSpecificationChange(key, 'value', e.target.value, 'generic')}
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          onClick={() => handleSpecificationRemove(key, 'generic')}
-                        >
-                          <Minus className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => handleSpecificationAdd('generic')}
-                      className="w-full"
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Specification
-                    </Button>
-                  </div>
                 </div>
 
                 <div className="flex justify-end pt-4">
@@ -1236,6 +980,146 @@ const AddProduct = () => {
                     )}
                   </Button>
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Bulk Upload Tab */}
+          <TabsContent value="bulk" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Upload className="h-5 w-5" />
+                  Bulk Upload Products
+                </CardTitle>
+                <CardDescription>
+                  Upload multiple products at once using a CSV file. Download the sample template to get started.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    <strong>Important:</strong> For phone models, use exact model names as they appear in our system. 
+                    Categories and Quality types must match exactly. Use the sample CSV as a reference.
+                  </AlertDescription>
+                </Alert>
+
+                <div className="flex gap-4">
+                  <Button onClick={downloadSampleCSV} variant="outline">
+                    <Download className="h-4 w-4 mr-2" />
+                    Download Sample CSV
+                  </Button>
+                  
+                  <div className="flex-1">
+                    <Input
+                      type="file"
+                      accept=".csv"
+                      onChange={handleCSVUpload}
+                      className="cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                {bulkUploadData.length > 0 && (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-lg font-semibold">Preview ({bulkUploadData.length} products)</h3>
+                      <Button onClick={processBulkUpload} disabled={isUploading}>
+                        {isUploading ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            Processing... ({Math.round(uploadProgress)}%)
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="h-4 w-4 mr-2" />
+                            Upload Products
+                          </>
+                        )}
+                      </Button>
+                    </div>
+
+                    {isUploading && (
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div 
+                          className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+                          style={{ width: `${uploadProgress}%` }}
+                        ></div>
+                      </div>
+                    )}
+
+                    <div className="max-h-96 overflow-y-auto border rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr>
+                            <th className="p-2 text-left">Row</th>
+                            <th className="p-2 text-left">Brand</th>
+                            <th className="p-2 text-left">Model</th>
+                            <th className="p-2 text-left">Category</th>
+                            <th className="p-2 text-left">Quality</th>
+                            <th className="p-2 text-left">Price</th>
+                            <th className="p-2 text-left">Stock</th>
+                            <th className="p-2 text-left">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {bulkUploadData.map((row, index) => (
+                            <tr key={index} className="border-t">
+                              <td className="p-2">{row.row_number}</td>
+                              <td className="p-2">{row.brand}</td>
+                              <td className="p-2">{row.model}</td>
+                              <td className="p-2">{row.category}</td>
+                              <td className="p-2">{row.quality}</td>
+                              <td className="p-2">₹{row.price}</td>
+                              <td className="p-2">{row.stock}</td>
+                              <td className="p-2">
+                                {row.status === 'pending' && <Badge variant="secondary">Pending</Badge>}
+                                {row.status === 'success' && <Badge variant="default" className="bg-green-500">Success</Badge>}
+                                {row.status === 'error' && (
+                                  <div className="flex items-center gap-1">
+                                    <Badge variant="destructive">Error</Badge>
+                                    {row.error && (
+                                      <span className="text-xs text-red-600 truncate max-w-[200px]" title={row.error}>
+                                        {row.error}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {uploadResults.success > 0 || uploadResults.failed > 0 ? (
+                      <Alert className={uploadResults.failed > 0 ? "border-red-200 bg-red-50" : "border-green-200 bg-green-50"}>
+                        <CheckCircle className="h-4 w-4" />
+                        <AlertDescription>
+                          <div className="space-y-2">
+                            <p><strong>Upload Results:</strong></p>
+                            <p>✅ Successfully added: {uploadResults.success} products</p>
+                            {uploadResults.failed > 0 && <p>❌ Failed: {uploadResults.failed} products</p>}
+                            {uploadResults.errors.length > 0 && (
+                              <div className="mt-2">
+                                <p className="font-medium">Errors:</p>
+                                <ul className="list-disc list-inside text-sm space-y-1">
+                                  {uploadResults.errors.slice(0, 5).map((error, idx) => (
+                                    <li key={idx}>{error}</li>
+                                  ))}
+                                  {uploadResults.errors.length > 5 && (
+                                    <li>... and {uploadResults.errors.length - 5} more errors</li>
+                                  )}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        </AlertDescription>
+                      </Alert>
+                    ) : null}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

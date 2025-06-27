@@ -19,10 +19,17 @@ import ResetPassword from "./pages/ResetPassword";
 
 import VendorDashboard from "./pages/VendorDashboard";
 import AddProduct from "./pages/AddProduct";
+import VendorProductManagement from "./pages/VendorProductManagement";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminModelsManagement from "./pages/AdminModelsManagement";
 import AdminCategoriesManagement from "./pages/AdminCategoriesManagement";
 import AdminQualitiesManagement from "./pages/AdminQualitiesManagement";
+
+import AdminCommissionRules from "./pages/AdminCommissionRules";
+import AdminVendorManagement from "./pages/AdminVendorManagement";
+import AdminVendorWallets from "./pages/AdminVendorWallets";
+import AdminDeliveryWallets from "./pages/AdminDeliveryWallets";
+import AdminPayoutManagement from "./pages/AdminPayoutManagement";
 import UserProfilePage from "./pages/UserProfilePage";
 import NotFound from "./pages/NotFound";
 import About from "./pages/About";
@@ -152,12 +159,18 @@ const App = () => (
                 {/* Vendor-only routes */}
                 <Route path="/vendor-dashboard" element={<ProtectedRoute allowedRoles={['vendor']}><VendorDashboard /></ProtectedRoute>} />
                 <Route path="/vendor/add-product" element={<ProtectedRoute allowedRoles={['vendor']}><AddProduct /></ProtectedRoute>} />
+                <Route path="/vendor/product-management" element={<ProtectedRoute allowedRoles={['vendor']}><VendorProductManagement /></ProtectedRoute>} />
 
                 {/* Admin-only routes */}
                 <Route path="/admin-dashboard" element={<ProtectedRoute allowedRoles={['admin']}><AdminDashboard /></ProtectedRoute>} />
                 <Route path="/admin/models" element={<ProtectedRoute allowedRoles={['admin']}><AdminModelsManagement /></ProtectedRoute>} />
                 <Route path="/admin/categories" element={<ProtectedRoute allowedRoles={['admin']}><AdminCategoriesManagement /></ProtectedRoute>} />
                 <Route path="/admin/qualities" element={<ProtectedRoute allowedRoles={['admin']}><AdminQualitiesManagement /></ProtectedRoute>} />
+                <Route path="/admin/vendor-management" element={<ProtectedRoute allowedRoles={['admin']}><AdminVendorManagement /></ProtectedRoute>} />
+                <Route path="/admin/commission-rules" element={<ProtectedRoute allowedRoles={['admin']}><AdminCommissionRules /></ProtectedRoute>} />
+                <Route path="/admin/vendor-wallets" element={<ProtectedRoute allowedRoles={['admin']}><AdminVendorWallets /></ProtectedRoute>} />
+                <Route path="/admin/delivery-wallets" element={<ProtectedRoute allowedRoles={['admin']}><AdminDeliveryWallets /></ProtectedRoute>} />
+                <Route path="/admin/payouts" element={<ProtectedRoute allowedRoles={['admin']}><AdminPayoutManagement /></ProtectedRoute>} />
 
                 {/* Delivery Partner routes */}
                 <Route path="/delivery-partner-dashboard" element={<ProtectedRoute allowedRoles={['delivery_partner']}><DeliveryPartnerDashboard /></ProtectedRoute>} />

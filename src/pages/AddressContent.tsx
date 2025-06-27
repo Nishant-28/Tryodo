@@ -224,7 +224,7 @@ const AddressContent = () => {
     try {
       if (useSimpleStorage) {
         // Use simple profile storage as fallback
-        await updateProfile({
+        const result = await updateProfile({
           address: formData.address_line1,
           city: formData.city,
           state: formData.state,
@@ -232,11 +232,98 @@ const AddressContent = () => {
           phone: formData.contact_phone || profile?.phone || null,
         });
         
-        toast.success('Address saved successfully');
-        loadSimpleAddresses();
-        resetForm();
+        if (result.success) {
+          toast.success('Address saved successfully');
+          loadSimpleAddresses();
+          resetForm();
+        } else {
+          toast.error(result.error || 'Failed to save address');
+        }
       } else {
-        toast.error('Database setup required. Please contact support.');
+        // Try to use the customer_addresses table
+        try {
+          const { data: existingCustomer, error: customerError } = await supabase
+            .from('customers')
+            .select('id')
+            .eq('profile_id', profile?.id)
+            .single();
+
+          if (customerError || !existingCustomer) {
+            // Fall back to simple storage if customer table doesn't exist
+            console.log('Customer table not found, falling back to simple storage');
+            setUseSimpleStorage(true);
+            
+            const result = await updateProfile({
+              address: formData.address_line1,
+              city: formData.city,
+              state: formData.state,
+              pincode: formData.pincode,
+              phone: formData.contact_phone || profile?.phone || null,
+            });
+            
+            if (result.success) {
+              toast.success('Address saved successfully');
+              loadSimpleAddresses();
+              resetForm();
+            } else {
+              toast.error(result.error || 'Failed to save address');
+            }
+            return;
+          }
+
+          // If we reach here, customer exists, try to save to customer_addresses
+          const addressData = {
+            customer_id: existingCustomer.id,
+            address_type: formData.address_type,
+            address_line1: formData.address_line1,
+            address_line2: formData.address_line2 || null,
+            city: formData.city,
+            state: formData.state,
+            pincode: formData.pincode,
+            landmark: formData.landmark || null,
+            contact_name: formData.contact_name || null,
+            contact_phone: formData.contact_phone || null,
+            is_default: formData.is_default || addresses.length === 0,
+          };
+
+          if (editingAddress) {
+            const { error: updateError } = await supabase
+              .from('customer_addresses')
+              .update(addressData)
+              .eq('id', editingAddress.id);
+              
+            if (updateError) throw updateError;
+          } else {
+            const { error: insertError } = await supabase
+              .from('customer_addresses')
+              .insert(addressData);
+              
+            if (insertError) throw insertError;
+          }
+          
+          toast.success(editingAddress ? 'Address updated successfully' : 'Address added successfully');
+          loadAddresses();
+          resetForm();
+        } catch (dbError) {
+          console.error('Database error, falling back to simple storage:', dbError);
+          setUseSimpleStorage(true);
+          
+          const result = await updateProfile({
+            address: formData.address_line1,
+            city: formData.city,
+            state: formData.state,
+            pincode: formData.pincode,
+            phone: formData.contact_phone || profile?.phone || null,
+          });
+          
+          if (result.success) {
+            toast.success('Address saved successfully');
+            loadSimpleAddresses();
+            resetForm();
+          } else {
+            toast.error(result.error || 'Failed to save address');
+          }
+        }
       }
     } catch (error) {
       console.error('Error saving address:', error);

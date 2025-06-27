@@ -21,7 +21,23 @@ const ProfileContent = () => {
     address: '',
     city: '',
     state: '',
-    pincode: '',
+    pincode: ''
+  });
+
+  // Notification preferences
+  const [notificationPrefs, setNotificationPrefs] = useState({
+    email_notifications: true,
+    order_updates: true,
+    promotional_emails: false,
+    sms_notifications: true,
+    push_notifications: true,
+  });
+
+  // Privacy settings
+  const [privacySettings, setPrivacySettings] = useState({
+    profile_visibility: 'private',
+    show_order_history: false,
+    data_sharing: false,
   });
 
   // Password form data
@@ -47,8 +63,18 @@ const ProfileContent = () => {
         address: profile.address || '',
         city: profile.city || '',
         state: profile.state || '',
-        pincode: profile.pincode || '',
+        pincode: profile.pincode || ''
       });
+
+      // Load notification preferences
+      if (profile.notification_preferences) {
+        setNotificationPrefs({ ...notificationPrefs, ...profile.notification_preferences });
+      }
+
+      // Load privacy settings
+      if (profile.privacy_settings) {
+        setPrivacySettings({ ...privacySettings, ...profile.privacy_settings });
+      }
     }
   }, [profile]);
 
@@ -117,25 +143,21 @@ const ProfileContent = () => {
 
     setPasswordLoading(true);
     try {
-      // First verify current password by attempting to sign in
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: user?.email || '',
-        password: passwordData.currentPassword,
-      });
-
-      if (signInError) {
-        toast.error('Current password is incorrect');
-        setPasswordLoading(false);
-        return;
-      }
-
-      // Update password
-      const { error: updateError } = await supabase.auth.updateUser({
+      // Use Supabase's built-in password update which handles verification internally
+      const { error } = await supabase.auth.updateUser({
         password: passwordData.newPassword,
       });
 
-      if (updateError) {
-        toast.error(updateError.message);
+      if (error) {
+        if (error.message.includes('New password should be different')) {
+          toast.error('New password must be different from current password');
+        } else if (error.message.includes('weak')) {
+          toast.error('Password is too weak. Please choose a stronger password');
+        } else if (error.message.includes('same')) {
+          toast.error('New password must be different from current password');
+        } else {
+          toast.error('Failed to change password. Please verify your current password and try again.');
+        }
       } else {
         toast.success('Password changed successfully!');
         setPasswordData({
@@ -244,7 +266,7 @@ const ProfileContent = () => {
                 type="text"
                 value={profileData.address}
                 onChange={handleProfileChange}
-                placeholder="Enter your address"
+                placeholder="Enter your full address"
                 className="w-full"
               />
             </div>

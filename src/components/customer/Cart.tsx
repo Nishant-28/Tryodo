@@ -101,33 +101,36 @@ const Cart = ({ isOpen, onClose }: CartProps) => {
               </span>
             )}
           </div>
-          <button
+          <Button
             onClick={handleClose}
-            className="rounded-lg p-2 hover:bg-gray-100 transition-colors duration-200 touch-manipulation active:scale-95"
+            variant="ghost"
+            size="mobile-icon-sm"
+            className="h-10 w-10 rounded-xl hover:bg-gray-100"
+            enableHaptics={true}
+            hapticIntensity="light"
           >
             <X className="h-5 w-5" />
-          </button>
+          </Button>
         </div>
 
         {/* Cart Items */}
-        <div className="flex-1 overflow-y-auto scroll-touch">
+        <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <LoadingSpinner />
             </div>
           ) : items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-gray-500 p-8">
+            <div className="empty-state-mobile">
               <div className="bg-gray-100 rounded-full p-8 mb-4">
                 <ShoppingBag className="h-12 w-12 text-gray-400" />
               </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Your cart is empty</h3>
-              <p className="text-sm text-gray-500 text-center mb-6">
-                Add some products to get started with your order
-              </p>
+              <h3>Your cart is empty</h3>
+              <p>Add some products to get started with your order</p>
               <Button
                 onClick={handleClose}
-                variant="outline"
-                className="touch-manipulation active:scale-95"
+                variant="outline-mobile"
+                size="mobile-md"
+                enableHaptics={true}
               >
                 Continue Shopping
               </Button>
@@ -137,18 +140,14 @@ const Cart = ({ isOpen, onClose }: CartProps) => {
               {items.map((item, index) => (
                 <div 
                   key={item.id} 
-                  className={cn(
-                    "bg-white border border-gray-200 rounded-xl p-4 shadow-sm",
-                    "transition-all duration-200 hover:shadow-md",
-                    "animate-in slide-in-from-right duration-300",
-                  )}
+                  className="card-mobile"
                   style={{ animationDelay: `${index * 100}ms` }}
                 >
                   <div className="flex items-start space-x-4">
                     {/* Product Image */}
-                    <div className="w-16 h-16 bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <div className="w-16 h-16 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl flex items-center justify-center flex-shrink-0">
                       {item.image ? (
-                        <img src={item.image} alt={item.name} className="w-full h-full object-cover rounded-lg" />
+                        <img src={item.image} alt={item.name} className="w-full h-full object-cover rounded-xl" />
                       ) : (
                         <ShoppingBag className="h-6 w-6 text-gray-400" />
                       )}
@@ -157,33 +156,50 @@ const Cart = ({ isOpen, onClose }: CartProps) => {
                     {/* Product Details */}
                     <div className="flex-1 min-w-0">
                       <h3 className="text-sm font-medium text-gray-900 truncate">{item.name}</h3>
-                      <p className="text-xs text-gray-500 mt-1">{item.vendor}</p>
-                      <div className="flex items-center justify-between mt-2">
+                      <div className="flex flex-col gap-1 mt-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs text-gray-600 font-medium">🏪 {item.vendor || 'Unknown Vendor'}</p>
+                          {item.qualityName && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-medium bg-blue-100 text-blue-800">
+                              {item.qualityName}
+                            </span>
+                          )}
+                        </div>
+                        {item.brandName && item.modelName && (
+                          <p className="text-xs text-gray-500">{item.brandName} • {item.modelName}</p>
+                        )}
+                        {item.warranty > 0 && (
+                          <p className="text-xs text-green-600">🛡️ {item.warranty} months warranty</p>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between mt-3">
                         <p className="text-lg font-semibold text-gray-900">₹{item.price.toLocaleString()}</p>
                         
-                        {/* Quantity Controls */}
-                        <div className="flex items-center space-x-1 bg-gray-100 rounded-lg p-1">
-                          <button
-                            onClick={() => {
-                              triggerHapticFeedback();
-                              updateQuantity(item.productId, Math.max(0, item.quantity - 1));
-                            }}
-                            className="w-8 h-8 rounded-md border border-gray-300 bg-white flex items-center justify-center hover:bg-gray-50 transition-colors touch-manipulation active:scale-95"
+                        {/* Enhanced Quantity Controls */}
+                        <div className="flex items-center space-x-2 bg-gray-100 rounded-xl p-1">
+                          <Button
+                            onClick={() => updateQuantity(item.productId, Math.max(0, item.quantity - 1))}
+                            variant="ghost"
+                            size="mobile-icon-sm"
+                            className="quantity-btn h-10 w-10"
+                            enableHaptics={true}
+                            hapticIntensity="light"
                           >
-                            <Minus className="h-3 w-3" />
-                          </button>
+                            <Minus className="h-4 w-4" />
+                          </Button>
                           
-                          <span className="w-8 text-center text-sm font-medium">{item.quantity}</span>
+                          <span className="min-w-[32px] text-center text-sm font-medium px-2">{item.quantity}</span>
                           
-                          <button
-                            onClick={() => {
-                              triggerHapticFeedback();
-                              updateQuantity(item.productId, item.quantity + 1);
-                            }}
-                            className="w-8 h-8 rounded-md border border-gray-300 bg-white flex items-center justify-center hover:bg-gray-50 transition-colors touch-manipulation active:scale-95"
+                          <Button
+                            onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                            variant="ghost"
+                            size="mobile-icon-sm"
+                            className="quantity-btn h-10 w-10"
+                            enableHaptics={true}
+                            hapticIntensity="light"
                           >
-                            <Plus className="h-3 w-3" />
-                          </button>
+                            <Plus className="h-4 w-4" />
+                          </Button>
                         </div>
                       </div>
                       
@@ -192,15 +208,16 @@ const Cart = ({ isOpen, onClose }: CartProps) => {
                         <p className="text-sm text-gray-600">
                           Total: <span className="font-semibold">₹{(item.price * item.quantity).toLocaleString()}</span>
                         </p>
-                        <button
-                          onClick={() => {
-                            triggerHapticFeedback();
-                            removeFromCart(item.productId);
-                          }}
-                          className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors touch-manipulation active:scale-95"
+                        <Button
+                          onClick={() => removeFromCart(item.productId)}
+                          variant="ghost"
+                          size="mobile-icon-sm"
+                          className="h-10 w-10 text-red-500 hover:text-red-700 hover:bg-red-50"
+                          enableHaptics={true}
+                          hapticIntensity="medium"
                         >
                           <Trash2 className="h-4 w-4" />
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -210,9 +227,9 @@ const Cart = ({ isOpen, onClose }: CartProps) => {
           )}
         </div>
 
-        {/* Footer */}
+        {/* Enhanced Footer */}
         {items.length > 0 && (
-          <div className="border-t border-gray-200 p-4 bg-white space-y-4 safe-area-pb">
+          <div className="border-t border-gray-200 p-4 bg-white space-y-4 pb-safe">
             {/* Order Summary */}
             <div className="space-y-2">
               <div className="flex justify-between text-sm text-gray-600">
@@ -230,18 +247,17 @@ const Cart = ({ isOpen, onClose }: CartProps) => {
               </div>
             </div>
             
-            {/* Checkout Button */}
+            {/* Enhanced Checkout Button */}
             <Button 
-              className={cn(
-                "w-full h-12 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700",
-                "touch-manipulation active:scale-98 transition-transform duration-150",
-                "font-semibold text-white shadow-lg"
-              )}
+              variant="primary-mobile"
+              size="mobile-full-lg"
+              className="shadow-lg"
               onClick={() => {
-                triggerHapticFeedback();
                 handleClose();
                 navigate('/checkout');
               }}
+              enableHaptics={true}
+              hapticIntensity="medium"
             >
               <CreditCard className="h-5 w-5 mr-2" />
               Proceed to Checkout

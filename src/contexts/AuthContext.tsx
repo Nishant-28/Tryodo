@@ -22,6 +22,11 @@ export interface Profile {
   city: string | null;
   state: string | null;
   pincode: string | null;
+  date_of_birth: string | null;
+  gender: string | null;
+  avatar_url: string | null;
+  notification_preferences: any | null;
+  privacy_settings: any | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

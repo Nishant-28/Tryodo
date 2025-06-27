@@ -22,12 +22,12 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import { TryodoAPI } from '@/lib/api';
+import { TryodoAPI, TransactionAPI, WalletAPI, CommissionAPI } from '@/lib/api';
 import { DeliveryAPI } from '@/lib/deliveryApi';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
 import { Alert as AlertComponent, AlertDescription } from '@/components/ui/alert';
-import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
 
 type SupabaseOrderData = {
   id: string;
@@ -266,6 +266,22 @@ const VendorDashboard = () => {
   const [error, setError] = useState<string | null>(null);
   const [confirmedOrdersLoading, setConfirmedOrdersLoading] = useState(false);
 
+  // Financial data state
+  const [wallet, setWallet] = useState<any>(null);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [loadingFinancials, setLoadingFinancials] = useState(false);
+
+  // Add new state for products
+  const [vendorProducts, setVendorProducts] = useState<VendorProduct[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [productSearchTerm, setProductSearchTerm] = useState('');
+  const [productFilter, setProductFilter] = useState<string>('all');
+  
+  // Add state for enhanced analytics
+  const [monthlyEarnings, setMonthlyEarnings] = useState<any[]>([]);
+  const [categoryBreakdown, setCategoryBreakdown] = useState<any[]>([]);
+  const [loadingChartData, setLoadingChartData] = useState(false);
+
   // Real-time refresh interval (every 30 seconds)
   useEffect(() => {
     const interval = setInterval(() => {
@@ -316,7 +332,10 @@ const VendorDashboard = () => {
       const results = await Promise.allSettled([
         loadPendingOrders(vendorData.id),
         loadConfirmedOrders(vendorData.id),
-        loadAnalytics(vendorData.id)
+        loadAnalytics(vendorData.id),
+        loadFinancialData(vendorData.id),
+        loadVendorProducts(vendorData.id),
+        loadEnhancedAnalytics(vendorData.id)
       ]);
 
       console.log('VendorDashboard: Data loading results:', results);
@@ -806,6 +825,212 @@ const VendorDashboard = () => {
     }
   };
 
+  // Load financial data
+  const loadFinancialData = async (vendorId: string) => {
+    try {
+      setLoadingFinancials(true);
+      
+      // Load wallet information
+      const walletResponse = await WalletAPI.getVendorWallet(vendorId);
+      if (walletResponse.success && walletResponse.data) {
+        setWallet(walletResponse.data);
+      }
+      
+      // Load recent transactions
+      const transactionsResponse = await TransactionAPI.getTransactions({
+        vendorId: vendorId,
+        limit: 10,
+        offset: 0
+      });
+      if (transactionsResponse.success && transactionsResponse.data) {
+        setTransactions(transactionsResponse.data);
+      }
+      
+    } catch (error) {
+      console.error('Error loading financial data:', error);
+    } finally {
+      setLoadingFinancials(false);
+    }
+  };
+
+  // Add new function to load vendor products
+  const loadVendorProducts = async (vendorId: string) => {
+    try {
+      setLoadingProducts(true);
+      console.log('Loading vendor products for vendor ID:', vendorId);
+      
+      const response = await TryodoAPI.Vendor.getVendorProducts(vendorId, {}, { limit: 100 });
+      
+      if (response.success && response.data) {
+        console.log('Vendor products loaded:', response.data);
+        setVendorProducts(response.data);
+      } else {
+        console.error('Failed to load vendor products:', response.error);
+      }
+    } catch (error) {
+      console.error('Error loading vendor products:', error);
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  // Add function to load enhanced analytics data
+  const loadEnhancedAnalytics = async (vendorId: string) => {
+    try {
+      setLoadingChartData(true);
+      
+      // Load monthly earnings data
+      const transactionsResponse = await TransactionAPI.getTransactions({
+        vendorId: vendorId,
+        limit: 100,
+        startDate: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      });
+      
+      if (transactionsResponse.success && transactionsResponse.data) {
+        // Process monthly earnings
+        const monthlyData = processMonthlyEarnings(transactionsResponse.data);
+        setMonthlyEarnings(monthlyData);
+      }
+      
+      // Load category breakdown
+      const { data: categoryData } = await supabase
+        .from('order_items')
+        .select(`
+          line_total,
+          vendor_products (
+            categories (
+              name
+            )
+          ),
+          vendor_generic_products (
+            categories (
+              name
+            )
+          )
+        `)
+        .eq('vendor_id', vendorId)
+        .eq('item_status', 'confirmed');
+      
+      if (categoryData) {
+        const categoryBreakdown = processCategoryBreakdown(categoryData);
+        setCategoryBreakdown(categoryBreakdown);
+      }
+      
+    } catch (error) {
+      console.error('Error loading enhanced analytics:', error);
+    } finally {
+      setLoadingChartData(false);
+    }
+  };
+
+  // Helper function to process monthly earnings
+  const processMonthlyEarnings = (transactions: any[]) => {
+    const monthlyMap = new Map();
+    
+    transactions.forEach(transaction => {
+      if (transaction.transaction_type === 'vendor_earning') {
+        const date = new Date(transaction.transaction_date);
+        const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        
+        if (!monthlyMap.has(monthKey)) {
+          monthlyMap.set(monthKey, {
+            month: monthKey,
+            earnings: 0,
+            orders: 0
+          });
+        }
+        
+        const existing = monthlyMap.get(monthKey);
+        existing.earnings += transaction.net_amount || 0;
+        existing.orders += 1;
+      }
+    });
+    
+    return Array.from(monthlyMap.values()).sort((a, b) => a.month.localeCompare(b.month));
+  };
+
+  // Helper function to process category breakdown
+  const processCategoryBreakdown = (data: any[]) => {
+    const categoryMap = new Map();
+    
+    data.forEach(item => {
+      const categoryName = item.vendor_products?.categories?.name || 
+                          item.vendor_generic_products?.categories?.name || 
+                          'Other';
+      
+      if (!categoryMap.has(categoryName)) {
+        categoryMap.set(categoryName, {
+          name: categoryName,
+          value: 0,
+          count: 0
+        });
+      }
+      
+      const existing = categoryMap.get(categoryName);
+      existing.value += item.line_total || 0;
+      existing.count += 1;
+    });
+    
+    return Array.from(categoryMap.values());
+  };
+
+  // Add function to handle product actions
+  const handleProductAction = async (productId: string, action: 'activate' | 'deactivate' | 'delete') => {
+    try {
+      if (action === 'delete') {
+        const { error } = await supabase
+          .from('vendor_products')
+          .delete()
+          .eq('id', productId);
+          
+        if (error) throw error;
+        toast.success('Product deleted successfully');
+      } else {
+        const { error } = await supabase
+          .from('vendor_products')
+          .update({ 
+            is_active: action === 'activate',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', productId);
+          
+        if (error) throw error;
+        toast.success(`Product ${action}d successfully`);
+      }
+      
+      if (vendor) {
+        await loadVendorProducts(vendor.id);
+      }
+    } catch (error) {
+      console.error(`Error ${action}ing product:`, error);
+      toast.error(`Failed to ${action} product`);
+    }
+  };
+
+  // Add function to update stock
+  const handleStockUpdate = async (productId: string, newStock: number) => {
+    try {
+      const { error } = await supabase
+        .from('vendor_products')
+        .update({ 
+          stock_quantity: newStock,
+          is_in_stock: newStock > 0,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', productId);
+        
+      if (error) throw error;
+      toast.success('Stock updated successfully');
+      
+      if (vendor) {
+        await loadVendorProducts(vendor.id);
+      }
+    } catch (error) {
+      console.error('Error updating stock:', error);
+      toast.error('Failed to update stock');
+    }
+  };
+
   const refreshData = useCallback(async () => {
     if (!vendor) return;
     
@@ -814,7 +1039,10 @@ const VendorDashboard = () => {
       await Promise.all([
         loadPendingOrders(vendor.id),
         loadConfirmedOrders(vendor.id),
-        loadAnalytics(vendor.id)
+        loadAnalytics(vendor.id),
+        loadFinancialData(vendor.id),
+        loadVendorProducts(vendor.id),
+        loadEnhancedAnalytics(vendor.id)
       ]);
     } finally {
       setRefreshing(false);
@@ -1266,171 +1494,313 @@ const VendorDashboard = () => {
               </h1>
               <p className="text-gray-600 font-medium">Manage your orders and business settings</p>
             </div>
-            <div className="flex flex-wrap sm:flex-nowrap gap-2 sm:gap-3 w-full sm:w-auto">
-              {/* Delivery Status Notifications */}
-              <div className="relative">
+            {/* Mobile-optimized action buttons */}
+            <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+              {/* Mobile: Single row of icon buttons */}
+              <div className="flex sm:hidden justify-between gap-2">
+                {/* Delivery Status Notifications */}
                 <Button
                   variant="outline"
                   size="icon"
-                  className="relative min-h-12 min-w-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
+                  className="relative flex-1 min-h-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
                 >
-                  <Bell className="h-4 w-4" />
+                  <div className="flex flex-col items-center gap-1">
+                    <Bell className="h-4 w-4" />
+                    <span className="text-xs">Alerts</span>
+                  </div>
                   {confirmedOrders.filter(o => ['assigned_to_delivery', 'picked_up', 'out_for_delivery'].includes(o.current_status)).length > 0 && (
                     <span className="absolute -top-1 -right-1 h-3 w-3 bg-gradient-to-r from-red-500 to-red-600 rounded-full animate-pulse shadow-soft"></span>
                   )}
                 </Button>
+
+                <Button 
+                  variant="outline" 
+                  onClick={refreshData}
+                  className="flex-1 min-h-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
+                  disabled={refreshing}
+                >
+                  <div className="flex flex-col items-center gap-1">
+                    <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                    <span className="text-xs">{refreshing ? 'Updating' : 'Refresh'}</span>
+                  </div>
+                </Button>
+                
+                <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
+                  <DialogTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      className="flex-1 min-h-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <Settings className="h-4 w-4" />
+                        <span className="text-xs">Settings</span>
+                      </div>
+                    </Button>
+                  </DialogTrigger>
+                </Dialog>
               </div>
 
-              <Button 
-                variant="outline" 
-                onClick={refreshData}
-                className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 font-medium"
-                disabled={refreshing}
-              >
-                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline">{refreshing ? 'Updating...' : 'Refresh'}</span>
-              </Button>
-              
-              <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
-                <DialogTrigger asChild>
-                  <Button 
-                    variant="outline" 
-                    className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 font-medium"
+              {/* Desktop: Original layout */}
+              <div className="hidden sm:flex gap-3">
+                {/* Delivery Status Notifications */}
+                <div className="relative">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="relative min-h-12 min-w-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
                   >
-                    <Settings className="h-4 w-4" />
-                    <span className="hidden sm:inline">Settings</span>
+                    <Bell className="h-4 w-4" />
+                    {confirmedOrders.filter(o => ['assigned_to_delivery', 'picked_up', 'out_for_delivery'].includes(o.current_status)).length > 0 && (
+                      <span className="absolute -top-1 -right-1 h-3 w-3 bg-gradient-to-r from-red-500 to-red-600 rounded-full animate-pulse shadow-soft"></span>
+                    )}
                   </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-md mx-4 rounded-xl shadow-strong">
-                  <DialogHeader>
-                    <DialogTitle className="text-xl font-semibold text-gray-900">Order Management Settings</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label>Auto-approve orders</Label>
-                        <p className="text-sm text-gray-500">Automatically approve eligible orders</p>
-                      </div>
-                      <Switch
-                        checked={vendorSettings.auto_approve_orders}
-                        onCheckedChange={(checked) => 
-                          setVendorSettings(prev => ({ ...prev, auto_approve_orders: checked }))
-                        }
-                      />
-                    </div>
+                </div>
 
-                    <div className="space-y-2">
-                      <Label>Confirmation timeout (minutes)</Label>
-                      <Input
-                        type="number"
-                        min="5"
-                        max="60"
-                        value={vendorSettings.order_confirmation_timeout_minutes}
-                        onChange={(e) => 
-                          setVendorSettings(prev => ({ 
-                            ...prev, 
-                            order_confirmation_timeout_minutes: parseInt(e.target.value) || 15 
-                          }))
-                        }
-                        className="rounded-xl border-gray-200 focus:border-blue-300 focus:ring-blue-200 min-h-12"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Auto-approve under amount (₹)</Label>
-                      <Input
-                        type="number"
-                        placeholder="Leave empty for no limit"
-                        value={vendorSettings.auto_approve_under_amount || ''}
-                        onChange={(e) => 
-                          setVendorSettings(prev => ({ 
-                            ...prev, 
-                            auto_approve_under_amount: e.target.value ? parseFloat(e.target.value) : null 
-                          }))
-                        }
-                      />
-                    </div>
-
-                    <Separator />
-
-                    <div className="space-y-4">
-                      <Label>Business Hours</Label>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <Label className="text-sm">Start</Label>
-                          <Input
-                            type="time"
-                            value={vendorSettings.business_hours_start}
-                            onChange={(e) => 
-                              setVendorSettings(prev => ({ ...prev, business_hours_start: e.target.value }))
-                            }
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-sm">End</Label>
-                          <Input
-                            type="time"
-                            value={vendorSettings.business_hours_end}
-                            onChange={(e) => 
-                              setVendorSettings(prev => ({ ...prev, business_hours_end: e.target.value }))
-                            }
-                          />
-                        </div>
-                      </div>
-                      
-                      
+                <Button 
+                  variant="outline" 
+                  onClick={refreshData}
+                  className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 font-medium"
+                  disabled={refreshing}
+                >
+                  <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                  <span>{refreshing ? 'Updating...' : 'Refresh'}</span>
+                </Button>
+                
+                <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
+                  <DialogTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 font-medium"
+                    >
+                      <Settings className="h-4 w-4" />
+                      <span>Settings</span>
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-md mx-4 rounded-xl shadow-strong">
+                    <DialogHeader>
+                      <DialogTitle className="text-xl font-semibold text-gray-900">Order Management Settings</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-6">
                       <div className="flex items-center justify-between">
                         <div className="space-y-0.5">
-                          <Label className="text-sm">Auto-approve only during business hours</Label>
-                          <p className="text-xs text-gray-500">Restrict auto-approval to business hours</p>
+                          <Label>Auto-approve orders</Label>
+                          <p className="text-sm text-gray-500">Automatically approve eligible orders</p>
                         </div>
                         <Switch
-                          checked={vendorSettings.auto_approve_during_business_hours_only}
+                          checked={vendorSettings.auto_approve_orders}
                           onCheckedChange={(checked) => 
-                            setVendorSettings(prev => ({ ...prev, auto_approve_during_business_hours_only: checked }))
+                            setVendorSettings(prev => ({ ...prev, auto_approve_orders: checked }))
                           }
                         />
                       </div>
-                    </div>
 
-                    <div className="flex gap-2 pt-4">
-                      <Button onClick={updateVendorSettings} className="flex-1">
-                        Save Settings
-                      </Button>
-                      <Button variant="outline" onClick={() => setShowSettingsDialog(false)}>
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
+                      <div className="space-y-2">
+                        <Label>Confirmation timeout (minutes)</Label>
+                        <Input
+                          type="number"
+                          min="5"
+                          max="60"
+                          value={vendorSettings.order_confirmation_timeout_minutes}
+                          onChange={(e) => 
+                            setVendorSettings(prev => ({ 
+                              ...prev, 
+                              order_confirmation_timeout_minutes: parseInt(e.target.value) || 15 
+                            }))
+                          }
+                          className="rounded-xl border-gray-200 focus:border-blue-300 focus:ring-blue-200 min-h-12"
+                        />
+                      </div>
 
-              <Button 
-                className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 flex items-center gap-2 min-h-12 px-6 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
-                onClick={() => navigate('/vendor/add-product')}
-              >
-                <Plus className="h-4 w-4" />
-                <span className="hidden sm:inline">Add Product</span>
-              </Button>
+                      <div className="space-y-2">
+                        <Label>Auto-approve under amount (₹)</Label>
+                        <Input
+                          type="number"
+                          placeholder="Leave empty for no limit"
+                          value={vendorSettings.auto_approve_under_amount || ''}
+                          onChange={(e) => 
+                            setVendorSettings(prev => ({ 
+                              ...prev, 
+                              auto_approve_under_amount: e.target.value ? parseFloat(e.target.value) : null 
+                            }))
+                          }
+                        />
+                      </div>
+
+                      <Separator />
+
+                      <div className="space-y-4">
+                        <Label>Business Hours</Label>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <Label className="text-sm">Start</Label>
+                            <Input
+                              type="time"
+                              value={vendorSettings.business_hours_start}
+                              onChange={(e) => 
+                                setVendorSettings(prev => ({ ...prev, business_hours_start: e.target.value }))
+                              }
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-sm">End</Label>
+                            <Input
+                              type="time"
+                              value={vendorSettings.business_hours_end}
+                              onChange={(e) => 
+                                setVendorSettings(prev => ({ ...prev, business_hours_end: e.target.value }))
+                              }
+                            />
+                          </div>
+                        </div>
+                        
+                        
+                        <div className="flex items-center justify-between">
+                          <div className="space-y-0.5">
+                            <Label className="text-sm">Auto-approve only during business hours</Label>
+                            <p className="text-xs text-gray-500">Restrict auto-approval to business hours</p>
+                          </div>
+                          <Switch
+                            checked={vendorSettings.auto_approve_during_business_hours_only}
+                            onCheckedChange={(checked) => 
+                              setVendorSettings(prev => ({ ...prev, auto_approve_during_business_hours_only: checked }))
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2 pt-4">
+                        <Button onClick={updateVendorSettings} className="flex-1">
+                          Save Settings
+                        </Button>
+                        <Button variant="outline" onClick={() => setShowSettingsDialog(false)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+
+              {/* Mobile Action Buttons */}
+              <div className="sm:hidden w-full space-y-3">
+                <Button 
+                  className="w-full bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 flex items-center justify-center gap-2 min-h-12 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
+                  onClick={() => navigate('/vendor/product-management')}
+                >
+                  <BarChart3 className="h-4 w-4" />
+                  <span>Advanced Product Management</span>
+                </Button>
+                <Button 
+                  className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 flex items-center justify-center gap-2 min-h-12 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
+                  onClick={() => navigate('/vendor/add-product')}
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Add Product</span>
+                </Button>
+              </div>
+
+              {/* Advanced Product Management */}
+              <div className="hidden sm:block">
+                <Button 
+                  className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 flex items-center gap-2 min-h-12 px-6 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
+                  onClick={() => navigate('/vendor/product-management')}
+                >
+                  <Package className="h-4 w-4" />
+                  <span>Product Management</span>
+                </Button>
+              </div>
+
+              {/* Desktop Add Product Button */}
+              <div className="hidden sm:block">
+                <Button 
+                  className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 flex items-center gap-2 min-h-12 px-6 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
+                  onClick={() => navigate('/vendor/add-product')}
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Add Product</span>
+                </Button>
+              </div>
             </div>
           </div>
         </div>
 
         <Tabs defaultValue="pending" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
-            <TabsTrigger value="pending" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
-              <span className="hidden sm:inline">Pending</span> ({analytics.pendingOrders})
-            </TabsTrigger>
-            <TabsTrigger value="confirmed" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
-              <span className="hidden sm:inline">Confirmed</span> ({confirmedOrders.length})
-            </TabsTrigger>
-            <TabsTrigger value="analytics" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
-              Analytics
-            </TabsTrigger>
-            <TabsTrigger value="products" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
-              Products
-            </TabsTrigger>
-          </TabsList>
+          {/* Mobile-first tabs with improved layout */}
+          <div className="block sm:hidden mb-4">
+            <TabsList className="flex flex-wrap gap-1 p-1 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl shadow-soft h-auto">
+              <TabsTrigger 
+                value="pending" 
+                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <Package className="h-3 w-3" />
+                  <span>Pending ({analytics.pendingOrders})</span>
+                </div>
+              </TabsTrigger>
+              <TabsTrigger 
+                value="confirmed" 
+                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <CheckCircle className="h-3 w-3" />
+                  <span>Confirmed ({confirmedOrders.length})</span>
+                </div>
+              </TabsTrigger>
+              <TabsTrigger 
+                value="earnings" 
+                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <DollarSign className="h-3 w-3" />
+                  <span>Earnings</span>
+                </div>
+              </TabsTrigger>
+              <TabsTrigger 
+                value="analytics" 
+                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <BarChart3 className="h-3 w-3" />
+                  <span>Analytics</span>
+                </div>
+              </TabsTrigger>
+              {/*
+              <TabsTrigger 
+                value="products" 
+                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <Package className="h-3 w-3" />
+                  <span>Products</span>
+                </div>
+              </TabsTrigger>
+              */}
+            </TabsList>
+          </div>
+
+          {/* Desktop tabs */}
+          <div className="hidden sm:block">
+            <TabsList className="grid w-full grid-cols-5 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
+              <TabsTrigger value="pending" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                Pending ({analytics.pendingOrders})
+              </TabsTrigger>
+              <TabsTrigger value="confirmed" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                Confirmed ({confirmedOrders.length})
+              </TabsTrigger>
+              <TabsTrigger value="earnings" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                {/* <DollarSign className="h-4 w-4 mr-1" /> */}
+                ₹ Earnings
+              </TabsTrigger>
+              <TabsTrigger value="analytics" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                Analytics
+              </TabsTrigger>
+              {/*
+              <TabsTrigger value="products" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                Products
+              </TabsTrigger>
+              */}
+            </TabsList>
+          </div>
 
           <TabsContent value="pending" className="space-y-6">
             {/* Quick Stats */}
@@ -1483,7 +1853,7 @@ const VendorDashboard = () => {
               <Card className="bg-gradient-to-br from-purple-50 to-blue-50 border-purple-200 shadow-soft hover:shadow-medium transition-all duration-200">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-semibold text-purple-800">Avg Order Value</CardTitle>
-                  <DollarSign className="h-5 w-5 text-purple-600" />
+                  <span className="h-5 w-5 text-purple-600 flex items-center justify-center font-bold text-sm">₹</span>
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl lg:text-3xl font-bold text-purple-700">₹{analytics.averageOrderValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
@@ -1578,65 +1948,161 @@ const VendorDashboard = () => {
                     </p>
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    {filteredOrders.map((order) => (
-                      <div key={order.order_item_id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <h3 className="font-semibold">{order.product_name}</h3>
-                              <Badge className={getUrgencyColor(order.minutes_remaining)}>
-                                <Timer className="h-3 w-3 mr-1" />
-                                {getTimeRemainingDisplay(order.minutes_remaining)}
-                              </Badge>
-                              {order.should_auto_approve && (
-                                <Badge variant="secondary">
-                                  Auto-Approve Eligible
-                                </Badge>
-                              )}
+                  <div className="space-y-6">
+                    {(() => {
+                      // Group orders by order_id
+                      const groupedOrders = filteredOrders.reduce((acc, order) => {
+                        if (!acc[order.order_id]) {
+                          acc[order.order_id] = {
+                            order_id: order.order_id,
+                            order_number: order.order_number,
+                            created_at: order.created_at,
+                            items: []
+                          };
+                        }
+                        acc[order.order_id].items.push(order);
+                        return acc;
+                      }, {} as Record<string, { order_id: string; order_number: string; created_at: string; items: PendingOrder[] }>);
+
+                      return Object.values(groupedOrders).map((groupedOrder) => {
+                        const urgentItems = groupedOrder.items.filter(item => item.minutes_remaining <= 5);
+                        const totalAmount = groupedOrder.items.reduce((sum, item) => sum + item.line_total, 0);
+                        const mostUrgentTime = Math.min(...groupedOrder.items.map(item => item.minutes_remaining));
+                        const hasAutoApprove = groupedOrder.items.some(item => item.should_auto_approve);
+
+                        return (
+                          <div key={groupedOrder.order_id} className="border-2 border-gray-200 rounded-xl bg-white shadow-sm hover:shadow-md transition-all duration-200">
+                            {/* Order Header */}
+                            <div className="bg-gradient-to-r from-blue-50 to-purple-50 px-4 py-3 border-b border-gray-200 rounded-t-xl">
+                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                                  <div>
+                                    <h3 className="font-bold text-gray-900 text-lg">Order {groupedOrder.order_number}</h3>
+                                    <p className="text-sm text-gray-600">Placed {formatTimeAgo(groupedOrder.created_at)}</p>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    <Badge className={getUrgencyColor(mostUrgentTime)}>
+                                      <Timer className="h-3 w-3 mr-1" />
+                                      {getTimeRemainingDisplay(mostUrgentTime)} left
+                                    </Badge>
+                                    {urgentItems.length > 0 && (
+                                      <Badge variant="destructive" className="animate-pulse">
+                                        <AlertTriangle className="h-3 w-3 mr-1" />
+                                        {urgentItems.length} Urgent
+                                      </Badge>
+                                    )}
+                                    {hasAutoApprove && (
+                                      <Badge variant="secondary">
+                                        Auto-Approve Eligible
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-2xl font-bold text-blue-600">₹{totalAmount.toLocaleString()}</p>
+                                  <p className="text-sm text-gray-600">{groupedOrder.items.length} items</p>
+                                </div>
+                              </div>
                             </div>
-                            
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600 mb-3">
-                              <div>
-                                <span className="font-medium">Order:</span> {order.order_number}
-                              </div>
-                              <div>
-                                <span className="font-medium">Quantity:</span> {order.quantity}
-                              </div>
-                              <div>
-                                <span className="font-medium">Amount:</span> ₹{order.line_total.toLocaleString()}
-                              </div>
-                              <div>
-                                <span className="font-medium">Placed:</span> {new Date(order.created_at).toLocaleDateString()}
+
+                            {/* Order Items */}
+                            <div className="p-4 space-y-4">
+                              {groupedOrder.items.map((item, index) => (
+                                <div key={item.order_item_id} className={`rounded-lg border-2 p-4 transition-all duration-200 ${
+                                  item.minutes_remaining <= 5 
+                                    ? 'border-red-200 bg-red-50' 
+                                    : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
+                                }`}>
+                                  {/* Product Header */}
+                                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+                                    <div className="flex-1 min-w-0">
+                                      <h4 className="font-semibold text-gray-900 text-lg truncate">{item.product_name}</h4>
+                                      <div className="flex flex-wrap items-center gap-3 mt-2">
+                                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                                          <span className="font-medium">Qty:</span>
+                                          <span className="bg-white px-2 py-1 rounded font-bold">{item.quantity}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                                          <span className="font-medium">Unit Price:</span>
+                                          <span>₹{item.unit_price.toLocaleString()}</span>
+                                        </div>
+                                        <Badge className={getUrgencyColor(item.minutes_remaining)} variant="outline">
+                                          <Timer className="h-3 w-3 mr-1" />
+                                          {getTimeRemainingDisplay(item.minutes_remaining)}
+                                        </Badge>
+                                      </div>
+                                      {item.product_description && (
+                                        <p className="text-sm text-gray-600 mt-2 line-clamp-2">{item.product_description}</p>
+                                      )}
+                                    </div>
+                                    <div className="text-right">
+                                      <p className="text-xl font-bold text-blue-600">₹{item.line_total.toLocaleString()}</p>
+                                    </div>
+                                  </div>
+
+                                  {/* Action Buttons */}
+                                  <div className="flex flex-col sm:flex-row gap-3">
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleOrderAction(item.order_item_id, 'accept')}
+                                      className="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium py-2.5"
+                                    >
+                                      <Check className="h-4 w-4 mr-2" />
+                                      Accept Item
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      onClick={() => handleOrderAction(item.order_item_id, 'reject')}
+                                      className="flex-1 font-medium py-2.5"
+                                    >
+                                      <X className="h-4 w-4 mr-2" />
+                                      Reject Item
+                                    </Button>
+                                  </div>
+
+                                  {/* Separator for multiple items */}
+                                  {index < groupedOrder.items.length - 1 && (
+                                    <div className="mt-4 border-b border-gray-300"></div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Quick Actions Footer */}
+                            <div className="bg-gray-50 px-4 py-3 border-t border-gray-200 rounded-b-xl">
+                              <div className="flex flex-col sm:flex-row gap-3">
+                                <Button
+                                  size="sm"
+                                  onClick={() => {
+                                    groupedOrder.items.forEach(item => {
+                                      handleOrderAction(item.order_item_id, 'accept');
+                                    });
+                                  }}
+                                  className="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium"
+                                >
+                                  <CheckCircle className="h-4 w-4 mr-2" />
+                                  Accept All Items
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    groupedOrder.items.forEach(item => {
+                                      handleOrderAction(item.order_item_id, 'reject');
+                                    });
+                                  }}
+                                  className="flex-1 border-red-300 text-red-600 hover:bg-red-50 font-medium"
+                                >
+                                  <XCircle className="h-4 w-4 mr-2" />
+                                  Reject All Items
+                                </Button>
                               </div>
                             </div>
-                            
-                            {order.product_description && (
-                              <p className="text-sm text-gray-500 mb-3">{order.product_description}</p>
-                            )}
                           </div>
-                          
-                          <div className="flex gap-2 ml-4">
-                            <Button
-                              size="sm"
-                              onClick={() => handleOrderAction(order.order_item_id, 'accept')}
-                              className="bg-green-600 hover:bg-green-700"
-                            >
-                              <Check className="h-4 w-4 mr-1" />
-                              Accept
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() => handleOrderAction(order.order_item_id, 'reject')}
-                            >
-                              <X className="h-4 w-4 mr-1" />
-                              Reject
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                        );
+                      });
+                    })()}
                   </div>
                 )}
               </CardContent>
@@ -1828,7 +2294,13 @@ const VendorDashboard = () => {
                               <div className="flex flex-col items-start justify-center p-4 bg-gray-50 rounded-lg">
                                  <h5 className="font-semibold text-gray-800 mb-2 flex items-center"><AlertTriangle className="w-4 h-4 mr-2 text-yellow-500" /> No Delivery Partner Assigned</h5>
                                  <p className="text-sm text-gray-600 mb-3">This order is waiting for a delivery partner to be assigned.</p>
-                                 <Button size="sm" onClick={() => handleAssignToDelivery(order)}>
+                                 <Button 
+                                   size="mobile-sm" 
+                                   variant="primary-mobile"
+                                   onClick={() => handleAssignToDelivery(order)}
+                                   enableHaptics={true}
+                                   hapticIntensity="medium"
+                                 >
                                    <RefreshCw className="mr-2 h-4 w-4" /> Try to Assign Now
                                  </Button>
                               </div>
@@ -1874,11 +2346,23 @@ const VendorDashboard = () => {
                           
                           <div className="flex justify-between items-center">
                             <div className="flex space-x-2">
-                              <Button size="sm" variant="outline" onClick={() => { setSelectedOrderItem(order.order_item_id); setVendorNotes(order.vendor_notes || ''); }}>
+                              <Button 
+                                size="mobile-sm" 
+                                variant="outline-mobile" 
+                                onClick={() => { setSelectedOrderItem(order.order_item_id); setVendorNotes(order.vendor_notes || ''); }}
+                                enableHaptics={true}
+                                hapticIntensity="light"
+                              >
                                 <Edit className="mr-2 h-4"/> Add/Edit Notes
                               </Button>
                               {order.delivery_partner_id && order.delivery_partner_phone && (
-                                <Button size="sm" variant="outline" onClick={() => window.open(`tel:${order.delivery_partner_phone}`)}>
+                                <Button 
+                                  size="mobile-sm" 
+                                  variant="outline-mobile" 
+                                  onClick={() => window.open(`tel:${order.delivery_partner_phone}`)}
+                                  enableHaptics={true}
+                                  hapticIntensity="light"
+                                >
                                   <Phone className="mr-2 h-4 w-4"/> Call Delivery Partner
                                 </Button>
                               )}
@@ -1912,7 +2396,197 @@ const VendorDashboard = () => {
             </Card>
           </TabsContent>
 
+          <TabsContent value="earnings" className="space-y-6">
+            {/* Wallet Overview */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <Card className="bg-gradient-to-br from-green-50 to-emerald-100 border-green-200">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium text-green-800">Available Balance</CardTitle>
+                  <DollarSign className="h-4 w-4 text-green-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-green-700">
+                    ₹{wallet?.available_balance?.toLocaleString('en-IN') || '0'}
+                  </div>
+                  <p className="text-xs text-green-600 mt-1">Ready for payout</p>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-gradient-to-br from-blue-50 to-cyan-100 border-blue-200">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium text-blue-800">Pending Balance</CardTitle>
+                  <Clock className="h-4 w-4 text-blue-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-blue-700">
+                    ₹{wallet?.pending_balance?.toLocaleString('en-IN') || '0'}
+                  </div>
+                  <p className="text-xs text-blue-600 mt-1">Processing orders</p>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-gradient-to-br from-purple-50 to-violet-100 border-purple-200">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium text-purple-800">Total Earned</CardTitle>
+                  <TrendingUp className="h-4 w-4 text-purple-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-purple-700">
+                    ₹{wallet?.total_earned?.toLocaleString('en-IN') || '0'}
+                  </div>
+                  <p className="text-xs text-purple-600 mt-1">All time earnings</p>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-gradient-to-br from-orange-50 to-red-100 border-orange-200">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium text-orange-800">Commission Paid</CardTitle>
+                  <AlertTriangle className="h-4 w-4 text-orange-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-orange-700">
+                    ₹{wallet?.total_commission_paid?.toLocaleString('en-IN') || '0'}
+                  </div>
+                  <p className="text-xs text-orange-600 mt-1">
+                    Avg: {wallet?.average_commission_rate?.toFixed(1) || '0'}%
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Earnings Summary */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Earnings Breakdown</CardTitle>
+                  <CardDescription>Today's financial summary</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">Today's Earnings</span>
+                      <span className="font-bold text-green-600">
+                        ₹{wallet?.today_earnings?.toLocaleString('en-IN') || '0'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">This Week</span>
+                      <span className="font-bold text-blue-600">
+                        ₹{wallet?.week_earnings?.toLocaleString('en-IN') || '0'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">This Month</span>
+                      <span className="font-bold text-purple-600">
+                        ₹{wallet?.month_earnings?.toLocaleString('en-IN') || '0'}
+                      </span>
+                    </div>
+                    <Separator />
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">Net Earnings</span>
+                      <span className="text-lg font-bold text-green-700">
+                        ₹{((wallet?.total_earned || 0) - (wallet?.total_commission_paid || 0)).toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Recent Transactions</CardTitle>
+                  <CardDescription>Latest financial activities</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {loadingFinancials ? (
+                    <div className="flex items-center justify-center py-8">
+                      <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
+                    </div>
+                  ) : transactions.length > 0 ? (
+                    <div className="space-y-3">
+                      {transactions.slice(0, 5).map((transaction: any) => (
+                        <div key={transaction.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                          <div>
+                            <p className="text-sm font-medium">{transaction.description}</p>
+                            <p className="text-xs text-gray-500">
+                              {new Date(transaction.transaction_date).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className={`font-medium ${
+                              transaction.transaction_type === 'vendor_earning' ? 'text-green-600' : 
+                              transaction.transaction_type === 'commission_deduction' ? 'text-red-600' : 
+                              'text-gray-600'
+                            }`}>
+                              {transaction.transaction_type === 'commission_deduction' ? '-' : '+'}
+                              ₹{transaction.net_amount?.toLocaleString('en-IN')}
+                            </p>
+                            <p className="text-xs text-gray-500 capitalize">
+                              {transaction.transaction_type.replace('_', ' ')}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      <DollarSign className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                      <p>No transactions yet</p>
+                      <p className="text-xs">Transactions will appear when you complete orders</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Payout Information */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Payout Information</CardTitle>
+                <CardDescription>Manage your payout preferences and history</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <h4 className="font-medium mb-3">Payout Settings</h4>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span>Minimum Payout:</span>
+                        <span className="font-medium">₹{wallet?.minimum_payout_amount?.toLocaleString('en-IN') || '1,000'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Payout Frequency:</span>
+                        <span className="font-medium capitalize">{wallet?.payout_frequency || 'Weekly'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Auto Payout:</span>
+                        <Badge variant={wallet?.auto_payout_enabled ? "default" : "secondary"}>
+                          {wallet?.auto_payout_enabled ? "Enabled" : "Disabled"}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <h4 className="font-medium mb-3">Next Payout</h4>
+                    <div className="text-sm text-gray-600">
+                      <p>Available balance will be processed in the next payout cycle.</p>
+                      <p className="mt-2 text-xs">
+                        Last payout: {wallet?.last_payout_date ? 
+                          new Date(wallet.last_payout_date).toLocaleDateString() : 
+                          'No payouts yet'
+                        }
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           <TabsContent value="analytics" className="space-y-6">
+            {/* Smart Tips Component */}
+            {/* VendorSmartTips component removed as part of cleanup */}
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -1990,53 +2664,322 @@ const VendorDashboard = () => {
                     </div>
                     <Progress value={analytics.autoApprovalRate} className="h-2" />
                   </div>
-                  
-                  {/* Monthly sales chart - Placeholder */}
-                  {/*
-                  <div className="mt-8">
-                    <h3 className="font-semibold text-gray-800 mb-4">Monthly Sales Overview</h3>
-                    <div className="h-64 bg-gray-100 rounded-lg flex items-center justify-center text-gray-500">
-                      Sales chart placeholder
-                    </div>
-                  </div>
-                  */}
                 </div>
               </CardContent>
             </Card>
+
+            {/* Charts Section */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Monthly Earnings Chart */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Monthly Earnings Trend</CardTitle>
+                  <CardDescription>Your earnings over the last 12 months</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {loadingChartData ? (
+                    <div className="h-64 flex items-center justify-center">
+                      <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
+                    </div>
+                  ) : monthlyEarnings.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <LineChart data={monthlyEarnings}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis 
+                          dataKey="month" 
+                          tick={{ fontSize: 12 }}
+                          tickFormatter={(value) => {
+                            const [year, month] = value.split('-');
+                            return `${month}/${year.slice(2)}`;
+                          }}
+                        />
+                        <YAxis tick={{ fontSize: 12 }} />
+                        <Tooltip 
+                          formatter={(value: any) => [`₹${value.toLocaleString('en-IN')}`, 'Earnings']}
+                          labelFormatter={(label) => {
+                            const [year, month] = label.split('-');
+                            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                            return `${monthNames[parseInt(month) - 1]} ${year}`;
+                          }}
+                        />
+                        <Line 
+                          type="monotone" 
+                          dataKey="earnings" 
+                          stroke="#3b82f6" 
+                          strokeWidth={2}
+                          dot={{ fill: '#3b82f6', strokeWidth: 2, r: 4 }}
+                          activeDot={{ r: 6, stroke: '#3b82f6', strokeWidth: 2, fill: '#fff' }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-64 flex items-center justify-center text-gray-500">
+                      <div className="text-center">
+                        <BarChart3 className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                        <p>No earnings data available</p>
+                        <p className="text-xs">Complete some orders to see your earnings trend</p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Category Breakdown Chart */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Sales by Category</CardTitle>
+                  <CardDescription>Breakdown of sales by product categories</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {loadingChartData ? (
+                    <div className="h-64 flex items-center justify-center">
+                      <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
+                    </div>
+                  ) : categoryBreakdown.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <PieChart>
+                        <Pie
+                          data={categoryBreakdown}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {categoryBreakdown.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value: any) => [`₹${value.toLocaleString('en-IN')}`, 'Sales']} />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-64 flex items-center justify-center text-gray-500">
+                      <div className="text-center">
+                        <TrendingUp className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                        <p>No category data available</p>
+                        <p className="text-xs">Add products and complete orders to see category breakdown</p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
+          {/*
           <TabsContent value="products" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>My Products</CardTitle>
-                <CardDescription>Manage your listed products</CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>My Products ({vendorProducts.length})</CardTitle>
+                    <CardDescription>Manage your listed products and inventory</CardDescription>
+                  </div>
+                  <Button 
+                    variant="outline"
+                    className="bg-gradient-to-r from-purple-500 to-blue-600 text-white border-0 hover:from-purple-600 hover:to-blue-700"
+                    onClick={() => navigate('/vendor/product-management')}
+                  >
+                    <BarChart3 className="h-4 w-4 mr-2" />
+                    Advanced Management
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="relative flex-1 mr-4">
+                <div className="flex flex-col sm:flex-row items-center justify-between mb-6 gap-4">
+                  <div className="relative flex-1 w-full">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input
                       placeholder="Search products..."
                       className="pl-10"
-                      // value={productSearchTerm}
-                      // onChange={(e) => setProductSearchTerm(e.target.value)}
+                      value={productSearchTerm}
+                      onChange={(e) => setProductSearchTerm(e.target.value)}
                     />
                   </div>
-                  <Button 
-                    className="bg-blue-600 hover:bg-blue-700 flex items-center gap-2"
-                    onClick={() => navigate('/vendor/add-product')}
-                  >
-                    <Plus className="h-4 w-4" />
-                    Add New Product
-                  </Button>
+                  <div className="flex gap-2 w-full sm:w-auto">
+                    <Select value={productFilter} onValueChange={setProductFilter}>
+                      <SelectTrigger className="w-full sm:w-[180px]">
+                        <SelectValue placeholder="Filter products" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Products</SelectItem>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="inactive">Inactive</SelectItem>
+                        <SelectItem value="out_of_stock">Out of Stock</SelectItem>
+                        <SelectItem value="low_stock">Low Stock (≤5)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button 
+                      className="bg-blue-600 hover:bg-blue-700 flex items-center gap-2"
+                      onClick={() => navigate('/vendor/add-product')}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Add Product
+                    </Button>
+                  </div>
                 </div>
-                {/* Product List - Placeholder */}
-                <div className="min-h-[200px] bg-gray-50 rounded-lg flex items-center justify-center text-gray-500 border border-dashed">
-                  Product listing coming soon...
-                </div>
+
+                {loadingProducts ? (
+                  <div className="min-h-[200px] flex items-center justify-center">
+                    <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
+                  </div>
+                ) : vendorProducts.length === 0 ? (
+                  <div className="min-h-[200px] flex items-center justify-center text-gray-500 border border-dashed rounded-lg">
+                    <div className="text-center">
+                      <Package className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">No products listed</h3>
+                      <p className="text-gray-600 mb-4">Start by adding your first product to begin selling</p>
+                      <Button onClick={() => navigate('/vendor/add-product')}>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Your First Product
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {vendorProducts
+                      .filter(product => {
+                        const matchesSearch = product.model?.model_name
+                          ?.toLowerCase()
+                          .includes(productSearchTerm.toLowerCase()) ||
+                          product.generic_product?.name
+                          ?.toLowerCase()
+                          .includes(productSearchTerm.toLowerCase());
+                        
+                        if (productFilter === 'all') return matchesSearch;
+                        if (productFilter === 'active') return matchesSearch && product.is_active;
+                        if (productFilter === 'inactive') return matchesSearch && !product.is_active;
+                        if (productFilter === 'out_of_stock') return matchesSearch && !product.is_in_stock;
+                        if (productFilter === 'low_stock') return matchesSearch && product.stock_quantity <= 5 && product.stock_quantity > 0;
+                        
+                        return matchesSearch;
+                      })
+                      .map((product) => (
+                        <Card key={product.id} className="overflow-hidden">
+                          <div className="p-4">
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-3 mb-2">
+                                  <h3 className="font-semibold text-lg">
+                                    {product.model?.model_name || product.generic_product?.name}
+                                  </h3>
+                                  <Badge variant={product.is_active ? "default" : "secondary"}>
+                                    {product.is_active ? "Active" : "Inactive"}
+                                  </Badge>
+                                  {!product.is_in_stock && (
+                                    <Badge variant="destructive">Out of Stock</Badge>
+                                  )}
+                                  {product.stock_quantity <= 5 && product.stock_quantity > 0 && (
+                                    <Badge variant="outline" className="text-orange-600 border-orange-600">
+                                      Low Stock
+                                    </Badge>
+                                  )}
+                                </div>
+                                
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600 mb-3">
+                                  <div>
+                                    <span className="font-medium">Price:</span> ₹{product.price.toLocaleString('en-IN')}
+                                    {product.original_price && product.original_price > product.price && (
+                                      <span className="ml-1 text-gray-400 line-through">
+                                        ₹{product.original_price.toLocaleString('en-IN')}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div>
+                                    <span className="font-medium">Stock:</span> {product.stock_quantity}
+                                  </div>
+                                  <div>
+                                    <span className="font-medium">Category:</span> {product.category?.name || 'N/A'}
+                                  </div>
+                                  <div>
+                                    <span className="font-medium">Quality:</span> {product.quality_type?.name || 'N/A'}
+                                  </div>
+                                </div>
+                                
+                                {product.model?.brand && (
+                                  <p className="text-sm text-gray-500 mb-2">
+                                    Brand: {product.model.brand.name}
+                                  </p>
+                                )}
+                                
+                                <div className="flex items-center gap-2 text-xs text-gray-500">
+                                  <span>Warranty: {product.warranty_months} months</span>
+                                  <span>•</span>
+                                  <span>Delivery: {product.delivery_time_days} days</span>
+                                  <span>•</span>
+                                  <span>Added: {new Date(product.created_at).toLocaleDateString()}</span>
+                                </div>
+                              </div>
+                              
+                              <div className="flex flex-col gap-2 ml-4">
+                                <div className="flex gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleProductAction(product.id, product.is_active ? 'deactivate' : 'activate')}
+                                  >
+                                    {product.is_active ? (
+                                      <>
+                                        <PauseCircle className="h-4 w-4 mr-1" />
+                                        Deactivate
+                                      </>
+                                    ) : (
+                                      <>
+                                        <PlayCircle className="h-4 w-4 mr-1" />
+                                        Activate
+                                      </>
+                                    )}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                  >
+                                    <Edit className="h-4 w-4 mr-1" />
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={() => {
+                                      if (window.confirm('Are you sure you want to delete this product?')) {
+                                        handleProductAction(product.id, 'delete');
+                                      }
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                                
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    value={product.stock_quantity}
+                                    onChange={(e) => {
+                                      const newStock = parseInt(e.target.value) || 0;
+                                      if (newStock !== product.stock_quantity) {
+                                        handleStockUpdate(product.id, newStock);
+                                      }
+                                    }}
+                                    className="w-20 h-8 text-center"
+                                  />
+                                  <span className="text-xs text-gray-500">Stock</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </Card>
+                      ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
+          */}
         </Tabs>
       </main>
     </div>

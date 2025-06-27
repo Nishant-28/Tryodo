@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { createMissingProfile } from '../lib/profileUtils';
 import { Button } from './ui/button';
 import { Alert, AlertDescription } from './ui/alert';
 import { RefreshCw, UserPlus, AlertCircle, CheckCircle } from 'lucide-react';
@@ -30,6 +29,8 @@ export const ProfileFixButton: React.FC<ProfileFixButtonProps> = ({ className })
       const role = user.user_metadata?.role || 'customer';
       const fullName = user.user_metadata?.full_name || null;
 
+      // Dynamic import to avoid bundle size issues
+      const { createMissingProfile } = await import('../lib/profileUtils');
       const createResult = await createMissingProfile(
         user.id,
         user.email || '',

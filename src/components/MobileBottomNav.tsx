@@ -21,10 +21,15 @@ const MobileBottomNav = ({ cartItems = 0, onCartClick }: MobileBottomNavProps) =
     return null;
   }
 
-  // Simulate haptic feedback for touch interactions
-  const triggerHapticFeedback = () => {
+  // Enhanced haptic feedback for touch interactions
+  const triggerHapticFeedback = (intensity: 'light' | 'medium' | 'heavy' = 'light') => {
     if ('vibrate' in navigator) {
-      navigator.vibrate(50); // Light vibration for 50ms
+      const patterns = {
+        light: 30,
+        medium: 50,
+        heavy: 80
+      }
+      navigator.vibrate(patterns[intensity]);
     }
   };
 
@@ -101,11 +106,19 @@ const MobileBottomNav = ({ cartItems = 0, onCartClick }: MobileBottomNavProps) =
 
   const navigationItems = profile.role === 'delivery_partner' ? deliveryNavigationItems : customerNavigationItems;
 
+  // Dynamic grid columns based on number of items
+  const getGridCols = () => {
+    const itemCount = navigationItems.length;
+    if (itemCount === 4) return 'grid-cols-4';
+    if (itemCount === 5) return 'grid-cols-5';
+    return 'grid-cols-4'; // fallback
+  };
+
   return (
     <>
-      {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-gray-200/50 safe-area-pb z-50 sm:hidden shadow-2xl">
-        <div className="grid grid-cols-5 h-16 relative">
+      {/* Enhanced Bottom Navigation */}
+      <nav className="nav-mobile shadow-2xl">
+        <div className={cn("h-16 relative", getGridCols(), "grid")}>
           {navigationItems.map((item, index) => {
             const Icon = item.icon;
             const isActive = item.isActive;
@@ -115,41 +128,48 @@ const MobileBottomNav = ({ cartItems = 0, onCartClick }: MobileBottomNavProps) =
                 <button
                   key={index}
                   onClick={() => {
-                    triggerHapticFeedback();
+                    triggerHapticFeedback('light');
                     item.onClick!();
                   }}
                   className={cn(
-                    "flex flex-col items-center justify-center space-y-1 touch-manipulation relative",
-                    "transition-all duration-300 ease-out",
-                    "active:scale-95 active:bg-gray-100/50",
-                    "focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:ring-inset",
+                    "nav-mobile-item",
+                    "relative overflow-hidden",
+                    "flex flex-col items-center justify-center",
+                    "px-1 py-2 rounded-xl transition-all duration-300",
+                    "min-h-[56px] min-w-[48px]",
+                    "active:scale-95 focus:outline-none focus:ring-2 focus:ring-blue-500/20",
                     isActive 
                       ? "text-blue-600 bg-blue-50/80" 
                       : "text-gray-500 hover:text-gray-700"
                   )}
                 >
-                  {/* Active indicator */}
+                  {/* Enhanced Active indicator */}
                   {isActive && (
-                    <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-8 h-1 bg-blue-600 rounded-b-full transition-all duration-300" />
+                    <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-8 h-1 bg-gradient-to-r from-blue-500 to-blue-600 rounded-b-full transition-all duration-300 shadow-md" />
                   )}
                   
-                  <div className="relative">
-                    <Icon className={cn(
-                      "transition-all duration-300",
-                      isActive ? "h-6 w-6" : "h-5 w-5"
-                    )} />
-                    {item.badge && (
-                      <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-medium shadow-lg animate-pulse">
-                        {item.badge > 99 ? '99+' : item.badge}
-                      </span>
-                    )}
+                  {/* Enhanced ripple effect */}
+                  <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-blue-500/10 to-purple-500/10 opacity-0 scale-75 transition-all duration-300 active:opacity-100 active:scale-100" />
+                  
+                  <div className="relative z-10 flex flex-col items-center">
+                    <div className="relative">
+                      <Icon className={cn(
+                        "transition-all duration-300",
+                        isActive ? "h-6 w-6" : "h-5 w-5"
+                      )} />
+                      {item.badge && (
+                        <span className="absolute -top-2 -right-2 bg-gradient-to-r from-red-500 to-red-600 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-bold shadow-lg animate-pulse border-2 border-white">
+                          {item.badge > 99 ? '99+' : item.badge}
+                        </span>
+                      )}
+                    </div>
+                    <span className={cn(
+                      "text-xs font-medium transition-all duration-300 mt-1 text-center leading-none",
+                      isActive ? "text-blue-600 font-semibold" : "text-gray-500"
+                    )}>
+                      {item.label}
+                    </span>
                   </div>
-                  <span className={cn(
-                    "text-xs font-medium transition-all duration-300",
-                    isActive ? "text-blue-600 font-semibold" : "text-gray-500"
-                  )}>
-                    {item.label}
-                  </span>
                 </button>
               );
             }
@@ -158,43 +178,50 @@ const MobileBottomNav = ({ cartItems = 0, onCartClick }: MobileBottomNavProps) =
               <Link
                 key={index}
                 to={item.href}
-                onClick={triggerHapticFeedback}
+                onClick={() => triggerHapticFeedback('light')}
                 className={cn(
-                  "flex flex-col items-center justify-center space-y-1 touch-manipulation relative",
-                  "transition-all duration-300 ease-out",
-                  "active:scale-95 active:bg-gray-100/50",
-                  "focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:ring-inset",
+                  "nav-mobile-item",
+                  "relative overflow-hidden",
+                  "flex flex-col items-center justify-center",
+                  "px-1 py-2 rounded-xl transition-all duration-300",
+                  "min-h-[56px] min-w-[48px]",
+                  "active:scale-95 focus:outline-none focus:ring-2 focus:ring-blue-500/20",
                   isActive 
                     ? "text-blue-600 bg-blue-50/80" 
                     : "text-gray-500 hover:text-gray-700"
                 )}
               >
-                {/* Active indicator */}
+                {/* Enhanced Active indicator */}
                 {isActive && (
-                  <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-8 h-1 bg-blue-600 rounded-b-full transition-all duration-300" />
+                  <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-8 h-1 bg-gradient-to-r from-blue-500 to-blue-600 rounded-b-full transition-all duration-300 shadow-md" />
                 )}
                 
-                <Icon className={cn(
-                  "transition-all duration-300",
-                  isActive ? "h-6 w-6" : "h-5 w-5"
-                )} />
-                <span className={cn(
-                  "text-xs font-medium transition-all duration-300",
-                  isActive ? "text-blue-600 font-semibold" : "text-gray-500"
-                )}>
-                  {item.label}
-                </span>
+                {/* Enhanced ripple effect */}
+                <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-blue-500/10 to-purple-500/10 opacity-0 scale-75 transition-all duration-300 active:opacity-100 active:scale-100" />
+                
+                <div className="relative z-10 flex flex-col items-center">
+                  <Icon className={cn(
+                    "transition-all duration-300",
+                    isActive ? "h-6 w-6" : "h-5 w-5"
+                  )} />
+                  <span className={cn(
+                    "text-xs font-medium transition-all duration-300 mt-1 text-center leading-none",
+                    isActive ? "text-blue-600 font-semibold" : "text-gray-500"
+                  )}>
+                    {item.label}
+                  </span>
+                </div>
               </Link>
             );
           })}
         </div>
         
-        {/* Safe area spacer for devices with bottom safe area */}
-        <div className="h-safe-bottom bg-white/95"></div>
+        {/* Enhanced bottom safe area with subtle gradient */}
+        <div className="h-[env(safe-area-inset-bottom)] bg-gradient-to-t from-white/50 to-transparent" />
       </nav>
 
-      {/* Backdrop for bottom navigation to prevent content overlap */}
-      <div className="h-20 sm:hidden" />
+      {/* Spacer for content to avoid being hidden behind the navigation */}
+      <div className="h-16 pb-safe" />
     </>
   );
 };

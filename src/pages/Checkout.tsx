@@ -30,6 +30,9 @@ interface CartItem {
   image?: string;
   deliveryTime: number;
   warranty: number;
+  qualityName?: string;
+  brandName?: string;
+  modelName?: string;
 }
 
 interface Address {
@@ -406,6 +409,18 @@ const Checkout = () => {
       return;
     }
 
+    // Check for invalid cart items (from localStorage)
+    const invalidItems = cart.items.filter(item => !item.vendorId || item.vendorId === 'unknown');
+    if (invalidItems.length > 0) {
+      toast({
+        title: "Cart Error",
+        description: "Some items in your cart are invalid. Please remove them and add products again from the Order page.",
+        variant: "destructive",
+      });
+      console.error('Invalid cart items detected:', invalidItems);
+      return;
+    }
+
     setIsPlacingOrder(true);
 
     try {
@@ -732,21 +747,69 @@ const Checkout = () => {
                 <CardTitle>Order Summary</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* Warning for invalid items */}
+                {cart.items.some(item => !item.vendorId || item.vendorId === 'unknown') && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription className="flex items-center justify-between">
+                      <span>Some items in your cart are invalid and need to be removed. Please clear your cart and add products again from the Order page.</span>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => {
+                          clearCart();
+                          toast({
+                            title: "Cart Cleared",
+                            description: "Invalid items have been removed. Please add products again from the Order page.",
+                          });
+                        }}
+                      >
+                        Clear Cart
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 {/* Items */}
                 <div className="space-y-3">
-                  {cart.items.map((item) => (
-                    <div key={item.id} className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
-                        <div className="w-6 h-6 bg-gray-200 rounded"></div>
+                  {cart.items.map((item) => {
+                    const isInvalid = !item.vendorId || item.vendorId === 'unknown';
+                    return (
+                      <div key={item.id} className={`flex items-center gap-3 ${isInvalid ? 'bg-red-50 border border-red-200 rounded-lg p-2' : ''}`}>
+                        <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
+                          <div className="w-6 h-6 bg-gray-200 rounded"></div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-medium truncate ${isInvalid ? 'text-red-700' : ''}`}>
+                            {item.name}
+                            {isInvalid && <span className="text-red-500 ml-2">⚠️ Invalid</span>}
+                          </p>
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs text-gray-600 font-medium">🏪 {item.vendor || 'Unknown Vendor'}</p>
+                              {item.qualityName && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                  {item.qualityName}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs text-gray-500">Qty: {item.quantity}</p>
+                              {item.warranty > 0 && (
+                                <span className="text-xs text-green-600">🛡️ {item.warranty}mo warranty</span>
+                              )}
+                            </div>
+                            {item.brandName && item.modelName && (
+                              <p className="text-xs text-gray-500">{item.brandName} • {item.modelName}</p>
+                            )}
+                          </div>
+                        </div>
+                        <p className={`text-sm font-medium ${isInvalid ? 'text-red-700' : ''}`}>
+                          ₹{(item.price * item.quantity).toLocaleString()}
+                        </p>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{item.name}</p>
-                        <p className="text-xs text-gray-500">{item.vendor}</p>
-                        <p className="text-xs text-gray-500">Qty: {item.quantity}</p>
-                      </div>
-                      <p className="text-sm font-medium">₹{(item.price * item.quantity).toLocaleString()}</p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <Separator />
