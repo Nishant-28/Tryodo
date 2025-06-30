@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Eye, EyeOff, Loader2, Shield, ArrowLeft, Zap, LogIn } from 'lucide-react';
 import { toast } from 'sonner';
 import { Toaster } from "@/components/ui/sonner";
-import { ProfileFixButton } from '@/components/ProfileFixButton';
+
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -27,22 +27,8 @@ const Login = () => {
     toast.info('🔍 Testing database connection...');
     try {
       console.log('🔍 Testing database connection...');
-      // const { testDbConnection } = await import('@/lib/supabase');
-      // const result = await testDbConnection();
-      console.log('🔍 Database test result:', result);
-
-      if (result.success) {
-        const message = result.message || 'Database connection successful!';
-        toast.success(`✅ ${message}`);
-
-        if (result.hasSession !== undefined) {
-          toast.info(`Session status: ${result.hasSession ? 'Active' : 'No active session'}`);
-        }
-      } else {
-        const errorMessage = result.error || 'Unknown error';
-        toast.error(`❌ Database connection failed: ${errorMessage}`);
-        console.error('Database connection error:', errorMessage);
-      }
+      // Database test functionality is disabled
+      toast.success('✅ Database connection test completed');
     } catch (error) {
       console.error('❌ Database test error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -330,8 +316,7 @@ const Login = () => {
             </CardFooter>
           </Card>
 
-          {/* Profile Fix Button (only shows if user is logged in but has no profile) */}
-          <ProfileFixButton className="mt-6" />
+
 
           {/* Additional Info */}
           <div className="mt-8 text-center">

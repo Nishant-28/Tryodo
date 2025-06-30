@@ -10,7 +10,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import Cart from '@/components/customer/Cart';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { useCart } from '@/contexts/CartContext';
@@ -79,23 +78,7 @@ interface VendorProduct {
   quality: QualityCategory;
 }
 
-interface CartItem {
-  id: string;
-  productId: string;
-  name: string;
-  vendor: string;
-  vendorId: string;
-  price: number;
-  originalPrice?: number;
-  quantity: number;
-  image?: string;
-  deliveryTime: number;
-  warranty: number;
-  modelName?: string;
-  brandName?: string;
-  qualityName?: string;
-  addedAt: string;
-}
+
 
 // Add mock data at the top of the file after imports
 const MOCK_CATEGORIES: Category[] = [
@@ -632,7 +615,7 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
 };
 
 const Order = () => {
-  // Use cart context instead of local state
+  // Use cart context for add to cart functionality
   const { addToCart, totalItems } = useCart();
   
   // State management
@@ -654,8 +637,7 @@ const Order = () => {
   const [sortBy, setSortBy] = useState<'price' | 'rating' | 'reviews'>('price');
   const [filterStock, setFilterStock] = useState<'all' | 'in-stock'>('all');
   
-  // Cart modal state
-  const [isCartOpen, setIsCartOpen] = useState(false);
+
 
   // Reset search term on step change to avoid filtering issues between steps
   useEffect(() => {
@@ -780,17 +762,12 @@ const Order = () => {
     return filtered;
   };
 
-  // Updated cart function to use context
+  // Add to cart function
   const handleAddToCart = async (product: VendorProduct) => {
     try {
       console.log('🎯 Adding product to cart:', product.id);
-      console.log('🎯 Product vendor info:', {
-        vendor_id: product.vendor_id,
-        vendor_name: product.vendor?.business_name,
-        vendor_object: product.vendor
-      });
       await addToCart(product.id, 1);
-      toast.success('Added to cart!');
+      toast.success('Added to cart! Go to checkout to complete your order.');
     } catch (error) {
       console.error('Error adding to cart:', error);
       toast.error('Failed to add to cart');
@@ -896,10 +873,11 @@ const Order = () => {
   );
 
   const renderSearchAndFilters = () => (
-    <div className="mb-6 space-y-4">
+    <div className="mb-6 space-y-4" id="search-section">
       <div className="relative">
         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
         <Input
+          id="main-search-input"
           placeholder={`Search ${step}...`}
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
@@ -977,33 +955,41 @@ const Order = () => {
     const filteredBrands = getFilteredData() as Brand[];
     
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         {filteredBrands.map((brand) => (
-          <Card 
+          <div
             key={brand.id}
-            className="cursor-pointer hover:shadow-lg transition-all duration-200 border-2 hover:border-blue-300"
+            className="cursor-pointer group"
             onClick={() => {
               setSelectedBrand(brand);
               loadModels(brand.id);
             }}
           >
-            <CardContent className="p-6 text-center">
-              {brand.logo_url ? (
-                <img 
-                  src={brand.logo_url} 
-                  alt={brand.name}
-                  className="w-16 h-16 mx-auto mb-4 object-contain"
-                />
-              ) : (
-                <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-lg flex items-center justify-center">
-                  <span className="text-2xl font-bold text-gray-400">
-                    {brand.name.charAt(0)}
-                  </span>
+            <div className="bg-white rounded-xl p-4 border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all duration-200 group-active:scale-95">
+              <div className="flex flex-col items-center space-y-3">
+                {brand.logo_url ? (
+                  <div className="w-12 h-12 flex items-center justify-center">
+                    <img 
+                      src={brand.logo_url} 
+                      alt={brand.name}
+                      className="w-full h-full object-contain filter group-hover:brightness-110 transition-all duration-200"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg flex items-center justify-center group-hover:from-blue-200 group-hover:to-blue-300 transition-all duration-200">
+                    <span className="text-lg font-bold text-blue-700">
+                      {brand.name.charAt(0)}
+                    </span>
+                  </div>
+                )}
+                <div className="text-center">
+                  <h3 className="font-medium text-gray-900 text-sm leading-tight group-hover:text-blue-700 transition-colors duration-200">
+                    {brand.name}
+                  </h3>
                 </div>
-              )}
-              <h3 className="font-semibold text-gray-900">{brand.name}</h3>
-            </CardContent>
-          </Card>
+              </div>
+            </div>
+          </div>
         ))}
       </div>
     );
@@ -1013,36 +999,52 @@ const Order = () => {
     const filteredModels = getFilteredData() as Model[];
     
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredModels.map((model) => (
-          <Card 
-            key={model.id}
-            className="cursor-pointer hover:shadow-lg transition-all duration-200 border-2 hover:border-blue-300"
-            onClick={() => {
-              setSelectedModel(model);
-              loadVendorProducts(model.id, selectedCategory!.id);
-            }}
-          >
-            <CardContent className="p-6">
-              <h3 className="font-semibold text-gray-900 mb-2">{model.model_name}</h3>
-              <div className="space-y-1">
-                {model.model_number && (
-                  <p className="text-sm text-gray-600">Model: {model.model_number}</p>
-                )}
-                {model.release_year && (
-                  <p className="text-sm text-gray-600">Year: {model.release_year}</p>
-                )}
-                {model.base_price && (
-                  <p className="text-sm text-gray-600">Starting from: ₹{model.base_price.toLocaleString()}</p>
-                )}
-                <div className="flex items-center justify-between pt-2">
-                  <Badge variant="outline">Available</Badge>
-                  <ChevronRight className="h-4 w-4 text-gray-400" />
+      <div className="space-y-4">
+        {/* Models Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {filteredModels.map((model) => (
+            <div
+              key={model.id}
+              className="cursor-pointer group"
+              onClick={() => {
+                setSelectedModel(model);
+                loadVendorProducts(model.id, selectedCategory!.id);
+              }}
+            >
+              <div className="bg-white rounded-lg p-4 border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all duration-200 group-active:scale-[0.98]">
+                <div className="space-y-3">
+                  {/* Model Name - Prominent */}
+                  <h3 className="font-semibold text-gray-900 text-base leading-tight group-hover:text-blue-700 transition-colors duration-200">
+                    {model.model_name}
+                  </h3>
+                  
+                  {/* Model Details - Compact */}
+                  <div className="space-y-1.5">
+                    {model.model_number && (
+                      <p className="text-xs text-gray-600">{model.model_number}</p>
+                    )}
+                    
+                    <div className="flex items-center justify-between">
+                      {model.release_year && (
+                        <span className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded-full">
+                          {model.release_year}
+                        </span>
+                      )}
+                      
+                      <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-blue-500 transition-colors duration-200" />
+                    </div>
+                    
+                    {model.base_price && (
+                      <p className="text-sm font-medium text-green-600">
+                        From ₹{model.base_price.toLocaleString()}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        ))}
+            </div>
+          ))}
+        </div>
       </div>
     );
   };
@@ -1080,23 +1082,23 @@ const Order = () => {
       const name = qualityName.toLowerCase();
       if (name.includes('premium') || name.includes('a+')) {
         return {
-          container: 'bg-gradient-to-r from-yellow-400 to-amber-500 text-white shadow-lg',
+          container: 'bg-gradient-to-r from-yellow-400 to-amber-500 text-white shadow-sm',
           icon: '⭐',
-          glow: 'shadow-amber-300/50'
+          glow: 'shadow-amber-300/30'
         };
       }
       if (name.includes('good') || name.includes('b+')) {
         return {
-          container: 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md',
+          container: 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-sm',
           icon: '✓',
-          glow: 'shadow-blue-300/50'
+          glow: 'shadow-blue-300/30'
         };
       }
       if (name.includes('fair') || name.includes('c+')) {
         return {
-          container: 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-md',
+          container: 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-sm',
           icon: '👍',
-          glow: 'shadow-green-300/50'
+          glow: 'shadow-green-300/30'
         };
       }
       return {
@@ -1107,37 +1109,37 @@ const Order = () => {
     };
 
     return (
-      <div className="space-y-8">
+      <div className="space-y-4 sm:space-y-6">
         {Object.entries(productsByVendor).map(([vendorId, { vendor, products }], vendorIndex) => {
           const colorScheme = getVendorColorScheme(vendorIndex);
           
           return (
-            <div key={vendorId} className={`rounded-2xl ${colorScheme.bg} p-6 ${colorScheme.border} border-2`}>
-              {/* Vendor Header */}
-              <div className="mb-6 pb-4 border-b border-gray-200/50">
+            <div key={vendorId} className={`rounded-xl sm:rounded-2xl ${colorScheme.bg} p-3 sm:p-4 md:p-6 ${colorScheme.border} border-2`}>
+              {/* Vendor Header - Mobile Optimized */}
+              <div className="mb-3 sm:mb-4 md:mb-6 pb-2 sm:pb-3 md:pb-4 border-b border-gray-200/50">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className={`w-12 h-12 rounded-full ${colorScheme.accent} bg-white/80 flex items-center justify-center font-bold text-lg shadow-md`}>
+                  <div className="flex items-center space-x-2 sm:space-x-3">
+                    <div className={`w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 rounded-full ${colorScheme.accent} bg-white/80 flex items-center justify-center font-bold text-sm sm:text-base md:text-lg shadow-md`}>
                       {vendor?.business_name?.charAt(0) || 'V'}
                     </div>
-                    <div>
-                      <h3 className={`text-xl font-bold ${colorScheme.accent} flex items-center space-x-2`}>
-                        <span>{vendor?.business_name || 'Unknown Vendor'}</span>
+                    <div className="min-w-0 flex-1">
+                      <h3 className={`text-base sm:text-lg md:text-xl font-bold ${colorScheme.accent} flex items-center space-x-1 sm:space-x-2`}>
+                        <span className="truncate">{vendor?.business_name || 'Unknown Vendor'}</span>
                         {vendor?.is_verified && (
-                          <Verified className="h-5 w-5 text-blue-600" />
+                          <Verified className="h-3 w-3 sm:h-4 sm:w-4 md:h-5 md:w-5 text-blue-600 flex-shrink-0" />
                         )}
                       </h3>
-                      <div className="flex items-center space-x-3 mt-1">
+                      <div className="flex items-center space-x-2 sm:space-x-3 mt-0.5 sm:mt-1">
                         <div className="flex items-center">
-                          <Star className="h-4 w-4 text-yellow-500 fill-current" />
-                          <span className="text-sm font-medium text-gray-700 ml-1">
+                          <Star className="h-3 w-3 sm:h-4 sm:w-4 text-yellow-500 fill-current" />
+                          <span className="text-xs sm:text-sm font-medium text-gray-700 ml-1">
                             {(vendor?.rating || 0).toFixed(1)}
                           </span>
-                          <span className="text-sm text-gray-600 ml-1">
-                            ({vendor?.total_reviews || 0} reviews)
+                          <span className="text-xs sm:text-sm text-gray-600 ml-1">
+                            ({vendor?.total_reviews || 0})
                           </span>
                         </div>
-                        <span className="text-sm text-gray-600">
+                        <span className="text-xs sm:text-sm text-gray-600 hidden sm:inline">
                           📍 Dak Bungalow, Patna
                         </span>
                       </div>
@@ -1146,8 +1148,8 @@ const Order = () => {
                 </div>
               </div>
 
-              {/* Products Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Products Grid - Mobile Optimized */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 {products.map((product) => {
                   const qualityStyle = getQualityBadgeStyle(product.quality?.name || '');
                   const hasDiscount = product.original_price && product.original_price > product.price;
@@ -1158,83 +1160,82 @@ const Order = () => {
                   return (
                     <Card 
                       key={product.id} 
-                      className="bg-white/90 backdrop-blur hover:shadow-xl transition-all duration-300 hover:scale-[1.02] border-0"
+                      className="bg-white/90 backdrop-blur hover:shadow-lg transition-all duration-300 hover:scale-[1.01] border-0"
                     >
-                      <CardContent className="p-5">
-                        {/* Quality Badge - Prominent Position */}
-                        <div className={`inline-flex items-center space-x-2 px-4 py-2 rounded-full text-sm font-bold mb-4 ${qualityStyle.container} ${qualityStyle.glow}`}>
-                          <span className="text-lg">{qualityStyle.icon}</span>
-                          <span>{product.quality?.name || 'Standard'}</span>
+                      <CardContent className="p-3 sm:p-4">
+                        {/* Compact Header with Quality and Price */}
+                        <div className="flex items-start justify-between mb-3">
+                          {/* Quality Badge - Smaller */}
+                          <div className={`inline-flex items-center space-x-1 px-2 py-1 rounded-lg text-xs font-semibold ${qualityStyle.container} ${qualityStyle.glow}`}>
+                            <span className="text-sm">{qualityStyle.icon}</span>
+                            <span>{product.quality?.name || 'Standard'}</span>
+                          </div>
+                          
+                          {/* Stock Status - Compact */}
+                          <Badge 
+                            variant={product.is_in_stock ? "default" : "destructive"}
+                            className={`text-xs ${product.is_in_stock ? "bg-green-100 text-green-800" : ""}`}
+                          >
+                            {product.is_in_stock ? 'In Stock' : 'Out of Stock'}
+                          </Badge>
                         </div>
 
-                        {/* Price Section - Large and Clear */}
-                        <div className="mb-4">
+                        {/* Price Section - Mobile Optimized */}
+                        <div className="mb-3">
                           <div className="flex items-baseline space-x-2">
-                            <span className="text-3xl font-black text-gray-900">
+                            <span className="text-xl sm:text-2xl font-black text-gray-900">
                               ₹{product.price.toLocaleString()}
                             </span>
                             {hasDiscount && (
-                              <span className="text-lg text-gray-400 line-through">
+                              <span className="text-sm sm:text-base text-gray-400 line-through">
                                 ₹{product.original_price!.toLocaleString()}
                               </span>
                             )}
                           </div>
                           {hasDiscount && (
                             <div className="mt-1">
-                              <Badge className="bg-red-500 text-white hover:bg-red-600">
-                                {discountPercent}% OFF - Save ₹{(product.original_price! - product.price).toLocaleString()}
+                              <Badge className="bg-red-500 text-white hover:bg-red-600 text-xs">
+                                {discountPercent}% OFF
                               </Badge>
                             </div>
                           )}
                         </div>
 
-                        {/* Product Features */}
-                        <div className="space-y-2 mb-4">
-                          <div className="flex items-center justify-between text-sm">
+                        {/* Product Features - Condensed */}
+                        <div className="space-y-1.5 mb-3">
+                          <div className="flex items-center justify-between text-xs sm:text-sm">
                             <span className="flex items-center text-gray-600">
-                              <Package className="h-4 w-4 mr-1 text-blue-500" />
+                              <Package className="h-3 w-3 sm:h-4 sm:w-4 mr-1 text-blue-500" />
                               Warranty
                             </span>
                             <span className="font-semibold text-gray-900">
-                              {product.warranty_months} Months
+                              {product.warranty_months}mo
                             </span>
                           </div>
-                          <div className="flex items-center justify-between text-sm">
+                          <div className="flex items-center justify-between text-xs sm:text-sm">
                             <span className="flex items-center text-gray-600">
-                              <Clock className="h-4 w-4 mr-1 text-green-500" />
+                              <Clock className="h-3 w-3 sm:h-4 sm:w-4 mr-1 text-green-500" />
                               Delivery
                             </span>
                             <span className="font-semibold text-gray-900">
-                              Express Available
+                              Express
                             </span>
-                          </div>
-                          <div className="flex items-center justify-between text-sm">
-                            <span className="flex items-center text-gray-600">
-                              <ShieldCheck className="h-4 w-4 mr-1 text-purple-500" />
-                              Stock
-                            </span>
-                            <Badge 
-                              variant={product.is_in_stock ? "default" : "destructive"}
-                              className={product.is_in_stock ? "bg-green-100 text-green-800" : ""}
-                            >
-                              {product.is_in_stock ? 'Available' : 'Out of Stock'}
-                            </Badge>
                           </div>
                         </div>
 
-                        {/* Add to Cart Button */}
+                        {/* Add to Cart Button - Mobile Optimized */}
                         <Button 
                           onClick={() => handleAddToCart(product)}
                           disabled={!product.is_in_stock}
-                          className={`w-full h-12 font-semibold text-base transition-all duration-200 ${
+                          className={`w-full h-9 sm:h-10 font-semibold text-sm transition-all duration-200 ${
                             product.is_in_stock 
-                              ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 shadow-lg hover:shadow-xl' 
+                              ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 shadow-md hover:shadow-lg' 
                               : 'bg-gray-300'
                           }`}
                         >
                           {product.is_in_stock ? (
-                            <span className="flex items-center justify-center space-x-2">
-                              <ShoppingCart className="h-5 w-5" />
+                            <span className="flex items-center justify-center space-x-1.5">
+                              <ShoppingCart className="h-4 w-4" />
                               <span>Add to Cart</span>
                             </span>
                           ) : (
@@ -1252,10 +1253,10 @@ const Order = () => {
 
         {/* If no products grouped by vendor, show empty state */}
         {Object.keys(productsByVendor).length === 0 && (
-          <div className="text-center py-16 bg-gray-50 rounded-2xl">
-            <ShoppingCart className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-700 mb-2">No Products Available</h3>
-            <p className="text-gray-500">Check back later for new offerings from our vendors.</p>
+          <div className="text-center py-12 sm:py-16 bg-gray-50 rounded-xl sm:rounded-2xl mx-3 sm:mx-0">
+            <ShoppingCart className="h-12 w-12 sm:h-16 sm:w-16 text-gray-300 mx-auto mb-4" />
+            <h3 className="text-lg sm:text-xl font-semibold text-gray-700 mb-2">No Products Available</h3>
+            <p className="text-gray-500 text-sm sm:text-base px-4">Check back later for new offerings from our vendors.</p>
           </div>
         )}
       </div>
@@ -1316,10 +1317,7 @@ const Order = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header 
-        cartItems={totalItems} 
-        onCartClick={() => setIsCartOpen(true)} 
-      />
+      <Header cartItems={totalItems} />
       
       <main className="container mx-auto px-4 py-8">
         {/* Header Section */}
@@ -1345,14 +1343,7 @@ const Order = () => {
               </h1>
             </div>
             
-            <Button
-              variant="outline"
-              onClick={() => setIsCartOpen(true)}
-              className="flex items-center space-x-2"
-            >
-              <ShoppingCart className="h-4 w-4" />
-              <span>Cart ({totalItems})</span>
-            </Button>
+
           </div>
 
           {renderBreadcrumb()}
@@ -1376,11 +1367,31 @@ const Order = () => {
 
       <Footer />
       
-      {/* Cart Sidebar */}
-      <Cart
-        isOpen={isCartOpen}
-        onClose={() => setIsCartOpen(false)}
-      />
+      {/* Floating Search Button */}
+      <Button
+        onClick={() => {
+          // Scroll to search section and focus on input
+          const searchSection = document.getElementById('search-section');
+          const searchInput = document.getElementById('main-search-input') as HTMLInputElement;
+          
+          if (searchSection) {
+            searchSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+          
+          // Focus on search input after scroll
+          setTimeout(() => {
+            if (searchInput) {
+              searchInput.focus();
+            }
+          }, 500);
+        }}
+        className="fixed bottom-6 right-6 w-12 h-12 rounded-full bg-blue-500 hover:bg-blue-600 shadow-lg hover:shadow-xl transition-all duration-200 z-50 active:scale-95"
+        size="icon"
+      >
+        <Search className="h-5 w-5 text-white" />
+      </Button>
+      
+
     </div>
   );
 };

@@ -51,6 +51,16 @@
     --sidebar-border: 220 13% 91%;
 
     --sidebar-ring: 217.2 91.2% 59.8%;
+
+    --color-1: oklch(66.2% 0.225 25.9);
+
+    --color-2: oklch(60.4% 0.26 302);
+
+    --color-3: oklch(69.6% 0.165 251);
+
+    --color-4: oklch(80.2% 0.134 225);
+
+    --color-5: oklch(90.7% 0.231 133);
   }
 
   .dark {
@@ -89,6 +99,19 @@
     --sidebar-accent-foreground: 240 4.8% 95.9%;
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+    --color-1: oklch(66.2% 0.225 25.9);
+    --color-2: oklch(60.4% 0.26 302);
+    --color-3: oklch(69.6% 0.165 251);
+    --color-4: oklch(80.2% 0.134 225);
+    --color-5: oklch(90.7% 0.231 133);
+  }
+  .theme {
+    --animate-marquee: marquee var(--duration) infinite linear;
+    --animate-marquee-vertical: marquee-vertical var(--duration) linear infinite;
+    --animate-rainbow: rainbow var(--speed, 2s) infinite linear;
+    --animate-shimmer-slide: shimmer-slide var(--speed) ease-in-out infinite alternate;
+    --animate-spin-around: spin-around calc(var(--speed) * 2) infinite linear;
+    --animate-pulse: pulse var(--duration) ease-out infinite;
   }
 }
 
@@ -198,6 +221,32 @@
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.16);
   }
 
+  /* Horizontal Scroll Utilities */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Text Truncation */
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Colored Shadows */
   .shadow-colored {
     box-shadow: 0 4px 16px rgba(255, 107, 53, 0.2);
   }
@@ -537,19 +586,19 @@
   .vendor-dashboard-header {
     @apply flex flex-col gap-4 p-4;
   }
-  
+
   .vendor-dashboard-actions {
     @apply grid grid-cols-3 gap-2 w-full;
   }
-  
+
   .vendor-dashboard-actions button {
     @apply flex-col items-center justify-center p-3 h-auto min-h-[64px];
   }
-  
+
   .vendor-dashboard-actions button .icon {
     @apply mb-1;
   }
-  
+
   .vendor-dashboard-actions button .text {
     @apply text-xs text-center leading-tight;
   }
@@ -558,7 +607,7 @@
   .vendor-tabs-mobile {
     @apply flex flex-wrap gap-1 p-1;
   }
-  
+
   .vendor-tabs-mobile > * {
     @apply flex-1 min-w-[60px] text-xs px-2 py-3 text-center;
   }
@@ -631,5 +680,59 @@
   /* Compact modals in landscape */
   .modal-mobile .modal-content {
     max-height: 85vh;
+  }
+}
+
+@theme inline {
+  @keyframes marquee {
+  from {
+    transform: translateX(0);
+    }
+  to {
+    transform: translateX(calc(-100% - var(--gap)));
+    }
+  }
+  @keyframes marquee-vertical {
+  from {
+    transform: translateY(0);
+    }
+  to {
+    transform: translateY(calc(-100% - var(--gap)));
+    }
+  }
+  @keyframes rainbow {
+  0% {
+    background-position: 0%;
+    }
+  100% {
+    background-position: 200%;
+    }
+  }
+  @keyframes shimmer-slide {
+  to {
+    transform: translate(calc(100cqw - 100%), 0);
+    }
+  }
+  @keyframes spin-around {
+  0% {
+    transform: translateZ(0) rotate(0);
+    }
+  15%, 35% {
+    transform: translateZ(0) rotate(90deg);
+    }
+  65%, 85% {
+    transform: translateZ(0) rotate(270deg);
+    }
+  100% {
+    transform: translateZ(0) rotate(360deg);
+    }
+  }
+  @keyframes pulse {
+  0%, 100% {
+    boxShadow: 0 0 0 0 var(--pulse-color);
+    }
+  50% {
+    boxShadow: 0 0 0 8px var(--pulse-color);
+    }
   }
 }

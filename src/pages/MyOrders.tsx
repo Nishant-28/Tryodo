@@ -85,7 +85,7 @@ const MyOrders = () => {
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<string>('all');
+  const [activeTab, setActiveTab] = useState<string>('pending');
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [showReturnDialog, setShowReturnDialog] = useState(false);
@@ -317,7 +317,6 @@ const MyOrders = () => {
   }
 
   const orderTabs = [
-    { key: 'all', label: 'All Orders', count: orders.length },
     { key: 'pending', label: 'Pending', count: orders.filter(o => o.order_status === 'pending').length },
     { key: 'confirmed', label: 'Confirmed', count: orders.filter(o => o.order_status === 'confirmed').length },
     { key: 'out_for_delivery', label: 'Out for Delivery', count: orders.filter(o => o.order_status === 'out_for_delivery').length },
@@ -351,8 +350,7 @@ const MyOrders = () => {
               >
                 <span className="hidden sm:inline">{tab.label}</span>
                 <span className="sm:hidden">
-                  {tab.key === 'all' ? 'All' : 
-                   tab.key === 'pending' ? 'Pend' :
+                  {tab.key === 'pending' ? 'Pend' :
                    tab.key === 'confirmed' ? 'Conf' :
                    tab.key === 'out_for_delivery' ? 'OFD' :
                    'Deliv'}

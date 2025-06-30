@@ -929,7 +929,7 @@ export class DeliveryAPI {
           is_available: isAvailable,
           updated_at: new Date().toISOString()
         })
-        .eq('profile_id', deliveryPartnerId)
+        .eq('id', deliveryPartnerId)
         .select()
         .single();
 

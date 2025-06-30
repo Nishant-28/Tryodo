@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Package, TrendingUp, MapPin, Star, Clock, Check, X, 
   RefreshCw, Phone, Navigation, AlertTriangle, CheckCircle,
-  DollarSign, Target, Truck, User, Banknote, Shield, Play, 
+  DollarSign, Target, Truck, User, Banknote, Shield, 
   Users, Store, ExternalLink, Calculator, CreditCard, Wallet
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -22,8 +22,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import { DeliveryAPI, AvailableOrder, MyOrder, DeliveryStats, MultiVendorOrder, VendorPickupInfo } from '@/lib/deliveryApi';
-
+import { DeliveryAPI, AvailableOrder, MyOrder, DeliveryStats } from '@/lib/deliveryApi';
 
 interface DeliveryPartner {
   id: string;
@@ -49,35 +48,13 @@ const DeliveryPartnerDashboard = () => {
   const [deliveryPartner, setDeliveryPartner] = useState<DeliveryPartner | null>(null);
   const [availableOrders, setAvailableOrders] = useState<AvailableOrder[]>([]);
   const [myOrders, setMyOrders] = useState<MyOrder[]>([]);
-  const [multiVendorOrders, setMultiVendorOrders] = useState<MultiVendorOrder[]>([]);
   const [stats, setStats] = useState<DeliveryStats | null>(null);
-  const [earningsHistory, setEarningsHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isAvailable, setIsAvailable] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showMultiVendor, setShowMultiVendor] = useState(false);
-  
-  // OTP State Management
-  const [otpDialogOpen, setOtpDialogOpen] = useState(false);
-  const [otpType, setOtpType] = useState<'pickup' | 'delivery'>('pickup');
-  const [currentOrderId, setCurrentOrderId] = useState<string>('');
-  const [otpValue, setOtpValue] = useState('');
-  const [otpLoading, setOtpLoading] = useState(false);
-  const [generatingOtp, setGeneratingOtp] = useState(false);
-
-  // Multi-vendor state
-  const [multiVendorDialogOpen, setMultiVendorDialogOpen] = useState(false);
-  const [selectedVendorId, setSelectedVendorId] = useState<string>('');
-  const [vendorOtpValue, setVendorOtpValue] = useState('');
-  const [vendorOtpLoading, setVendorOtpLoading] = useState(false);
   const [expandedOrderId, setExpandedOrderId] = useState<string>('');
-  const [currentVendorPickupStatus, setCurrentVendorPickupStatus] = useState<VendorPickupInfo[]>([]);
-
-  // Testing state
-  const [testingMode, setTestingMode] = useState(false);
-  const [testResults, setTestResults] = useState<string[]>([]);
 
   // Payment collection state
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
@@ -89,7 +66,6 @@ const DeliveryPartnerDashboard = () => {
   
   // Day-end summary state
   const [dayEndDialogOpen, setDayEndDialogOpen] = useState(false);
-  const [dailyCollectionSummary, setDailyCollectionSummary] = useState<any>(null);
   const [dayEndCashAmount, setDayEndCashAmount] = useState('');
   const [dayEndDigitalAmount, setDayEndDigitalAmount] = useState('');
   const [dayEndNotes, setDayEndNotes] = useState('');
@@ -156,8 +132,7 @@ const DeliveryPartnerDashboard = () => {
       await Promise.allSettled([
         loadAvailableOrders(),
         loadMyOrders(deliveryPartnerData.id),
-        loadStats(deliveryPartnerData.id),
-        loadEarningsHistory(deliveryPartnerData.id)
+        loadStats(deliveryPartnerData.id)
       ]);
 
     } catch (error) {
@@ -179,7 +154,6 @@ const DeliveryPartnerDashboard = () => {
 
       if (error) {
         if (error.code === 'PGRST116') {
-          // No delivery partner record found
           console.log('🚚 No delivery partner record found for profile:', profileId);
           return null;
         }
@@ -198,109 +172,85 @@ const DeliveryPartnerDashboard = () => {
       if (!deliveryPartner) return;
       console.log('🎯 Loading available orders for delivery partner:', deliveryPartner.id);
       const result = await DeliveryAPI.getAvailableOrdersForDeliveryPartner(deliveryPartner.id);
-      console.log('🎯 Available orders result:', result);
-      if (result.success) {
-        setAvailableOrders(result.data || []);
+      
+      if (result.success && result.data) {
+        setAvailableOrders(result.data);
+        console.log('✅ Available orders loaded:', result.data.length);
+      } else {
+        console.error('❌ Failed to load available orders:', result.error);
+        setAvailableOrders([]);
       }
     } catch (error) {
-      console.error('Error loading available orders:', error);
+      console.error('💥 Error loading available orders:', error);
+      setAvailableOrders([]);
     }
   };
 
   const loadMyOrders = async (deliveryPartnerId: string) => {
     try {
-      console.log('🎯 DeliveryPartnerDashboard.loadMyOrders called with deliveryPartnerId:', deliveryPartnerId);
+      console.log('🚚 Loading my orders for delivery partner:', deliveryPartnerId);
       const result = await DeliveryAPI.getMyOrders(deliveryPartnerId);
-      console.log('🎯 DeliveryAPI.getMyOrders result:', result);
-      if (result.success) {
-        console.log('🎯 Setting myOrders state to:', result.data);
-        setMyOrders(result.data || []);
+      
+      if (result.success && result.data) {
+        setMyOrders(result.data);
+        console.log('✅ My orders loaded:', result.data.length);
       } else {
-        console.error('🎯 DeliveryAPI.getMyOrders failed:', result.error);
+        console.error('❌ Failed to load my orders:', result.error);
+        setMyOrders([]);
       }
     } catch (error) {
-      console.error('🎯 Error loading my orders:', error);
+      console.error('💥 Error loading my orders:', error);
+      setMyOrders([]);
     }
   };
 
   const loadStats = async (deliveryPartnerId: string) => {
     try {
-      // Use the new real-time stats calculation function
-      const result = await DeliveryAPI.calculateAndUpdateStats(deliveryPartnerId);
-      if (result.success) {
-        setStats(result.data || null);
+      console.log('📊 Loading stats for delivery partner:', deliveryPartnerId);
+      const result = await DeliveryAPI.getDeliveryStats(deliveryPartnerId);
+      
+      if (result.success && result.data) {
+        setStats(result.data);
+        console.log('✅ Stats loaded:', result.data);
       } else {
-        console.error('Failed to calculate stats:', result.error);
-        // Fallback to regular stats if calculation fails
-        const fallbackResult = await DeliveryAPI.getDeliveryStats(deliveryPartnerId);
-        if (fallbackResult.success) {
-          setStats(fallbackResult.data || null);
-        }
+        console.error('❌ Failed to load stats:', result.error);
       }
     } catch (error) {
-      console.error('Error loading stats:', error);
+      console.error('💥 Error loading stats:', error);
     }
   };
 
-  const loadEarningsHistory = async (deliveryPartnerId: string) => {
-    try {
-      console.log('🎯 Loading earnings history for delivery partner:', deliveryPartnerId);
-      const { data, error } = await supabase
-        .from('delivery_earnings')
-        .select(`
-          *,
-          orders!inner(
-            order_number,
-            total_amount,
-            created_at
-          )
-        `)
-        .eq('delivery_partner_id', deliveryPartnerId)
-        .order('created_at', { ascending: false })
-        .limit(20);
-      
-      if (error) {
-        console.error('Error loading earnings history:', error);
-        return;
-      }
-      
-      console.log('🎯 Earnings history loaded:', data);
-      setEarningsHistory(data || []);
-    } catch (error) {
-      console.error('Error loading earnings history:', error);
-    }
-  };
-
-  const refreshData = useCallback(async () => {
-    if (!deliveryPartner) return;
+  const refreshData = async () => {
+    if (!deliveryPartner || refreshing) return;
     
     setRefreshing(true);
     try {
-      await Promise.all([
+      await Promise.allSettled([
         loadAvailableOrders(),
         loadMyOrders(deliveryPartner.id),
-        loadMultiVendorOrders(),
         loadStats(deliveryPartner.id)
       ]);
     } finally {
       setRefreshing(false);
     }
-  }, [deliveryPartner]);
+  };
 
   const handleAutoAssignOrders = async () => {
+    if (!deliveryPartner) return;
+    
     try {
       setRefreshing(true);
       const result = await DeliveryAPI.autoAssignAvailableOrders();
       
       if (result.success) {
-        toast.success(result.message || 'Orders assigned successfully');
-        await refreshData(); // Refresh data to show newly assigned orders
+        toast.success('Auto-assignment completed!');
+        await refreshData();
       } else {
-        toast.error(result.error || 'Failed to assign orders');
+        toast.error(result.error || 'Failed to auto-assign orders');
       }
     } catch (error) {
       console.error('Error auto-assigning orders:', error);
-      toast.error('Failed to assign orders');
+      toast.error('Failed to auto-assign orders');
     } finally {
       setRefreshing(false);
     }
@@ -309,50 +259,80 @@ const DeliveryPartnerDashboard = () => {
   const updateLocationInDatabase = async (location: { lat: number; lng: number }) => {
     if (!deliveryPartner) return;
     
-    try {
-      await DeliveryAPI.updateLocation(deliveryPartner.id, location.lat, location.lng);
-    } catch (error) {
-      console.error('Error updating location:', error);
-    }
+    await DeliveryAPI.updateLocation(deliveryPartner.id, location.lat, location.lng);
   };
 
   const handleAcceptOrder = async (orderId: string) => {
     if (!deliveryPartner) return;
-
+    
     try {
-      console.log('🎯 Attempting to accept order:', { orderId, deliveryPartnerId: deliveryPartner.id });
       const result = await DeliveryAPI.acceptOrder(orderId, deliveryPartner.id);
-      console.log('🎯 Accept order result:', result);
       
       if (result.success) {
         toast.success('Order accepted successfully!');
-        console.log('🎯 Refreshing data after successful accept');
         await refreshData();
       } else {
-        console.error('🎯 Accept order failed:', result.error);
         toast.error(result.error || 'Failed to accept order');
       }
-    } catch (error: any) {
-      console.error('🎯 Accept order error:', error);
-      toast.error(`Error accepting order: ${error.message}`);
+    } catch (error) {
+      console.error('Error accepting order:', error);
+      toast.error('Failed to accept order');
     }
   };
 
   const handleUpdateAvailability = async (available: boolean) => {
     if (!deliveryPartner) return;
-
+    
     try {
-      const result = await DeliveryAPI.updateAvailabilityStatus(deliveryPartner.profile_id, available);
+      const result = await DeliveryAPI.updateAvailabilityStatus(deliveryPartner.id, available);
       
       if (result.success) {
         setIsAvailable(available);
-        setDeliveryPartner({ ...deliveryPartner, is_available: available });
-        toast.success(`Status updated to ${available ? 'available' : 'unavailable'}`);
+        toast.success(`You are now ${available ? 'available' : 'unavailable'} for orders`);
       } else {
         toast.error(result.error || 'Failed to update availability');
       }
-    } catch (error: any) {
-      toast.error(`Error updating availability: ${error.message}`);
+    } catch (error) {
+      console.error('Error updating availability:', error);
+      toast.error('Failed to update availability');
+    }
+  };
+
+  // Simple pickup confirmation without OTP
+  const handleConfirmPickup = async (orderId: string) => {
+    if (!deliveryPartner) return;
+    
+    try {
+      const result = await DeliveryAPI.markPickedUp(orderId, deliveryPartner.id);
+      
+      if (result.success) {
+        toast.success('✅ Pickup confirmed! You can now deliver to customer.');
+        await refreshData();
+      } else {
+        toast.error(result.error || 'Failed to confirm pickup');
+      }
+    } catch (error) {
+      console.error('Error confirming pickup:', error);
+      toast.error('Failed to confirm pickup');
+    }
+  };
+
+  // Simple delivery confirmation without OTP
+  const handleConfirmDelivery = async (orderId: string) => {
+    if (!deliveryPartner) return;
+    
+    try {
+      const result = await DeliveryAPI.markDelivered(orderId, deliveryPartner.id);
+      
+      if (result.success) {
+        toast.success('🎉 Delivery completed successfully!');
+        await refreshData();
+      } else {
+        toast.error(result.error || 'Failed to confirm delivery');
+      }
+    } catch (error) {
+      console.error('Error confirming delivery:', error);
+      toast.error('Failed to confirm delivery');
     }
   };
 
@@ -369,418 +349,15 @@ const DeliveryPartnerDashboard = () => {
   const formatTimeAgo = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / (1000 * 60));
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return date.toLocaleDateString();
-  };
-
-  // OTP Handler Functions
-  // Testing functions
-  const runOTPTests = async () => {
-    setTestingMode(true);
-    setTestResults([]);
-    const results: string[] = [];
-
-    try {
-      results.push('🧪 Starting OTP System Tests...');
-
-      // Test 1: OTP Format Validation (Basic test without database)
-      results.push('✅ Test 1: OTP Format Validation');
-      const testOtp1 = Math.floor(1000 + Math.random() * 9000).toString();
-      const testOtp2 = Math.floor(1000 + Math.random() * 9000).toString();
-      
-      if (testOtp1.length === 4 && /^\d{4}$/.test(testOtp1)) {
-        results.push(`✅ Generated valid 4-digit OTP: ${testOtp1}`);
-      } else {
-        results.push(`❌ Invalid OTP format: ${testOtp1} (expected 4 digits)`);
-      }
-
-      // Test 2: Use existing order for real testing (if available)
-      results.push('✅ Test 2: Real Order OTP Generation');
-      let testOrderId = null;
-      
-      // Try to use an existing order from myOrders
-      if (myOrders.length > 0) {
-        testOrderId = myOrders[0].order_id;
-        results.push(`✅ Using existing order: ${myOrders[0].order_number}`);
-        
-        const generateResult = await DeliveryAPI.generateOTP(testOrderId, 'pickup');
-        if (generateResult.success && generateResult.data) {
-          const otp = generateResult.data;
-          if (otp.length === 4 && /^\d{4}$/.test(otp)) {
-            results.push(`✅ Generated valid 4-digit OTP for real order: ${otp}`);
-            
-            // Test 3: Verify incorrect OTP with real order
-            results.push('✅ Test 3: Verify incorrect OTP');
-            const wrongOtp = '9999';
-            const verifyWrongResult = await DeliveryAPI.verifyOTP(testOrderId, wrongOtp, 'pickup');
-            if (!verifyWrongResult.success || verifyWrongResult.data === false) {
-              results.push('✅ Incorrect OTP correctly rejected');
-            } else {
-              results.push('❌ Incorrect OTP was incorrectly accepted');
-            }
-          } else {
-            results.push(`❌ Invalid OTP format from real order: ${otp} (expected 4 digits)`);
-          }
-        } else {
-          results.push(`❌ Failed to generate OTP for real order: ${generateResult.error}`);
-        }
-      } else {
-        results.push('⚠️ No existing orders available for real testing');
-        results.push('💡 Accept an order first to test with real data');
-      }
-
-      // Test 4: Multi-vendor OTP generation with existing order and debugging
-      results.push('✅ Test 4: Multi-vendor OTP Format Test');
-      if (testOrderId) {
-        results.push('🔍 Debug: Investigating order structure...');
-        
-        // Debug: Check order items first
-        try {
-          const { data: orderItems, error: itemsError } = await supabase
-            .from('order_items')
-            .select(`
-              vendor_id,
-              product_name,
-              quantity,
-              line_total,
-              item_status,
-              vendors!inner(
-                id,
-                business_name,
-                business_address,
-                profiles!inner(phone)
-              )
-            `)
-            .eq('order_id', testOrderId);
-
-          if (itemsError) {
-            results.push(`❌ Debug: Error fetching order items: ${itemsError.message}`);
-          } else {
-            results.push(`📊 Debug: Found ${orderItems.length} order items`);
-            
-            const statusCounts = orderItems.reduce((acc: any, item: any) => {
-              acc[item.item_status] = (acc[item.item_status] || 0) + 1;
-              return acc;
-            }, {});
-            
-            results.push(`📊 Debug: Item statuses: ${Object.entries(statusCounts).map(([status, count]) => `${status}(${count})`).join(', ')}`);
-            
-            const uniqueVendors = new Set(orderItems.map((item: any) => item.vendor_id));
-            results.push(`📊 Debug: Unique vendors: ${uniqueVendors.size}`);
-            
-            if (uniqueVendors.size > 1) {
-              results.push('🎯 Debug: This is a MULTI-VENDOR order!');
-            } else {
-              results.push('🎯 Debug: This is a single-vendor order');
-            }
-            
-            // Show vendor details
-            orderItems.forEach((item: any, index: number) => {
-              results.push(`📝 Debug: Item ${index + 1}: ${item.product_name} (${item.item_status}) - Vendor: ${item.vendors.business_name} (${item.vendor_id})`);
-            });
-          }
-        } catch (debugError: any) {
-          results.push(`❌ Debug: Error during investigation: ${debugError.message}`);
-        }
-        
-        const multiVendorResult = await DeliveryAPI.generateMultiVendorPickupOTPs(testOrderId);
-        if (multiVendorResult.success) {
-          results.push(`✅ Multi-vendor OTPs generated for ${multiVendorResult.data?.length || 0} vendors`);
-          
-          // Check if OTPs are 4-digit
-          if (multiVendorResult.data && multiVendorResult.data.length > 0) {
-            const allValid = multiVendorResult.data.every(vendor => 
-              vendor.pickup_otp.length === 4 && /^\d{4}$/.test(vendor.pickup_otp)
-            );
-            if (allValid) {
-              results.push('✅ All vendor OTPs are valid 4-digit format');
-              results.push(`📝 Sample vendor OTPs: ${multiVendorResult.data.map(v => `${v.vendor_name}:${v.pickup_otp}`).join(', ')}`);
-            } else {
-              results.push('❌ Some vendor OTPs are not in 4-digit format');
-            }
-          } else {
-            results.push('⚠️ No vendors found for multi-vendor OTP generation');
-          }
-        } else {
-          results.push(`❌ Multi-vendor OTP generation failed: ${multiVendorResult.error}`);
-        }
-      } else {
-        // Test OTP generation logic without database
-        const mockVendorOtps = Array.from({length: 3}, () => Math.floor(1000 + Math.random() * 9000).toString());
-        const allValid = mockVendorOtps.every(otp => otp.length === 4 && /^\d{4}$/.test(otp));
-        if (allValid) {
-          results.push('✅ Mock multi-vendor OTP generation logic is valid');
-          results.push(`📝 Sample mock OTPs: ${mockVendorOtps.join(', ')}`);
-        } else {
-          results.push('❌ Mock multi-vendor OTP generation logic failed');
-        }
-      }
-
-      // Test 5: Input Validation
-      results.push('✅ Test 5: Input Validation');
-      const validInputs = ['1234', '5678', '9999', '0000'];
-      const invalidInputs = ['123', '12345', 'abcd', '12a4', ''];
-      
-      validInputs.forEach(input => {
-        if (input.length === 4 && /^\d{4}$/.test(input)) {
-          results.push(`✅ Valid input accepted: "${input}"`);
-        } else {
-          results.push(`❌ Valid input rejected: "${input}"`);
-        }
-      });
-      
-      invalidInputs.forEach(input => {
-        if (input.length !== 4 || !/^\d{4}$/.test(input)) {
-          results.push(`✅ Invalid input correctly rejected: "${input}"`);
-        } else {
-          results.push(`❌ Invalid input incorrectly accepted: "${input}"`);
-        }
-      });
-
-      results.push('🎉 OTP Tests completed!');
-      
-    } catch (error: any) {
-      results.push(`❌ Test failed with error: ${error.message}`);
-    }
-
-    setTestResults(results);
-    setTestingMode(false);
-  };
-
-  const loadMultiVendorOrders = async () => {
-    if (!deliveryPartner) return;
+    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
     
-    try {
-      const result = await DeliveryAPI.getMyOrdersWithMultiVendor(deliveryPartner.id);
-      if (result.success) {
-        setMultiVendorOrders(result.data || []);
-      }
-    } catch (error) {
-      console.error('Error loading multi-vendor orders:', error);
-    }
+    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+    const diffInHours = Math.floor(diffInMinutes / 60);
+    if (diffInHours < 24) return `${diffInHours}h ago`;
+    const diffInDays = Math.floor(diffInHours / 24);
+    return `${diffInDays}d ago`;
   };
 
-  const handleOtpAction = async (orderId: string, type: 'pickup' | 'delivery') => {
-    setCurrentOrderId(orderId);
-    setOtpType(type);
-    setOtpValue('');
-    setOtpDialogOpen(true);
-  };
-
-  const handleMultiVendorPickupAction = async (orderId: string) => {
-    setCurrentOrderId(orderId);
-    setCurrentVendorPickupStatus([]);
-    
-    try {
-      // Load current vendor pickup status
-      const statusResult = await DeliveryAPI.getMultiVendorPickupStatus(orderId);
-      if (statusResult.success && statusResult.data) {
-        setCurrentVendorPickupStatus(statusResult.data.vendors);
-        
-        // If no OTPs generated yet, generate them automatically
-        if (statusResult.data.vendors.length === 0 || statusResult.data.vendors.every(v => !v.pickup_otp)) {
-          toast.info('Generating vendor pickup OTPs...');
-          await handleGenerateMultiVendorOTPs();
-          
-          // Reload status after generation
-          const updatedStatus = await DeliveryAPI.getMultiVendorPickupStatus(orderId);
-          if (updatedStatus.success && updatedStatus.data) {
-            setCurrentVendorPickupStatus(updatedStatus.data.vendors);
-          }
-        }
-      }
-    } catch (error: any) {
-      toast.error('Error loading vendor pickup status: ' + error.message);
-    }
-    
-    setMultiVendorDialogOpen(true);
-  };
-
-  const handleGenerateOtp = async () => {
-    setGeneratingOtp(true);
-    try {
-      const result = await DeliveryAPI.generateOTP(currentOrderId, otpType);
-      if (result.success) {
-        toast.success(`${otpType === 'pickup' ? 'Pickup' : 'Delivery'} OTP generated successfully`);
-        toast.info(`4-digit OTP: ${result.data}`); // Show the OTP for testing
-      } else {
-        toast.error(result.error || 'Failed to generate OTP');
-      }
-    } catch (error: any) {
-      toast.error('Error generating OTP: ' + error.message);
-    } finally {
-      setGeneratingOtp(false);
-    }
-  };
-
-  const handleVerifyOtp = async () => {
-    if (!otpValue.trim()) {
-      toast.error('Please enter the OTP');
-      return;
-    }
-
-    if (otpValue.length !== 4) {
-      toast.error('OTP must be exactly 4 digits');
-      return;
-    }
-
-    setOtpLoading(true);
-    try {
-      // First verify the OTP
-      const verifyResult = await DeliveryAPI.verifyOTP(currentOrderId, otpValue, otpType);
-      if (!verifyResult.success || verifyResult.data !== true) {
-        toast.error(verifyResult.error || 'Invalid OTP');
-        return;
-      }
-
-      // If OTP is valid, proceed with the action
-      let actionResult;
-      if (otpType === 'pickup') {
-        actionResult = await DeliveryAPI.markPickedUp(currentOrderId, deliveryPartner!.id);
-      } else {
-        actionResult = await DeliveryAPI.markDelivered(currentOrderId, deliveryPartner!.id);
-      }
-
-      if (actionResult.success) {
-        const order = myOrders.find(o => o.order_id === currentOrderId);
-        const successMessage = otpType === 'pickup' 
-          ? 'Order marked as picked up successfully! OTP verified.'
-          : order?.collection_required 
-            ? `Order delivered successfully! Payment of ₹${order.total_amount} collected.`
-            : 'Order delivered successfully! Payment was already processed.';
-        
-        toast.success(successMessage);
-        setOtpDialogOpen(false);
-        setOtpValue('');
-        await refreshData();
-      } else {
-        toast.error(actionResult.error || `Failed to mark as ${otpType === 'pickup' ? 'picked up' : 'delivered'}`);
-      }
-    } catch (error: any) {
-      toast.error(`Error confirming ${otpType}: ` + error.message);
-    } finally {
-      setOtpLoading(false);
-    }
-  };
-
-  const handleGenerateMultiVendorOTPs = async () => {
-    try {
-      const result = await DeliveryAPI.generateMultiVendorPickupOTPs(currentOrderId);
-      if (result.success) {
-        toast.success(`Generated pickup OTPs for ${result.data?.length || 0} vendors`);
-        setCurrentVendorPickupStatus(result.data || []);
-        await loadMultiVendorOrders();
-        return result.data || [];
-      } else {
-        toast.error(result.error || 'Failed to generate multi-vendor OTPs');
-        return [];
-      }
-    } catch (error: any) {
-      toast.error('Error generating multi-vendor OTPs: ' + error.message);
-      return [];
-    }
-  };
-
-  const handleVerifyVendorOtp = async (vendorId: string, otp: string) => {
-    if (!otp.trim() || otp.length !== 4) {
-      toast.error('Please enter a valid 4-digit OTP');
-      return;
-    }
-
-    setVendorOtpLoading(true);
-    try {
-      const result = await DeliveryAPI.verifyVendorPickupOTP(currentOrderId, vendorId, otp);
-      if (result.success && result.data === true) {
-        toast.success('✅ Vendor pickup confirmed successfully!');
-        
-        // Update the current vendor pickup status
-        setCurrentVendorPickupStatus(prev => 
-          prev.map(vendor => 
-            vendor.vendor_id === vendorId 
-              ? { ...vendor, is_confirmed: true }
-              : vendor
-          )
-        );
-        
-        // Clear input fields
-        setVendorOtpValue('');
-        setSelectedVendorId('');
-        
-        // Reload orders to reflect changes
-        await loadMultiVendorOrders();
-        
-        // Check if all vendors are confirmed
-        const updatedStatus = currentVendorPickupStatus.map(vendor => 
-          vendor.vendor_id === vendorId 
-            ? { ...vendor, is_confirmed: true }
-            : vendor
-        );
-        
-        if (updatedStatus.every(v => v.is_confirmed)) {
-          setTimeout(() => {
-            toast.success('🎉 All vendors confirmed! Ready for delivery.');
-          }, 500);
-        }
-      } else {
-        toast.error(result.error || 'Invalid vendor OTP. Please check the OTP and try again.');
-      }
-    } catch (error: any) {
-      toast.error('Error verifying vendor OTP: ' + error.message);
-    } finally {
-      setVendorOtpLoading(false);
-    }
-  };
-
-  const createTestMultiVendorOrder = async () => {
-    try {
-      toast.info('Checking available vendors...');
-      
-      // Check what vendors are available in the system
-      const { data: vendors, error: vendorError } = await supabase
-        .from('vendors')
-        .select(`
-          id,
-          business_name,
-          business_address,
-          is_active
-        `)
-        .eq('is_active', true)
-        .limit(10);
-
-      if (vendorError) {
-        toast.error(`Error fetching vendors: ${vendorError.message}`);
-        return;
-      }
-
-      if (vendors && vendors.length >= 2) {
-        toast.success(`Found ${vendors.length} active vendors!`);
-        toast.info(`💡 To create multi-vendor order: Add items from multiple vendors like: ${vendors.slice(0, 3).map(v => v.business_name).join(', ')}`);
-        
-        // Show vendor list
-        const vendorList = vendors.map(v => `• ${v.business_name}`).join('\n');
-        console.log('Available vendors for multi-vendor orders:', vendorList);
-      } else {
-        toast.warning('Only found 1 vendor - you need at least 2 vendors for multi-vendor orders');
-        toast.info('💡 Add more vendors via Admin Dashboard first');
-      }
-      
-    } catch (error: any) {
-      toast.error('Error checking vendors: ' + error.message);
-    }
-  };
-
-  const handleCloseOtpDialog = () => {
-    setOtpDialogOpen(false);
-    setOtpValue('');
-    setCurrentOrderId('');
-  };
-
-  // Payment collection functions
   const handlePaymentCollection = (order: MyOrder) => {
     setSelectedOrderForPayment(order);
     setPaymentAmount(order.total_amount.toString());
@@ -788,35 +365,29 @@ const DeliveryPartnerDashboard = () => {
   };
 
   const submitPaymentCollection = async () => {
-    if (!selectedOrderForPayment || !deliveryPartner) return;
+    if (!deliveryPartner || !selectedOrderForPayment) return;
     
-    const amount = parseFloat(paymentAmount);
-    if (isNaN(amount) || amount <= 0) {
-      toast.error('Please enter a valid payment amount');
-      return;
-    }
-
     try {
       setPaymentLoading(true);
       const result = await DeliveryAPI.recordPaymentCollection(
         deliveryPartner.id,
         selectedOrderForPayment.order_id,
-        amount,
+        parseFloat(paymentAmount),
         paymentMethod,
         paymentNotes
       );
-
+      
       if (result.success) {
         toast.success('Payment collection recorded successfully!');
         setPaymentDialogOpen(false);
         resetPaymentForm();
-        await refreshData(); // Refresh data to update stats
+        await refreshData();
       } else {
         toast.error(result.error || 'Failed to record payment collection');
       }
-    } catch (error: any) {
-      console.error('Error recording payment:', error);
-      toast.error('Error recording payment collection');
+    } catch (error) {
+      console.error('Error recording payment collection:', error);
+      toast.error('Failed to record payment collection');
     } finally {
       setPaymentLoading(false);
     }
@@ -829,25 +400,22 @@ const DeliveryPartnerDashboard = () => {
     setPaymentNotes('');
   };
 
-  // Day-end summary functions
   const handleOpenDayEndSummary = async () => {
     if (!deliveryPartner) return;
-
+    
     try {
       setDayEndLoading(true);
       const result = await DeliveryAPI.getDailyCollectionSummary(deliveryPartner.id);
       
-      if (result.success) {
-        setDailyCollectionSummary(result.data);
-        setDayEndCashAmount(result.data.cash_collected.toString());
-        setDayEndDigitalAmount(result.data.digital_collected.toString());
-        setDayEndDialogOpen(true);
-      } else {
-        toast.error(result.error || 'Failed to load daily collection summary');
+      if (result.success && result.data) {
+        setDayEndCashAmount(result.data.total_cash_collected?.toString() || '0');
+        setDayEndDigitalAmount(result.data.total_digital_collected?.toString() || '0');
       }
+      
+      setDayEndDialogOpen(true);
     } catch (error) {
-      console.error('Error loading daily summary:', error);
-      toast.error('Error loading daily collection summary');
+      console.error('Error loading day-end summary:', error);
+      toast.error('Failed to load day-end summary');
     } finally {
       setDayEndLoading(false);
     }
@@ -855,37 +423,33 @@ const DeliveryPartnerDashboard = () => {
 
   const submitDayEndSummary = async () => {
     if (!deliveryPartner) return;
-
-    const cashAmount = parseFloat(dayEndCashAmount) || 0;
-    const digitalAmount = parseFloat(dayEndDigitalAmount) || 0;
-
+    
     try {
       setDayEndLoading(true);
       const result = await DeliveryAPI.submitDayEndSummary(
         deliveryPartner.id,
-        cashAmount,
-        digitalAmount,
+        parseFloat(dayEndCashAmount),
+        parseFloat(dayEndDigitalAmount),
         dayEndNotes
       );
-
+      
       if (result.success) {
         toast.success('Day-end summary submitted successfully!');
         setDayEndDialogOpen(false);
         resetDayEndForm();
-        await refreshData(); // Refresh data to update stats
+        await refreshData();
       } else {
         toast.error(result.error || 'Failed to submit day-end summary');
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error submitting day-end summary:', error);
-      toast.error('Error submitting day-end summary');
+      toast.error('Failed to submit day-end summary');
     } finally {
       setDayEndLoading(false);
     }
   };
 
   const resetDayEndForm = () => {
-    setDailyCollectionSummary(null);
     setDayEndCashAmount('');
     setDayEndDigitalAmount('');
     setDayEndNotes('');
@@ -1005,105 +569,8 @@ const DeliveryPartnerDashboard = () => {
           </div>
         </div>
 
-        {/* Testing Panel */}
-        <Card className="mb-6 sm:mb-8 border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50">
-          <CardHeader className="pb-4">
-            <CardTitle className="flex items-center gap-2 text-blue-800">
-              <Play className="h-5 w-5" />
-              OTP System Testing & Multi-Vendor Support
-            </CardTitle>
-            <CardDescription className="text-blue-600">
-              Test the OTP system functionality and manage multi-vendor orders
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              <Button 
-                onClick={runOTPTests}
-                disabled={testingMode}
-                variant="outline"
-                className="border-blue-300 hover:bg-blue-100"
-              >
-                {testingMode ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    Testing...
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-4 w-4 mr-2" />
-                    Run OTP Tests
-                  </>
-                )}
-              </Button>
-              
-              <Button 
-                onClick={() => setShowMultiVendor(!showMultiVendor)}
-                variant="outline"
-                className="border-purple-300 hover:bg-purple-100"
-              >
-                <Users className="h-4 w-4 mr-2" />
-                {showMultiVendor ? 'Hide' : 'Show'} Multi-Vendor
-              </Button>
-              
-              <Button 
-                onClick={loadMultiVendorOrders}
-                disabled={refreshing}
-                variant="outline"
-                className="border-green-300 hover:bg-green-100"
-              >
-                <Store className="h-4 w-4 mr-2" />
-                Load Multi-Vendor Orders
-              </Button>
-              
-              <Button 
-                onClick={createTestMultiVendorOrder}
-                variant="outline"
-                className="border-green-300 hover:bg-green-100"
-              >
-                <Package className="h-4 w-4 mr-2" />
-                Create Test Multi-Vendor Order
-              </Button>
-            </div>
-            
-            {testResults.length > 0 && (
-              <div className="mt-4 p-4 bg-white rounded-lg border border-blue-200 max-h-48 overflow-y-auto">
-                <h4 className="font-semibold text-sm mb-2 text-blue-800">Test Results:</h4>
-                <div className="space-y-1 text-sm font-mono">
-                  {testResults.map((result, index) => (
-                    <div key={index} className={
-                      result.includes('❌') ? 'text-red-600' :
-                      result.includes('✅') ? 'text-green-600' :
-                      result.includes('🧪') || result.includes('🎉') ? 'text-blue-600' :
-                      'text-gray-600'
-                    }>
-                      {result}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {showMultiVendor && multiVendorOrders.length > 0 && (
-              <div className="mt-4 p-4 bg-white rounded-lg border border-purple-200">
-                <h4 className="font-semibold text-sm mb-2 text-purple-800">Multi-Vendor Orders:</h4>
-                <div className="space-y-2 text-sm">
-                  {multiVendorOrders.map((order) => (
-                    <div key={order.order_id} className="flex items-center justify-between p-2 bg-purple-50 rounded">
-                      <span>Order #{order.order_number}</span>
-                      <Badge className={order.all_vendors_confirmed ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}>
-                        {order.confirmed_vendors}/{order.total_vendors} vendors confirmed
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
         {/* Enhanced Stats Overview */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-6 sm:mb-8">
+        {/* <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-6 sm:mb-8">
           <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200 shadow-soft hover:shadow-medium transition-all duration-200">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-semibold text-blue-800">Today's Deliveries</CardTitle>
@@ -1159,85 +626,9 @@ const DeliveryPartnerDashboard = () => {
               </p>
             </CardContent>
           </Card>
-        </div>
+        </div> */}
 
-        {/* Enhanced Weekly/Monthly Performance Overview */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 mb-6 sm:mb-8">
-          <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 border-indigo-200 shadow-soft hover:shadow-medium transition-all duration-200">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-semibold text-indigo-800">Weekly Performance</CardTitle>
-              <TrendingUp className="h-5 w-5 text-indigo-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-indigo-700">Deliveries</span>
-                  <span className="font-bold text-indigo-800">{stats?.week_deliveries || 0}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-indigo-700">Earnings</span>
-                  <span className="font-bold text-indigo-800">₹{stats?.week_earnings || 0}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-indigo-700">Avg per delivery</span>
-                  <span className="font-bold text-indigo-800">
-                    ₹{stats?.week_deliveries ? Math.round((stats?.week_earnings || 0) / stats.week_deliveries) : 0}
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-emerald-50 to-emerald-100 border-emerald-200 shadow-soft hover:shadow-medium transition-all duration-200">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-semibold text-emerald-800">Monthly Performance</CardTitle>
-              <TrendingUp className="h-5 w-5 text-emerald-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-emerald-700">Deliveries</span>
-                  <span className="font-bold text-emerald-800">{stats?.month_deliveries || 0}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-emerald-700">Earnings</span>
-                  <span className="font-bold text-emerald-800">₹{stats?.month_earnings || 0}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-emerald-700">Avg per delivery</span>
-                  <span className="font-bold text-emerald-800">
-                    ₹{stats?.month_deliveries ? Math.round((stats?.month_earnings || 0) / stats.month_deliveries) : 0}
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-rose-50 to-rose-100 border-rose-200 shadow-soft hover:shadow-medium transition-all duration-200">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-semibold text-rose-800">Wallet Balance</CardTitle>
-              <DollarSign className="h-5 w-5 text-rose-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-rose-700">Available</span>
-                  <span className="font-bold text-rose-800">₹{stats?.available_balance || 0}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-rose-700">Pending</span>
-                  <span className="font-bold text-rose-800">₹{stats?.pending_balance || 0}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-rose-700">Total Paid Out</span>
-                  <span className="font-bold text-rose-800">₹{stats?.total_paid_out || 0}</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Tabs defaultValue="available" className="w-full">
+        <Tabs defaultValue="my-orders" className="w-full">
           {/* Mobile-first tabs with improved layout */}
           <div className="block sm:hidden mb-4">
             <TabsList className="flex flex-wrap gap-1 p-1 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl shadow-soft h-auto">
@@ -1259,54 +650,17 @@ const DeliveryPartnerDashboard = () => {
                   <span>My Orders ({myOrders.length})</span>
                 </div>
               </TabsTrigger>
-              <TabsTrigger 
-                value="earnings" 
-                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
-              >
-                <div className="flex flex-col items-center gap-1">
-                  <DollarSign className="h-3 w-3" />
-                  <span>Earnings</span>
-                </div>
-              </TabsTrigger>
-              <TabsTrigger 
-                value="analytics" 
-                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
-              >
-                <div className="flex flex-col items-center gap-1">
-                  <TrendingUp className="h-3 w-3" />
-                  <span>Analytics</span>
-                </div>
-              </TabsTrigger>
-              <TabsTrigger 
-                value="profile" 
-                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
-              >
-                <div className="flex flex-col items-center gap-1">
-                  <User className="h-3 w-3" />
-                  <span>Profile</span>
-                </div>
-              </TabsTrigger>
             </TabsList>
           </div>
 
           {/* Desktop tabs */}
           <div className="hidden sm:block">
-            <TabsList className="grid w-full grid-cols-5 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
+            <TabsList className="grid w-full grid-cols-2 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
               <TabsTrigger value="available" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Available ({availableOrders.length})
               </TabsTrigger>
               <TabsTrigger value="my-orders" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 My Orders ({myOrders.length})
-              </TabsTrigger>
-              <TabsTrigger value="earnings" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
-                <DollarSign className="h-4 w-4 mr-1" />
-                Earnings
-              </TabsTrigger>
-              <TabsTrigger value="analytics" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
-                Analytics
-              </TabsTrigger>
-              <TabsTrigger value="profile" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
-                Profile
               </TabsTrigger>
             </TabsList>
           </div>
@@ -1339,8 +693,8 @@ const DeliveryPartnerDashboard = () => {
                     <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                     <h3 className="text-lg font-semibold text-gray-900 mb-2">No available orders</h3>
                     <p className="text-gray-600">
-                      {!isAvailable 
-                        ? "Set yourself as available to see orders in your area." 
+                      {!isAvailable
+                        ? "Set yourself as available to see orders in your area."
                         : "New orders will appear here when they become available."
                       }
                     </p>
@@ -1371,21 +725,21 @@ const DeliveryPartnerDashboard = () => {
                                   </Badge>
                                 )}
                               </div>
-                              
+
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                                 <div>
                                   <p className="font-medium text-gray-900 mb-1">Customer</p>
                                   <p className="text-gray-600">{order.customer_name}</p>
                                   <p className="text-gray-600">{order.customer_phone}</p>
                                 </div>
-                                
+
                                 <div>
                                   <p className="font-medium text-gray-900 mb-1">Pickup Location</p>
                                   <p className="text-gray-600">{order.vendor_name}</p>
                                   <p className="text-gray-600">{order.vendor_address}</p>
                                 </div>
                               </div>
-                              
+
                               <div className="mt-3 flex items-center text-sm text-gray-500">
                                 <Clock className="h-4 w-4 mr-1" />
                                 Placed {formatTimeAgo(order.created_at)}
@@ -1398,9 +752,9 @@ const DeliveryPartnerDashboard = () => {
                                 )}
                               </div>
                             </div>
-                            
+
                             <div className="mt-4 sm:mt-0 sm:ml-4">
-                              <Button 
+                              <Button
                                 onClick={() => handleAcceptOrder(order.order_id)}
                                 variant="success-mobile"
                                 size="mobile-md"
@@ -1442,7 +796,7 @@ const DeliveryPartnerDashboard = () => {
                     </div>
                     <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Orders</h3>
                     <p className="text-gray-500 mb-4">Your accepted orders will appear here</p>
-                    <Button 
+                    <Button
                       onClick={handleAutoAssignOrders}
                       variant="outline"
                       className="border-blue-300 hover:bg-blue-50"
@@ -1525,26 +879,43 @@ const DeliveryPartnerDashboard = () => {
                         {/* Expanded Details - Conditionally Visible */}
                         {expandedOrderId === order.order_id && (
                           <div className="p-4 space-y-4 bg-white">
-                            {/* Vendor and Delivery Information */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              {/* Pickup Information */}
+                            {/* Information Flow: Show Vendor first, Customer only after pickup */}
+                            
+                            {/* Vendor Information - Always visible when order is accepted */}
+                            {(order.status === 'accepted' || order.status === 'picked_up' || order.status === 'delivered') && (
                               <div className="space-y-3">
                                 <h4 className="font-semibold text-gray-900 flex items-center gap-2">
                                   <Store className="h-4 w-4 text-orange-500" />
-                                  Pickup Location
+                                  🏪 Pickup from Vendor
+                                  {order.status === 'picked_up' || order.status === 'delivered' ? (
+                                    <Badge className="bg-green-100 text-green-800 ml-2">✅ Completed</Badge>
+                                  ) : (
+                                    <Badge className="bg-orange-100 text-orange-800 ml-2">📦 Pending</Badge>
+                                  )}
                                 </h4>
-                                <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                                  <div className="font-medium text-orange-900">{order.vendor_name}</div>
-                                  <div className="text-sm text-orange-700 mt-1">{order.vendor_address}</div>
-                                  <div className="flex items-center gap-2 mt-2">
+                                <div className="bg-gradient-to-r from-orange-50 to-orange-100 border-2 border-orange-200 rounded-lg p-4">
+                                  <div className="flex items-start justify-between mb-3">
+                                    <div className="flex-1">
+                                      <div className="font-bold text-orange-900 text-lg">{order.vendor_name}</div>
+                                      <div className="text-sm text-orange-700 mt-1">{order.vendor_address}</div>
+                                      <div className="flex items-center gap-1 mt-2 text-xs text-orange-600">
+                                        <Clock className="h-3 w-3" />
+                                        <span>Contact vendor before pickup</span>
+                                      </div>
+                                    </div>
+                                    <div className="text-right">
+                                      <div className="text-lg font-bold text-orange-900">₹{order.total_amount}</div>
+                                      <div className="text-xs text-orange-600">{order.item_count} items</div>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
                                     <Button
                                       size="sm"
-                                      variant="outline"
                                       onClick={() => window.open(`tel:${order.vendor_phone}`)}
-                                      className="border-orange-300 hover:bg-orange-100 text-orange-700"
+                                      className="bg-orange-500 hover:bg-orange-600 text-white border-0"
                                     >
                                       <Phone className="h-3 w-3 mr-1" />
-                                      Call
+                                      Call Vendor
                                     </Button>
                                     <Button
                                       size="sm"
@@ -1555,33 +926,69 @@ const DeliveryPartnerDashboard = () => {
                                       <MapPin className="h-3 w-3 mr-1" />
                                       Navigate
                                     </Button>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Delivery Information */}
-                              <div className="space-y-3">
-                                <h4 className="font-semibold text-gray-900 flex items-center gap-2">
-                                  <MapPin className="h-4 w-4 text-blue-500" />
-                                  Delivery Location
-                                </h4>
-                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                                  <div className="font-medium text-blue-900">{order.customer_name}</div>
-                                  <div className="text-sm text-blue-700 mt-1">
-                                    {typeof order.delivery_address === 'string' 
-                                      ? order.delivery_address 
-                                      : JSON.stringify(order.delivery_address)
-                                    }
-                                  </div>
-                                  <div className="flex items-center gap-2 mt-2">
                                     <Button
                                       size="sm"
                                       variant="outline"
+                                      onClick={() => window.open(`https://wa.me/${order.vendor_phone.replace(/[^0-9]/g, '')}`)}
+                                      className="border-orange-300 hover:bg-orange-100 text-orange-700"
+                                    >
+                                      💬 WhatsApp
+                                    </Button>
+                                  </div>
+                                  {order.status === 'accepted' && (
+                                    <div className="mt-3 p-2 bg-orange-200 rounded text-center">
+                                      <p className="text-xs text-orange-800 font-medium">
+                                        📱 Contact vendor to confirm order is ready for pickup
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Customer Information - Only show after pickup */}
+                            {(order.status === 'picked_up' || order.status === 'delivered') && (
+                              <div className="space-y-3">
+                                <h4 className="font-semibold text-gray-900 flex items-center gap-2">
+                                  <MapPin className="h-4 w-4 text-blue-500" />
+                                  🏠 Deliver to Customer
+                                  {order.status === 'delivered' ? (
+                                    <Badge className="bg-green-100 text-green-800 ml-2">🎉 Completed</Badge>
+                                  ) : (
+                                    <Badge className="bg-blue-100 text-blue-800 ml-2">🚚 In Transit</Badge>
+                                  )}
+                                </h4>
+                                <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-200 rounded-lg p-4">
+                                  <div className="flex items-start justify-between mb-3">
+                                    <div className="flex-1">
+                                      <div className="font-bold text-blue-900 text-lg">{order.customer_name}</div>
+                                      <div className="text-sm text-blue-700 mt-1">
+                                        {typeof order.delivery_address === 'string' 
+                                          ? order.delivery_address 
+                                          : JSON.stringify(order.delivery_address)
+                                        }
+                                      </div>
+                                      <div className="flex items-center gap-1 mt-2 text-xs text-blue-600">
+                                        <Clock className="h-3 w-3" />
+                                        <span>Picked up • Ready for delivery</span>
+                                      </div>
+                                    </div>
+                                    {order.collection_required && (
+                                      <div className="text-right bg-orange-100 rounded p-2">
+                                        <div className="text-xs text-orange-600 mb-1">Collect Cash</div>
+                                        <div className="text-lg font-bold text-orange-900">₹{order.total_amount}</div>
+                                        <div className="text-xs text-orange-600">COD</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      size="sm"
                                       onClick={() => window.open(`tel:${order.customer_phone}`)}
-                                      className="border-blue-300 hover:bg-blue-100 text-blue-700"
+                                      className="bg-blue-500 hover:bg-blue-600 text-white border-0"
                                     >
                                       <Phone className="h-3 w-3 mr-1" />
-                                      Call
+                                      Call Customer
                                     </Button>
                                     <Button
                                       size="sm"
@@ -1596,10 +1003,18 @@ const DeliveryPartnerDashboard = () => {
                                       <MapPin className="h-3 w-3 mr-1" />
                                       Navigate
                                     </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => window.open(`https://wa.me/${order.customer_phone.replace(/[^0-9]/g, '')}`)}
+                                      className="border-blue-300 hover:bg-blue-100 text-blue-700"
+                                    >
+                                      💬 WhatsApp
+                                    </Button>
                                   </div>
                                 </div>
                               </div>
-                            </div>
+                            )}
 
                             {/* Payment Information */}
                             {order.status === 'picked_up' && (
@@ -1692,32 +1107,44 @@ const DeliveryPartnerDashboard = () => {
                             )}
                             
                             {order.status === 'accepted' && (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <Button 
+                                onClick={() => handleConfirmPickup(order.order_id)}
+                                className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-semibold py-4 rounded-xl shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
+                              >
+                                <Package className="mr-2 h-5 w-5" />
+                                ✅ Confirm Pickup from Vendor
+                              </Button>
+                            )}
+                            
+                            {order.status === 'picked_up' && (
+                              <div className="space-y-3">
+                                {/* Show COD collection reminder if needed */}
+                                {order.collection_required && (
+                                  <div className="p-3 bg-gradient-to-r from-orange-100 to-orange-200 border border-orange-300 rounded-lg">
+                                    <div className="flex items-center gap-2 text-orange-800">
+                                      <Banknote className="h-4 w-4" />
+                                      <span className="text-sm font-medium">Remember to collect ₹{order.total_amount} cash from customer</span>
+                                    </div>
+                                  </div>
+                                )}
+                                
                                 <Button 
-                                  onClick={() => handleOtpAction(order.order_id, 'pickup')}
-                                  className="bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700 text-white font-semibold py-3 rounded-xl shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
+                                  onClick={() => handleConfirmDelivery(order.order_id)}
+                                  className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold py-4 rounded-xl shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
                                 >
-                                  <Shield className="mr-2 h-4 w-4" />
-                                  Confirm Pickup (OTP)
-                                </Button>
-                                <Button 
-                                  variant="outline"
-                                  onClick={() => handleMultiVendorPickupAction(order.order_id)}
-                                  className="border-purple-300 hover:bg-purple-50 text-purple-700 font-semibold py-3 rounded-xl shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
-                                >
-                                  <Users className="mr-2 h-4 w-4" />
-                                  Multi-Vendor Pickup
+                                  <CheckCircle className="mr-2 h-5 w-5" />
+                                  🎉 Confirm Delivery to Customer
                                 </Button>
                               </div>
                             )}
                             
-                            {order.status === 'picked_up' && (
+                            {order.status === 'delivered' && order.collection_required && (
                               <Button 
-                                onClick={() => handleOtpAction(order.order_id, 'delivery')}
-                                className="w-full bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-semibold py-3 rounded-xl shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
+                                onClick={() => handlePaymentCollection(order)}
+                                className="w-full bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white font-semibold py-3 rounded-xl shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
                               >
-                                <Shield className="mr-2 h-5 w-5" />
-                                Confirm Delivery (OTP)
+                                <CreditCard className="mr-2 h-4 w-4" />
+                                Record Payment Collection
                               </Button>
                             )}
                           </div>
@@ -2107,439 +1534,6 @@ const DeliveryPartnerDashboard = () => {
           </TabsContent>
         </Tabs>
       </main>
-
-      {/* OTP Verification Dialog */}
-      <Dialog open={otpDialogOpen} onOpenChange={setOtpDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Shield className="h-5 w-5 text-blue-600" />
-              {otpType === 'pickup' ? 'Pickup' : 'Delivery'} Verification
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-6 py-4">
-            {/* Order Info */}
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <h4 className="font-semibold text-sm text-gray-800 mb-1">
-                Order #{myOrders.find(o => o.order_id === currentOrderId)?.order_number || 'Unknown'}
-              </h4>
-              <p className="text-xs text-gray-600">
-                {otpType === 'pickup' 
-                  ? 'Confirm pickup from vendor with OTP verification'
-                  : 'Confirm delivery to customer with OTP verification'
-                }
-              </p>
-            </div>
-
-            {/* Generate OTP Button */}
-            <div className="text-center">
-              <Button 
-                onClick={handleGenerateOtp}
-                disabled={generatingOtp}
-                variant="outline"
-                className="w-full"
-              >
-                {generatingOtp ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    Generating OTP...
-                  </>
-                ) : (
-                  <>
-                    <Shield className="h-4 w-4 mr-2" />
-                    Generate {otpType === 'pickup' ? 'Pickup' : 'Delivery'} OTP
-                  </>
-                )}
-              </Button>
-              <p className="text-xs text-gray-500 mt-2">
-                {otpType === 'pickup' 
-                  ? 'OTP will be sent to the vendor' 
-                  : 'OTP will be sent to the customer'
-                }
-              </p>
-            </div>
-
-            {/* OTP Input */}
-            <div className="space-y-3">
-              <Label htmlFor="otp-input" className="text-sm font-medium">
-                Enter {otpType === 'pickup' ? 'Pickup' : 'Delivery'} OTP
-              </Label>
-              <Input
-                id="otp-input"
-                type="text"
-                placeholder="Enter 4-digit OTP"
-                value={otpValue}
-                onChange={(e) => setOtpValue(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                className="text-center text-xl font-mono tracking-[0.5em] py-3"
-                maxLength={4}
-                autoComplete="off"
-              />
-              <p className="text-xs text-gray-500">
-                Get the 4-digit OTP from the {otpType === 'pickup' ? 'vendor' : 'customer'} and enter it above
-              </p>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-3 pt-4">
-              <Button 
-                variant="outline" 
-                onClick={handleCloseOtpDialog}
-                className="flex-1"
-                disabled={otpLoading}
-              >
-                Cancel
-              </Button>
-              <Button 
-                onClick={handleVerifyOtp}
-                disabled={otpLoading || otpValue.length !== 4}
-                className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700"
-              >
-                {otpLoading ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    Verifying...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    Verify & Confirm
-                  </>
-                )}
-              </Button>
-            </div>
-
-            {/* Security Notice */}
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="flex items-start gap-2">
-                <Shield className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                <div className="text-xs text-blue-800">
-                  <p className="font-medium mb-1">Security Notice</p>
-                  <p>
-                    OTP verification ensures secure {otpType === 'pickup' ? 'pickup' : 'delivery'} confirmation. 
-                    Never share your OTP with anyone.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Multi-Vendor OTP Dialog */}
-      <Dialog open={multiVendorDialogOpen} onOpenChange={setMultiVendorDialogOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-purple-600" />
-              Multi-Vendor Pickup Verification
-            </DialogTitle>
-            <DialogDescription>
-              Confirm pickup from each vendor separately using their OTP codes
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4">
-            {/* Order Summary */}
-            <div className="p-4 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="font-semibold text-purple-800">
-                  Order #{myOrders.find(o => o.order_id === currentOrderId)?.order_number || 'Unknown'}
-                </h4>
-                <Badge className="bg-purple-100 text-purple-800">Multi-Vendor</Badge>
-              </div>
-              <p className="text-sm text-purple-700">
-                This order contains items from multiple vendors. You must confirm pickup from each vendor individually.
-              </p>
-            </div>
-
-            {currentVendorPickupStatus.length === 0 ? (
-              <div className="text-center py-8">
-                <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-                  <Store className="h-8 w-8 text-gray-400" />
-                </div>
-                <p className="text-gray-500 font-medium mb-2">No Multi-Vendor Data Found</p>
-                <p className="text-sm text-gray-400 mb-4">
-                  This order may have items from a single vendor only, or OTPs haven't been generated yet.
-                </p>
-                <Button 
-                  onClick={handleGenerateMultiVendorOTPs}
-                  variant="outline"
-                  className="border-purple-300 hover:bg-purple-50"
-                >
-                  <Shield className="h-4 w-4 mr-2" />
-                  Generate Vendor OTPs
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {/* Progress Indicator */}
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-4 w-4 text-blue-600" />
-                      <span className="text-sm font-medium text-blue-800">
-                                                 Pickup Progress: {currentVendorPickupStatus.filter(v => v.is_confirmed).length} of {currentVendorPickupStatus.length}
-                      </span>
-                    </div>
-                    <div className="text-xl">
-                      {currentVendorPickupStatus.every(v => v.is_confirmed) ? '🎉' : '📦'}
-                    </div>
-                  </div>
-                  <div className="w-full bg-blue-200 rounded-full h-2 mt-2">
-                    <div 
-                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                      style={{ 
-                        width: `${(currentVendorPickupStatus.filter(v => v.is_confirmed).length / currentVendorPickupStatus.length) * 100}%` 
-                      }}
-                    ></div>
-                  </div>
-                </div>
-                
-                {/* Vendor Cards */}
-                {currentVendorPickupStatus.map((vendor, index) => (
-                  <div 
-                    key={vendor.vendor_id} 
-                                         className={`border rounded-lg p-4 transition-all duration-200 ${
-                       vendor.is_confirmed 
-                         ? 'bg-green-50 border-green-200 shadow-green-100' 
-                         : 'bg-orange-50 border-orange-200 hover:shadow-md'
-                     }`}
-                  >
-                    {/* Vendor Header */}
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                          vendor.is_confirmed 
-                            ? 'bg-green-500 text-white' 
-                            : 'bg-orange-500 text-white'
-                        }`}>
-                          {vendor.is_confirmed ? (
-                            <CheckCircle className="h-5 w-5" />
-                          ) : (
-                            <Store className="h-5 w-5" />
-                          )}
-                        </div>
-                        <div>
-                          <h4 className="font-semibold text-gray-900">{vendor.vendor_name}</h4>
-                          <p className="text-sm text-gray-600">{vendor.vendor_address}</p>
-                        </div>
-                      </div>
-                      <Badge 
-                        className={vendor.is_confirmed 
-                          ? 'bg-green-100 text-green-800 border-green-200' 
-                          : 'bg-orange-100 text-orange-800 border-orange-200'
-                        }
-                      >
-                        {vendor.is_confirmed ? (
-                          <div className="flex items-center gap-1">
-                            <CheckCircle className="h-3 w-3" />
-                            Confirmed
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            Pending
-                          </div>
-                        )}
-                      </Badge>
-                    </div>
-                    
-                    {/* Contact and Navigation Row */}
-                    <div className="flex items-center gap-2 mb-4">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => window.open(`tel:${vendor.vendor_phone}`)}
-                        className={vendor.is_confirmed 
-                          ? "border-green-300 hover:bg-green-100 text-green-700" 
-                          : "border-orange-300 hover:bg-orange-100 text-orange-700"
-                        }
-                      >
-                        <Phone className="h-3 w-3 mr-1" />
-                        Call Vendor
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => window.open(`https://maps.google.com/?q=${encodeURIComponent(vendor.vendor_address)}`)}
-                        className={vendor.is_confirmed 
-                          ? "border-green-300 hover:bg-green-100 text-green-700" 
-                          : "border-orange-300 hover:bg-orange-100 text-orange-700"
-                        }
-                      >
-                        <MapPin className="h-3 w-3 mr-1" />
-                        Navigate
-                      </Button>
-                      <div className="text-xs text-gray-500 ml-auto">
-                        {vendor.vendor_phone}
-                      </div>
-                    </div>
-                    
-                    {/* OTP Section */}
-                    {vendor.is_confirmed ? (
-                      <div className="bg-green-100 border border-green-200 rounded-lg p-3">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="h-4 w-4 text-green-600" />
-                          <span className="text-sm font-medium text-green-800">
-                            Pickup confirmed successfully!
-                          </span>
-                        </div>
-                        <p className="text-xs text-green-700 mt-1">
-                          ✅ Items collected from this vendor - Ready for delivery
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {/* OTP Display */}
-                        <div className="bg-orange-100 border border-orange-200 rounded-lg p-3">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <span className="text-sm font-medium text-orange-800">
-                                🔐 Pickup OTP Required
-                              </span>
-                              <p className="text-xs text-orange-700 mt-1">
-                                Get the 4-digit OTP from this vendor to confirm pickup
-                              </p>
-                            </div>
-                            {vendor.pickup_otp && (
-                              <div className="text-right bg-orange-200 rounded px-3 py-2">
-                                <span className="text-xs text-orange-600 block">Generated OTP</span>
-                                <div className="font-mono text-xl font-bold text-orange-900">
-                                  {vendor.pickup_otp}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        
-                        {/* OTP Input and Verification */}
-                        <div className="flex gap-2">
-                          <div className="flex-1">
-                            <Input 
-                              type="text"
-                              placeholder="Enter 4-digit OTP from vendor"
-                              value={selectedVendorId === vendor.vendor_id ? vendorOtpValue : ''}
-                              onChange={(e) => {
-                                setSelectedVendorId(vendor.vendor_id);
-                                setVendorOtpValue(e.target.value.replace(/\D/g, '').slice(0, 4));
-                              }}
-                              maxLength={4}
-                              className="text-center text-lg font-mono tracking-wider"
-                            />
-                          </div>
-                          <Button 
-                            onClick={() => handleVerifyVendorOtp(vendor.vendor_id, selectedVendorId === vendor.vendor_id ? vendorOtpValue : '')}
-                            disabled={
-                              selectedVendorId !== vendor.vendor_id || 
-                              !vendorOtpValue || 
-                              vendorOtpValue.length !== 4 || 
-                              vendorOtpLoading
-                            }
-                            className="bg-orange-500 hover:bg-orange-600 text-white px-6"
-                          >
-                            {vendorOtpLoading && selectedVendorId === vendor.vendor_id ? (
-                              <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                <span className="hidden sm:inline">Verifying...</span>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-2">
-                                <Shield className="h-4 w-4" />
-                                <span className="hidden sm:inline">Verify OTP</span>
-                                <span className="sm:hidden">Verify</span>
-                              </div>
-                            )}
-                          </Button>
-                        </div>
-                        
-                        {/* Instructions */}
-                        <div className="text-xs text-gray-600 bg-gray-50 rounded p-2">
-                          💡 <strong>Instructions:</strong> Visit the vendor, collect the items, and ask them for the 4-digit OTP to confirm pickup.
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-                
-                {/* Overall Status Summary */}
-                <div className={`p-4 rounded-lg border-2 ${
-                  currentVendorPickupStatus.every(v => v.is_confirmed)
-                    ? 'bg-green-50 border-green-300'
-                    : 'bg-blue-50 border-blue-300'
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className={`font-semibold ${
-                        currentVendorPickupStatus.every(v => v.is_confirmed)
-                          ? 'text-green-800'
-                          : 'text-blue-800'
-                      }`}>
-                        {currentVendorPickupStatus.every(v => v.is_confirmed)
-                          ? '🎉 All Vendors Confirmed!'
-                          : '⏳ Pickup In Progress'
-                        }
-                      </h4>
-                      <p className={`text-sm ${
-                        currentVendorPickupStatus.every(v => v.is_confirmed)
-                          ? 'text-green-700'
-                          : 'text-blue-700'
-                      }`}>
-                        {currentVendorPickupStatus.every(v => v.is_confirmed)
-                          ? 'All items collected. You can now proceed to customer delivery.'
-                          : `Please confirm pickup from ${currentVendorPickupStatus.filter(v => !v.is_confirmed).length} remaining vendor(s).`
-                        }
-                      </p>
-                    </div>
-                    <div className="text-3xl">
-                      {currentVendorPickupStatus.every(v => v.is_confirmed) ? '✅' : '📦'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-          
-          <DialogFooter className="flex gap-2">
-            <Button 
-              type="button" 
-              variant="secondary" 
-              onClick={() => {
-                setMultiVendorDialogOpen(false);
-                setSelectedVendorId('');
-                setVendorOtpValue('');
-              }}
-            >
-              Close
-            </Button>
-            
-            {currentVendorPickupStatus.length > 0 && !currentVendorPickupStatus.every(v => v.is_confirmed) && (
-              <Button 
-                onClick={() => handleGenerateMultiVendorOTPs()}
-                variant="outline"
-                className="border-purple-300 hover:bg-purple-50"
-              >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Refresh OTPs
-              </Button>
-            )}
-            
-            {currentVendorPickupStatus.length > 0 && currentVendorPickupStatus.every(v => v.is_confirmed) && (
-              <Button 
-                onClick={() => {
-                  setMultiVendorDialogOpen(false);
-                  setSelectedVendorId('');
-                  setVendorOtpValue('');
-                  toast.success('🎉 All vendors confirmed! You can now proceed to customer delivery.');
-                }}
-                className="bg-green-600 hover:bg-green-700 text-white"
-              >
-                <CheckCircle className="h-4 w-4 mr-2" />
-                Continue to Delivery
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Payment Collection Dialog */}
       <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>

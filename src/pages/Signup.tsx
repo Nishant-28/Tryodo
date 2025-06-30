@@ -4,11 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth, UserRole } from '@/contexts/AuthContext';
-import { Eye, EyeOff, Loader2, Shield, Users, Store, ArrowLeft, Smartphone, Zap, CheckCircle, UserPlus, Truck, Star } from 'lucide-react';
+import { Eye, EyeOff, Loader2, Shield, Users, ArrowLeft, Smartphone, Zap, CheckCircle, UserPlus, Star } from 'lucide-react';
 import { toast } from 'sonner';
 
 const Signup = () => {
@@ -17,7 +17,7 @@ const Signup = () => {
     email: '',
     password: '',
     confirmPassword: '',
-    role: '' as UserRole | '',
+    role: 'customer' as UserRole,
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -68,10 +68,6 @@ const Signup = () => {
       newErrors.confirmPassword = 'Passwords do not match';
     }
 
-    if (!formData.role) {
-      newErrors.role = 'Please select your account type';
-    }
-
     if (!acceptTerms) {
       newErrors.terms = 'You must accept the terms and conditions';
     }
@@ -120,43 +116,7 @@ const Signup = () => {
     }
   };
 
-  const getRoleInfo = (role: string) => {
-    const roleConfig = {
-      customer: {
-        icon: <Smartphone className="h-5 w-5" />,
-        title: 'Customer Account',
-        description: 'Shop for mobile parts and accessories',
-        badge: 'Most Popular',
-        badgeColor: 'bg-blue-100 text-blue-700',
-        gradient: 'from-blue-500 to-purple-600',
-      },
-      vendor: {
-        icon: <Store className="h-5 w-5" />,
-        title: 'Vendor Account',
-        description: 'Sell products and grow your business',
-        badge: 'Business',
-        badgeColor: 'bg-green-100 text-green-700',
-        gradient: 'from-green-500 to-teal-600',
-      },
-      admin: {
-        icon: <Shield className="h-5 w-5" />,
-        title: 'Admin Account',
-        description: 'Platform management access',
-        badge: 'Restricted',
-        badgeColor: 'bg-orange-100 text-orange-700',
-        gradient: 'from-orange-500 to-red-600',
-      },
-      delivery_partner: {
-        icon: <Truck className="h-5 w-5" />,
-        title: 'Delivery Partner',
-        description: 'Earn by delivering orders',
-        badge: 'Flexible',
-        badgeColor: 'bg-amber-100 text-amber-700',
-        gradient: 'from-amber-500 to-orange-600',
-      },
-    };
-    return roleConfig[role as keyof typeof roleConfig];
-  };
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
@@ -265,116 +225,87 @@ const Signup = () => {
                 </div>
 
                 {/* Account Type */}
-                {/* Customer Account Type - Auto Selected */}
                 <div className="space-y-2">
                   <Label htmlFor="role" className="text-sm font-medium text-gray-700">Account Type</Label>
-                  <div className="h-12 px-3 py-2 border border-gray-200 rounded-md bg-gray-50 flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="p-1 bg-blue-100 rounded">
-                        <Users className="h-4 w-4 text-blue-600" />
+                  <div className="grid grid-cols-2 gap-4">
+                    {/* Customer Option */}
+                    <div
+                      onClick={() => handleInputChange('role', 'customer')}
+                      className={`h-12 px-3 py-2 border rounded-md flex items-center justify-between cursor-pointer transition-all duration-200 ${
+                        formData.role === 'customer' 
+                          ? 'border-blue-500 bg-blue-50' 
+                          : 'border-gray-200 bg-gray-50 hover:border-gray-300'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="p-1 bg-blue-100 rounded">
+                          <Users className="h-4 w-4 text-blue-600" />
+                        </div>
+                        <div>
+                          <div className="font-medium">Customer</div>
+                          <div className="text-xs text-gray-500">Shop for products</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="font-medium">Customer</div>
-                        <div className="text-xs text-gray-500">Shop for products</div>
-                      </div>
+                      {formData.role === 'customer' && (
+                        <CheckCircle className="h-4 w-4 text-blue-600" />
+                      )}
                     </div>
-                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">Selected</span>
+                    {/* Vendor Option */}
+                    <div
+                      onClick={() => handleInputChange('role', 'vendor')}
+                      className={`h-12 px-3 py-2 border rounded-md flex items-center justify-between cursor-pointer transition-all duration-200 ${
+                        formData.role === 'vendor' 
+                          ? 'border-green-500 bg-green-50' 
+                          : 'border-gray-200 bg-gray-50 hover:border-gray-300'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="p-1 bg-green-100 rounded">
+                          <UserPlus className="h-4 w-4 text-green-600" />
+                        </div>
+                        <div>
+                          <div className="font-medium">Vendor</div>
+                          <div className="text-xs text-gray-500">Sell your products</div>
+                        </div>
+                      </div>
+                      {formData.role === 'vendor' && (
+                        <CheckCircle className="h-4 w-4 text-green-600" />
+                      )}
+                    </div>
                   </div>
-                  <input type="hidden" name="role" value="customer" />
                 </div>
-                {/* <div className="space-y-2">
-                  <Label htmlFor="role" className="text-sm font-medium text-gray-700">Account Type</Label>
-                  <Select
-                    value={formData.role}
-                    onValueChange={(value) => handleInputChange('role', value)}
-                    disabled={loading}
-                  >
-                    <SelectTrigger className="h-12 transition-all duration-200 focus:border-blue-500">
-                      <SelectValue placeholder="Choose your account type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="customer">
-                        <div className="flex items-center justify-between w-full">
-                          <div className="flex items-center space-x-3">
-                            <div className="p-1 bg-blue-100 rounded">
-                              <Users className="h-4 w-4 text-blue-600" />
-                            </div>
-                            <div>
-                              <div className="font-medium">Customer</div>
-                              <div className="text-xs text-gray-500">Shop for products</div>
-                            </div>
-                          </div>
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">Popular</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="vendor">
-                        <div className="flex items-center justify-between w-full">
-                          <div className="flex items-center space-x-3">
-                            <div className="p-1 bg-green-100 rounded">
-                              <Store className="h-4 w-4 text-green-600" />
-                            </div>
-                            <div>
-                              <div className="font-medium">Vendor</div>
-                              <div className="text-xs text-gray-500">Sell products</div>
-                            </div>
-                          </div>
-                          <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">Business</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="admin">
-                        <div className="flex items-center justify-between w-full">
-                          <div className="flex items-center space-x-3">
-                            <div className="p-1 bg-orange-100 rounded">
-                              <Shield className="h-4 w-4 text-orange-600" />
-                            </div>
-                            <div>
-                              <div className="font-medium">Admin</div>
-                              <div className="text-xs text-gray-500">Platform management</div>
-                            </div>
-                          </div>
-                          <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full">Restricted</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="delivery_partner">
-                        <div className="flex items-center justify-between w-full">
-                          <div className="flex items-center space-x-3">
-                            <div className="p-1 bg-amber-100 rounded">
-                              <Truck className="h-4 w-4 text-amber-600" />
-                            </div>
-                            <div>
-                              <div className="font-medium">Delivery Partner</div>
-                              <div className="text-xs text-gray-500">Earn by delivering</div>
-                            </div>
-                          </div>
-                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full">Flexible</span>
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {errors.role && (
-                    <p className="text-sm text-red-600">{errors.role}</p>
-                  )}
-                </div> */}
 
-                {/* Role Information */}
-                {formData.role && (
+                {/* Account Benefits */}
+                {formData.role === 'customer' ? (
                   <div className="p-4 rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100">
                     <div className="flex items-center space-x-3">
-                      <div className={`p-2 bg-gradient-to-r ${getRoleInfo(formData.role).gradient} rounded-lg text-white`}>
-                        {getRoleInfo(formData.role).icon}
+                      <div className="p-2 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg text-white">
+                        <Smartphone className="h-5 w-5" />
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center space-x-2">
-                          <h3 className="font-semibold text-gray-900">{getRoleInfo(formData.role).title}</h3>
-                          <span className={`text-xs px-2 py-1 rounded-full ${getRoleInfo(formData.role).badgeColor}`}>
-                            {getRoleInfo(formData.role).badge}
+                          <h3 className="font-semibold text-gray-900">Customer Account</h3>
+                          <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700">
+                            Most Popular
                           </span>
                         </div>
-                        <p className="text-sm text-gray-600">{getRoleInfo(formData.role).description}</p>
+                        <p className="text-sm text-gray-600">Shop for mobile parts and accessories</p>
                       </div>
                     </div>
                   </div>
-                )}
+                ) : formData.role === 'vendor' ? (
+                  <div className="p-4 rounded-lg bg-gradient-to-r from-green-50 to-teal-50 border border-green-100">
+                    <div className="flex items-center space-x-3">
+                      <div className="p-2 bg-gradient-to-r from-green-500 to-teal-600 rounded-lg text-white">
+                        <UserPlus className="h-5 w-5" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-gray-900">Vendor Account</h3>
+                        <p className="text-sm text-gray-600">List your products and manage your store</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 {/* Password */}
                 <div className="space-y-2">

@@ -13,7 +13,6 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import Header from '@/components/Header';
-import Footer from '@/components/Footer';
 import { supabase } from '@/lib/supabase';
 import { toast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -539,7 +538,6 @@ const Checkout = () => {
             </Button>
           </div>
         </div>
-        <Footer />
       </div>
     );
   }
@@ -556,7 +554,6 @@ const Checkout = () => {
             <p className="text-gray-600">Please wait</p>
           </div>
         </div>
-        <Footer />
       </div>
     );
   }
@@ -566,7 +563,7 @@ const Checkout = () => {
       <Header onCartClick={() => {}} />
       
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Debug Section - Remove in production */}
+        {/* Debug Section - Remove in production
         {process.env.NODE_ENV === 'development' && (
           <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
             <h3 className="font-semibold text-yellow-800 mb-2">Debug Info:</h3>
@@ -583,7 +580,7 @@ const Checkout = () => {
               )}
             </div>
           </div>
-        )}
+        )} */}
 
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
@@ -720,23 +717,7 @@ const Checkout = () => {
               </CardContent>
             </Card>
 
-            {/* Special Instructions */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Special Instructions</CardTitle>
-                <CardDescription>
-                  Any specific delivery instructions or notes for your order
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Textarea
-                  placeholder="e.g., Ring the doorbell, Leave at gate, Call before delivery..."
-                  value={specialInstructions}
-                  onChange={(e) => setSpecialInstructions(e.target.value)}
-                  rows={3}
-                />
-              </CardContent>
-            </Card>
+            
           </div>
 
           {/* Right Column - Order Summary */}
@@ -856,18 +837,7 @@ const Checkout = () => {
               </CardContent>
             </Card>
 
-            {/* Delivery Info */}
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 text-sm text-green-600">
-                  <Truck className="h-4 w-4" />
-                  <span>Expected delivery in 3-7 days</span>
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  Free delivery on all orders
-                </p>
-              </CardContent>
-            </Card>
+            
           </div>
         </div>
       </div>
@@ -983,7 +953,6 @@ const Checkout = () => {
         </DialogContent>
       </Dialog>
 
-      <Footer />
     </div>
   );
 };

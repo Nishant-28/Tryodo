@@ -58,7 +58,7 @@ const Header = ({ cartItems = 0, onCartClick, hideCartOnMobile = true }: HeaderP
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <Link to="/login" className="touch-manipulation">
-                <img src="/Tryodo_Full_LOGO.png" alt="Tryodo Logo" className="h-12 sm:h-16 w-auto" />
+                <img src="/Tryodo-Icon.png" alt="Tryodo Logo" className="h-12 sm:h-16 w-auto" />
               </Link>
               <div className="hidden sm:block">
                 <span className="text-sm text-gray-500 font-medium">Electronics Marketplace</span>
@@ -142,6 +142,9 @@ const Header = ({ cartItems = 0, onCartClick, hideCartOnMobile = true }: HeaderP
               <>
                 <Link to="/vendor-dashboard" className="text-green-600 hover:text-green-700 transition-colors font-medium py-2">
                   Dashboard
+                </Link>
+                <Link to="/vendor-profile" className="text-green-600 hover:text-green-700 transition-colors font-medium py-2">
+                  Profile
                 </Link>
               </>
             )}
@@ -239,6 +242,12 @@ const Header = ({ cartItems = 0, onCartClick, hideCartOnMobile = true }: HeaderP
                         <Link to="/vendor-dashboard" className="flex items-center cursor-pointer">
                           <Store className="mr-2 h-4 w-4" />
                           Dashboard
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link to="/vendor-profile" className="flex items-center cursor-pointer">
+                          <User className="mr-2 h-4 w-4" />
+                          Profile
                         </Link>
                       </DropdownMenuItem>
                       <DropdownMenuItem asChild>

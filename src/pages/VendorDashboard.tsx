@@ -1764,17 +1764,6 @@ const VendorDashboard = () => {
                   <span>Analytics</span>
                 </div>
               </TabsTrigger>
-              {/*
-              <TabsTrigger 
-                value="products" 
-                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
-              >
-                <div className="flex flex-col items-center gap-1">
-                  <Package className="h-3 w-3" />
-                  <span>Products</span>
-                </div>
-              </TabsTrigger>
-              */}
             </TabsList>
           </div>
 
@@ -1794,11 +1783,6 @@ const VendorDashboard = () => {
               <TabsTrigger value="analytics" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Analytics
               </TabsTrigger>
-              {/*
-              <TabsTrigger value="products" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
-                Products
-              </TabsTrigger>
-              */}
             </TabsList>
           </div>
 
@@ -1865,6 +1849,7 @@ const VendorDashboard = () => {
             </div>
 
             {/* Filters */}
+            {/*
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -1928,6 +1913,7 @@ const VendorDashboard = () => {
                 </div>
               </CardContent>
             </Card>
+            */}
 
             {/* Pending Orders */}
             <Card>

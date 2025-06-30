@@ -1590,18 +1590,26 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   },
 });
 
-// Create a service role client for administrative operations that bypass RLS
-export const supabaseServiceRole = supabaseServiceRoleKey ? createClient<Database>(supabaseUrl, supabaseServiceRoleKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false
-  },
-  global: {
-    headers: {
-      'x-client-info': 'tryodo-website-admin@1.0.0',
-    },
-  },
-}) : null;
+// If a dedicated service-role key is available use it, otherwise gracefully
+// fall back to the regular Supabase client. This prevents runtime errors in
+// development/staging environments where exposing the service-role key is not
+// desirable, while still allowing the application to function (subject to RLS
+// policies) with the standard authenticated client.
+
+export const supabaseServiceRole = supabaseServiceRoleKey
+  ? createClient<Database>(supabaseUrl, supabaseServiceRoleKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+      global: {
+        headers: {
+          'x-client-info': 'tryodo-website-admin@1.0.0',
+        },
+      },
+    })
+  // Fallback: use the regular client to avoid null checks across the codebase
+  : supabase;
 
 // Utility function to clear all auth-related storage
 export const clearAuthStorage = () => {

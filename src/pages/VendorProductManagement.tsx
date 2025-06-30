@@ -772,6 +772,8 @@ const VendorProductManagement = () => {
             </CardContent>
           </Card>
 
+          {/* Removed Total Value Card as per request */}
+          {/*
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
@@ -786,6 +788,7 @@ const VendorProductManagement = () => {
               </div>
             </CardContent>
           </Card>
+          */}
 
           <Card>
             <CardContent className="p-6">
@@ -803,6 +806,8 @@ const VendorProductManagement = () => {
             </CardContent>
           </Card>
 
+          {/* Removed Performance Card as per request */}
+          {/*
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
@@ -819,6 +824,7 @@ const VendorProductManagement = () => {
               </div>
             </CardContent>
           </Card>
+          */}
         </div>
 
         {/* Smart Business Insights - NEW ENHANCEMENT */}

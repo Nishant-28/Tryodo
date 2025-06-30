@@ -1,41 +1,35 @@
 import React, { useState, useEffect } from 'react';
-import { X, Minus, Plus, ShoppingBag, Trash2, CreditCard } from 'lucide-react';
+import { X, Minus, Plus, ShoppingCart, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useCart } from '@/contexts/CartContext';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { RainbowButton } from '@/components/magicui/rainbow-button';
 
 interface CartProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-const Cart = ({ isOpen, onClose }: CartProps) => {
+export function Cart({ isOpen, onClose }: CartProps) {
   const navigate = useNavigate();
-  const [isClosing, setIsClosing] = useState(false);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
   const { cart, loading, updateQuantity, removeFromCart } = useCart();
   
   const items = cart?.items || [];
-  const total = cart?.totalPrice || 0;
-
-  // Debug cart state when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      console.log('🛒 Cart modal opened!');
-      console.log('🛒 Cart object:', cart);
-      console.log('🛒 Items array:', items);
-      console.log('🛒 Items length:', items.length);
-      console.log('🛒 Total items:', cart?.totalItems);
-      console.log('🛒 Loading state:', loading);
-    }
-  }, [isOpen, cart, items, loading]);
+  const totalItems = cart?.totalItems || 0;
+  const subtotal = cart?.totalPrice || 0;
+  const deliveryFee = 0; // Free delivery
+  const total = subtotal + deliveryFee;
 
   // Handle backdrop click and escape key
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) {
-        handleClose();
+        onClose();
       }
     };
 
@@ -50,174 +44,151 @@ const Cart = ({ isOpen, onClose }: CartProps) => {
       document.removeEventListener('keydown', handleEscape);
       document.body.style.overflow = 'unset';
     };
-  }, [isOpen]);
+  }, [isOpen, onClose]);
 
-  const handleClose = () => {
-    setIsClosing(true);
+  const handleQuantityChange = async (productId: string, newQuantity: number) => {
+    await updateQuantity(productId, newQuantity);
+  };
+
+  const handleRemoveItem = async (productId: string) => {
+    await removeFromCart(productId);
+  };
+
+  const handleCheckout = async () => {
+    if (items.length === 0) return;
+    
+    setIsCheckingOut(true);
+    
+    // Simulate loading delay for better UX
     setTimeout(() => {
-      setIsClosing(false);
+      navigate('/checkout');
       onClose();
-    }, 300);
+      setIsCheckingOut(false);
+    }, 1000);
   };
 
-  const triggerHapticFeedback = () => {
-    if ('vibrate' in navigator) {
-      navigator.vibrate(30);
-    }
-  };
-
-  if (!isOpen && !isClosing) return null;
+  if (!isOpen) return null;
 
   return (
-    <div className={cn(
-      "fixed inset-0 z-50 overflow-hidden",
-      "transition-all duration-300 ease-out",
-      isClosing ? "opacity-0" : "opacity-100"
-    )}>
+    <>
       {/* Backdrop */}
-      <div 
-        className={cn(
-          "absolute inset-0 bg-black transition-opacity duration-300",
-          isClosing ? "opacity-0" : "opacity-50"
-        )}
-        onClick={handleClose} 
+      <div
+        className="fixed inset-0 bg-black bg-opacity-50 z-40 transition-opacity duration-300"
+        onClick={onClose}
       />
-      
+
       {/* Cart Panel */}
-      <div className={cn(
-        "absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl",
-        "transform transition-transform duration-300 ease-out",
-        "flex flex-col",
-        isClosing ? "translate-x-full" : "translate-x-0"
-      )}>
+      <div
+        className={cn(
+          "fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 flex flex-col transition-transform duration-300 ease-out",
+          isOpen ? "translate-x-0" : "translate-x-full"
+        )}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-200 p-4 bg-gradient-to-r from-blue-50 to-purple-50">
-          <div className="flex items-center space-x-2">
-            <ShoppingBag className="h-5 w-5 text-blue-600" />
-            <h2 className="text-lg font-semibold text-gray-900">Shopping Cart</h2>
-            {items.length > 0 && (
-              <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-medium">
-                {items.length} item{items.length !== 1 ? 's' : ''}
-              </span>
-            )}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <ShoppingCart className="w-6 h-6 text-blue-600" />
+              {totalItems > 0 && (
+                <div className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium">
+                  {totalItems}
+                </div>
+              )}
+            </div>
+            <h2 className="text-xl font-bold text-gray-900">Your Cart</h2>
           </div>
           <Button
-            onClick={handleClose}
             variant="ghost"
-            size="mobile-icon-sm"
-            className="h-10 w-10 rounded-xl hover:bg-gray-100"
-            enableHaptics={true}
-            hapticIntensity="light"
+            size="icon"
+            onClick={onClose}
+            className="hover:bg-gray-100 rounded-full transition-colors"
           >
-            <X className="h-5 w-5" />
+            <X className="w-5 h-5" />
           </Button>
         </div>
 
         {/* Cart Items */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <LoadingSpinner />
             </div>
           ) : items.length === 0 ? (
-            <div className="empty-state-mobile">
-              <div className="bg-gray-100 rounded-full p-8 mb-4">
-                <ShoppingBag className="h-12 w-12 text-gray-400" />
-              </div>
-              <h3>Your cart is empty</h3>
-              <p>Add some products to get started with your order</p>
-              <Button
-                onClick={handleClose}
-                variant="outline-mobile"
-                size="mobile-md"
-                enableHaptics={true}
-              >
+            <div className="flex flex-col items-center justify-center h-full text-center py-12">
+              <ShoppingCart className="w-16 h-16 text-gray-300 mb-6" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Your cart is empty</h3>
+              <p className="text-gray-500 mb-6">Discover amazing products and add them to your cart</p>
+              <Button onClick={onClose} className="px-6 py-2">
                 Continue Shopping
               </Button>
             </div>
           ) : (
-            <div className="p-4 space-y-4">
-              {items.map((item, index) => (
-                <div 
-                  key={item.id} 
-                  className="card-mobile"
-                  style={{ animationDelay: `${index * 100}ms` }}
-                >
-                  <div className="flex items-start space-x-4">
-                    {/* Product Image */}
-                    <div className="w-16 h-16 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl flex items-center justify-center flex-shrink-0">
-                      {item.image ? (
-                        <img src={item.image} alt={item.name} className="w-full h-full object-cover rounded-xl" />
-                      ) : (
-                        <ShoppingBag className="h-6 w-6 text-gray-400" />
-                      )}
-                    </div>
-                    
-                    {/* Product Details */}
+            <div className="space-y-4">
+              {items.map((item) => (
+                <div key={item.id} className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-shadow">
+                  <div className="flex gap-4">
+                    {/* Product Details - Removed Image Section */}
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-medium text-gray-900 truncate">{item.name}</h3>
-                      <div className="flex flex-col gap-1 mt-1">
-                        <div className="flex items-center gap-2">
-                          <p className="text-xs text-gray-600 font-medium">🏪 {item.vendor || 'Unknown Vendor'}</p>
-                          {item.qualityName && (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-medium bg-blue-100 text-blue-800">
-                              {item.qualityName}
-                            </span>
-                          )}
-                        </div>
-                        {item.brandName && item.modelName && (
-                          <p className="text-xs text-gray-500">{item.brandName} • {item.modelName}</p>
+                      <div className="flex justify-between items-start mb-2">
+                        <h3 className="font-medium text-gray-900 truncate">
+                          {item.name}
+                        </h3>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleRemoveItem(item.productId)}
+                          className="h-6 w-6 text-red-500 hover:text-red-700 hover:bg-red-50"
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+
+                      <p className="text-sm text-gray-600 mb-2 truncate">{item.vendor}</p>
+
+                      {/* Badges */}
+                      <div className="flex flex-wrap gap-1 mb-3">
+                        {item.qualityName && (
+                          <Badge variant="secondary" className="text-xs">
+                            {item.qualityName}
+                          </Badge>
                         )}
                         {item.warranty > 0 && (
-                          <p className="text-xs text-green-600">🛡️ {item.warranty} months warranty</p>
+                          <Badge variant="outline" className="text-xs">
+                            {item.warranty} months
+                          </Badge>
                         )}
                       </div>
-                      <div className="flex items-center justify-between mt-3">
-                        <p className="text-lg font-semibold text-gray-900">₹{item.price.toLocaleString()}</p>
+
+                      {/* Price and Quantity Controls */}
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-blue-600 text-lg">
+                          ₹{(item.price * item.quantity).toFixed(2)}
+                        </span>
                         
-                        {/* Enhanced Quantity Controls */}
-                        <div className="flex items-center space-x-2 bg-gray-100 rounded-xl p-1">
+                        <div className="flex items-center gap-2">
                           <Button
-                            onClick={() => updateQuantity(item.productId, Math.max(0, item.quantity - 1))}
-                            variant="ghost"
-                            size="mobile-icon-sm"
-                            className="quantity-btn h-10 w-10"
-                            enableHaptics={true}
-                            hapticIntensity="light"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => handleQuantityChange(item.productId, Math.max(1, item.quantity - 1))}
+                            disabled={item.quantity <= 1}
+                            className="h-8 w-8"
                           >
-                            <Minus className="h-4 w-4" />
+                            <Minus className="w-3 h-3" />
                           </Button>
                           
-                          <span className="min-w-[32px] text-center text-sm font-medium px-2">{item.quantity}</span>
+                          <span className="w-8 text-center font-medium">
+                            {item.quantity}
+                          </span>
                           
                           <Button
-                            onClick={() => updateQuantity(item.productId, item.quantity + 1)}
-                            variant="ghost"
-                            size="mobile-icon-sm"
-                            className="quantity-btn h-10 w-10"
-                            enableHaptics={true}
-                            hapticIntensity="light"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => handleQuantityChange(item.productId, item.quantity + 1)}
+                            className="h-8 w-8"
                           >
-                            <Plus className="h-4 w-4" />
+                            <Plus className="w-3 h-3" />
                           </Button>
                         </div>
-                      </div>
-                      
-                      {/* Item Total and Remove */}
-                      <div className="flex items-center justify-between mt-3">
-                        <p className="text-sm text-gray-600">
-                          Total: <span className="font-semibold">₹{(item.price * item.quantity).toLocaleString()}</span>
-                        </p>
-                        <Button
-                          onClick={() => removeFromCart(item.productId)}
-                          variant="ghost"
-                          size="mobile-icon-sm"
-                          className="h-10 w-10 text-red-500 hover:text-red-700 hover:bg-red-50"
-                          enableHaptics={true}
-                          hapticIntensity="medium"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
                       </div>
                     </div>
                   </div>
@@ -227,46 +198,42 @@ const Cart = ({ isOpen, onClose }: CartProps) => {
           )}
         </div>
 
-        {/* Enhanced Footer */}
+        {/* Order Summary */}
         {items.length > 0 && (
-          <div className="border-t border-gray-200 p-4 bg-white space-y-4 pb-safe">
-            {/* Order Summary */}
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm text-gray-600">
-                <span>Subtotal ({items.reduce((sum, item) => sum + item.quantity, 0)} items)</span>
-                <span>₹{total.toLocaleString()}</span>
+          <div className="border-t border-gray-200 p-6 bg-white space-y-4">
+            <div className="space-y-3">
+              <div className="flex justify-between text-gray-600">
+                <span>Subtotal ({totalItems} items)</span>
+                <span>₹{subtotal.toFixed(2)}</span>
               </div>
-              <div className="flex justify-between text-sm text-gray-600">
+              <div className="flex justify-between text-gray-600">
                 <span>Delivery Fee</span>
                 <span className="text-green-600 font-medium">FREE</span>
               </div>
-              <hr className="my-2" />
-              <div className="flex justify-between text-lg font-semibold text-gray-900">
+              <Separator />
+              <div className="flex justify-between text-lg font-bold text-gray-900">
                 <span>Total</span>
-                <span>₹{total.toLocaleString()}</span>
+                <span className="text-blue-600">₹{total.toFixed(2)}</span>
               </div>
             </div>
-            
-            {/* Enhanced Checkout Button */}
-            <Button 
-              variant="primary-mobile"
-              size="mobile-full-lg"
-              className="shadow-lg"
-              onClick={() => {
-                handleClose();
-                navigate('/checkout');
-              }}
-              enableHaptics={true}
-              hapticIntensity="medium"
+
+            <RainbowButton
+              onClick={handleCheckout}
+              disabled={isCheckingOut}
+              className="w-full h-12 text-base font-medium"
             >
-              <CreditCard className="h-5 w-5 mr-2" />
-              Proceed to Checkout
-            </Button>
+              {isCheckingOut ? (
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <>
+                  <span>Proceed to Checkout</span>
+                  <ArrowRight className="w-5 h-5 ml-2" />
+                </>
+              )}
+            </RainbowButton>
           </div>
         )}
       </div>
-    </div>
+    </>
   );
-};
-
-export default Cart;
+}

@@ -18,6 +18,7 @@ import Signup from "./pages/Signup";
 import ResetPassword from "./pages/ResetPassword";
 
 import VendorDashboard from "./pages/VendorDashboard";
+import VendorProfile from "./pages/VendorProfile";
 import AddProduct from "./pages/AddProduct";
 import VendorProductManagement from "./pages/VendorProductManagement";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -39,7 +40,7 @@ import OrderSuccess from "./pages/OrderSuccess";
 import MyOrders from "./pages/MyOrders";
 import DeliveryPartnerDashboard from "./pages/DeliveryPartnerDashboard";
 import NetworkStatusIndicator from "@/components/NetworkStatusIndicator";
-import Cart from "@/components/customer/Cart";
+import { Cart } from "@/components/customer/Cart";
 
 const queryClient = new QueryClient();
 
@@ -158,6 +159,7 @@ const App = () => (
 
                 {/* Vendor-only routes */}
                 <Route path="/vendor-dashboard" element={<ProtectedRoute allowedRoles={['vendor']}><VendorDashboard /></ProtectedRoute>} />
+                <Route path="/vendor-profile" element={<ProtectedRoute allowedRoles={['vendor']}><VendorProfile /></ProtectedRoute>} />
                 <Route path="/vendor/add-product" element={<ProtectedRoute allowedRoles={['vendor']}><AddProduct /></ProtectedRoute>} />
                 <Route path="/vendor/product-management" element={<ProtectedRoute allowedRoles={['vendor']}><VendorProductManagement /></ProtectedRoute>} />
 

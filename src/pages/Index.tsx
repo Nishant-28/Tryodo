@@ -54,47 +54,83 @@ const Index = () => {
     try {
       setLoading(true);
       
-      // Simulating featured products for now
-      const mockProducts: Product[] = [
+      // Predefined trending products
+      const trendingProducts: Product[] = [
         {
           id: '1',
-          name: 'iPhone 14 Pro',
-          price: 89999,
+          name: 'iPhone 14 Pro Max Display',
+          price: 12999,
           image: '/placeholder.svg',
-          rating: 4.8,
-          reviews: 1245,
-          category: 'Smartphone'
+          rating: 4.9,
+          reviews: 2456,
+          category: 'Display'
         },
         {
           id: '2',
-          name: 'Samsung Galaxy S23',
-          price: 74999,
+          name: 'Samsung S23 Ultra Battery',
+          price: 3499,
           image: '/placeholder.svg',
-          rating: 4.6,
-          reviews: 890,
-          category: 'Smartphone'
+          rating: 4.8,
+          reviews: 1890,
+          category: 'Battery'
         },
         {
           id: '3',
-          name: 'OnePlus 11',
-          price: 56999,
+          name: 'OnePlus 11 Back Cover',
+          price: 1299,
           image: '/placeholder.svg',
-          rating: 4.5,
+          rating: 4.7,
           reviews: 654,
-          category: 'Smartphone'
+          category: 'Cover'
         },
         {
           id: '4',
-          name: 'Google Pixel 7',
-          price: 41999,
+          name: 'iPhone 13 Camera Module',
+          price: 8999,
+          image: '/placeholder.svg',
+          rating: 4.9,
+          reviews: 1432,
+          category: 'Camera'
+        },
+        {
+          id: '5',
+          name: 'Xiaomi 12 Charging Port',
+          price: 899,
+          image: '/placeholder.svg',
+          rating: 4.6,
+          reviews: 876,
+          category: 'Charging'
+        },
+        {
+          id: '6',
+          name: 'Samsung A54 Speaker',
+          price: 699,
+          image: '/placeholder.svg',
+          rating: 4.5,
+          reviews: 543,
+          category: 'Audio'
+        },
+        {
+          id: '7',
+          name: 'iPhone 12 Home Button',
+          price: 2499,
+          image: '/placeholder.svg',
+          rating: 4.8,
+          reviews: 1234,
+          category: 'Button'
+        },
+        {
+          id: '8',
+          name: 'Realme GT Screen Guard',
+          price: 299,
           image: '/placeholder.svg',
           rating: 4.4,
-          reviews: 432,
-          category: 'Smartphone'
+          reviews: 789,
+          category: 'Protection'
         }
       ];
       
-      setFeaturedProducts(mockProducts);
+      setFeaturedProducts(trendingProducts);
     } catch (error) {
       console.error('Error loading featured products:', error);
       toast.error('Failed to load featured products');
@@ -302,61 +338,121 @@ const Index = () => {
       </section>
 
       {/* Trending Products Section */}
-      <section className="py-16 lg:py-24">
-        <div className="container mx-auto px-6">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-4">
+      <section className="py-12 sm:py-16 lg:py-20">
+        <div className="container mx-auto px-4 sm:px-6">
+          <div className="text-center mb-8 sm:mb-12">
+            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 mb-3 sm:mb-4">
               Trending Products
             </h2>
-            <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-              Discover the most popular mobile parts and accessories
+            <p className="text-base sm:text-lg text-gray-600 max-w-2xl mx-auto">
+              Most popular mobile parts and accessories this week
             </p>
           </div>
 
           {loading ? (
             <div className="text-center py-12">
-              <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
-              <div className="text-lg text-gray-600 font-medium">Loading products...</div>
+              <div className="w-10 h-10 sm:w-12 sm:h-12 border-4 border-orange-200 border-t-orange-600 rounded-full animate-spin mx-auto mb-4"></div>
+              <div className="text-base sm:text-lg text-gray-600 font-medium">Loading products...</div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
-              {featuredProducts.map((product) => (
-                <div key={product.id} className="bg-white rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all duration-300 group border border-gray-100 hover:border-blue-200">
-                  <div className="text-center">
-                    <div className="w-20 h-20 bg-gray-100 rounded-2xl mx-auto mb-6 flex items-center justify-center text-3xl shadow-soft group-hover:scale-105 transition-transform duration-300">
-                      {typeof product.image === 'string' && product.image.startsWith('http') ? (
-                        <img 
-                          src={product.image} 
-                          alt={product.name}
-                          className="w-16 h-16 object-cover rounded-xl"
-                          onError={(e) => {
-                            const target = e.currentTarget as HTMLImageElement;
-                            const sibling = target.nextElementSibling as HTMLElement;
-                            target.style.display = 'none';
-                            if (sibling) sibling.style.display = 'block';
-                          }}
-                        />
-                      ) : null}
-                      <div 
-                        className="text-3xl" 
-                        style={{ display: typeof product.image === 'string' && product.image.startsWith('http') ? 'none' : 'block' }}
-                      >
-                        {typeof product.image === 'string' && !product.image.startsWith('http') ? product.image : "📱"}
+            <div className="relative">
+              {/* Horizontal Scroll Container */}
+              <div className="overflow-x-auto scrollbar-hide -mx-4 sm:-mx-6">
+                <div className="flex space-x-4 sm:space-x-6 px-4 sm:px-6 pb-4">
+                  {featuredProducts.map((product, index) => (
+                    <div 
+                      key={product.id} 
+                      className="flex-none w-64 sm:w-72 bg-white rounded-2xl shadow-soft hover:shadow-medium transition-all duration-300 group border border-gray-100 hover:border-orange-200 overflow-hidden"
+                    >
+                      {/* Product Image */}
+                      <div className="relative h-48 bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden">
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          {/* Category Badge */}
+                          <div className="absolute top-3 left-3 bg-orange-100 text-orange-800 px-2 py-1 rounded-full text-xs font-medium z-10">
+                            {product.category}
+                          </div>
+                          
+                          {/* Product Icon/Image */}
+                          <div className="text-6xl group-hover:scale-110 transition-transform duration-300">
+                            {(() => {
+                              const categoryIcons: { [key: string]: string } = {
+                                'Display': '📱',
+                                'Battery': '🔋',
+                                'Cover': '📲',
+                                'Camera': '📷',
+                                'Charging': '🔌',
+                                'Audio': '🔊',
+                                'Button': '⚫',
+                                'Protection': '🛡️'
+                              };
+                              return categoryIcons[product.category] || '📱';
+                            })()}
+                          </div>
+                        </div>
+                        
+                        {/* Gradient overlay */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/10 to-transparent"></div>
+                      </div>
+
+                      {/* Product Info */}
+                      <div className="p-5">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2 line-clamp-2 leading-snug group-hover:text-orange-600 transition-colors duration-200">
+                          {product.name}
+                        </h3>
+                        
+                        {/* Rating and Reviews */}
+                        <div className="flex items-center space-x-2 mb-3">
+                          <div className="flex items-center">
+                            {[...Array(5)].map((_, i) => (
+                              <Star 
+                                key={i} 
+                                className={`h-4 w-4 ${i < Math.floor(product.rating) ? 'text-orange-400 fill-current' : 'text-gray-200'}`} 
+                              />
+                            ))}
+                          </div>
+                          <span className="text-sm text-gray-500 font-medium">
+                            {product.rating} ({product.reviews.toLocaleString()})
+                          </span>
+                        </div>
+
+                        {/* Price */}
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-2xl font-bold text-gray-900">₹{product.price.toLocaleString()}</span>
+                            {index < 3 && (
+                              <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-medium">
+                                Hot
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Add to Cart Button */}
+                        <Button 
+                          onClick={() => handleAddToCart(product)}
+                          className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-semibold py-3 rounded-xl shadow-soft hover:shadow-medium transform hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 touch-manipulation"
+                        >
+                          <span className="flex items-center justify-center space-x-2">
+                            <span>Add to Cart</span>
+                            <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center">
+                              <ArrowRight className="h-3 w-3" />
+                            </div>
+                          </span>
+                        </Button>
                       </div>
                     </div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-3 leading-snug">{product.name}</h3>
-                    <div className="flex items-center justify-center space-x-2 mb-6">
-                      <span className="text-xl font-bold text-gray-900">₹{product.price.toLocaleString()}</span>
-                    </div>
-                    <Button 
-                      onClick={() => handleAddToCart(product)}
-                      className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 transform hover:scale-105 transition-all duration-200 rounded-xl font-semibold shadow-soft"
-                    >
-                      Add to Cart
-                    </Button>
-                  </div>
+                  ))}
                 </div>
-              ))}
+              </div>
+
+              {/* Scroll indicators */}
+              <div className="flex justify-center mt-6 space-x-2">
+                <div className="flex items-center space-x-1 bg-gray-100 rounded-full px-3 py-1">
+                  <ArrowRight className="h-4 w-4 text-gray-400 rotate-180" />
+                  <span className="text-sm text-gray-600 font-medium">Swipe to explore</span>
+                  <ArrowRight className="h-4 w-4 text-gray-400" />
+                </div>
+              </div>
             </div>
           )}
         </div>

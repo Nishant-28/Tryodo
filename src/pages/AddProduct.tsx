@@ -132,6 +132,8 @@ const AddProduct = () => {
     stock_quantity: ''
   });
   
+  // Commented out genericForm as requested
+  /*
   const [genericForm, setGenericForm] = useState<GenericProductForm>({
     generic_product_id: '',
     quality_type_id: '',
@@ -140,6 +142,7 @@ const AddProduct = () => {
     warranty_months: '6',
     stock_quantity: ''
   });
+  */
 
   // Bulk upload states
   const [bulkUploadData, setBulkUploadData] = useState<BulkUploadRow[]>([]);
@@ -361,75 +364,6 @@ const AddProduct = () => {
     }
   };
 
-  const submitGenericProduct = async () => {
-    const errors = validateGenericForm();
-    if (errors.length > 0) {
-      toast({
-        title: "Validation Error",
-        description: errors.join('\n'),
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!vendorId) {
-      toast({
-        title: "Error",
-        description: "Vendor ID is missing. Cannot add product.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      setLoading(true);
-      
-      const productData = {
-        vendor_id: vendorId,
-        generic_product_id: genericForm.generic_product_id,
-        quality_type_id: genericForm.quality_type_id,
-        price: parseFloat(genericForm.price),
-        original_price: genericForm.original_price ? parseFloat(genericForm.original_price) : null,
-        warranty_months: parseInt(genericForm.warranty_months),
-        stock_quantity: parseInt(genericForm.stock_quantity),
-        is_active: true
-      };
-
-      const { data, error } = await supabase
-        .from('vendor_generic_products')
-        .insert(productData)
-        .select();
-
-      if (error) throw error;
-
-      toast({
-        title: "Success",
-        description: "Generic product added successfully!",
-      });
-
-      // Reset form
-      setGenericForm({
-        generic_product_id: '',
-        quality_type_id: '',
-        price: '',
-        original_price: '',
-        warranty_months: '6',
-        stock_quantity: ''
-      });
-      setSelectedCategory('');
-
-    } catch (error: any) {
-      console.error('Error adding generic product:', error);
-      toast({
-        title: "Error",
-        description: "Failed to add product. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // CSV Upload functionality
   const downloadSampleCSV = () => {
     const sampleData = [
@@ -640,18 +574,27 @@ const AddProduct = () => {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="phone" className="flex items-center gap-2">
-              <Smartphone className="h-4 w-4" />
-              Phone Products
+          <TabsList className="grid w-full grid-cols-3 md:grid-cols-2 lg:grid-cols-2 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
+            <TabsTrigger 
+              value="phone" 
+              className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200"
+            >
+              <Smartphone className="h-4 w-4 mr-2" /> Phone Products
             </TabsTrigger>
-            <TabsTrigger value="generic" className="flex items-center gap-2">
-              <Cable className="h-4 w-4" />
-              Generic Products
+            {/* Commented out Generic Product tab as per request */}
+            {/*
+            <TabsTrigger 
+              value="generic" 
+              className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-pink-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200"
+            >
+              <Package className="h-4 w-4 mr-2" /> Generic Products
             </TabsTrigger>
-            <TabsTrigger value="bulk" className="flex items-center gap-2">
-              <Upload className="h-4 w-4" />
-              Bulk Upload
+            */}
+            <TabsTrigger 
+              value="bulk" 
+              className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-500 data-[state=active]:to-teal-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200"
+            >
+              <Upload className="h-4 w-4 mr-2" /> Bulk Upload
             </TabsTrigger>
           </TabsList>
 
@@ -659,47 +602,39 @@ const AddProduct = () => {
           <TabsContent value="phone" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Smartphone className="h-5 w-5" />
-                  Add Phone-Specific Product
-                </CardTitle>
-                <CardDescription>
-                  Add products that are specific to particular phone models (displays, batteries, etc.)
+                <CardTitle className="text-lg font-semibold text-gray-800">Add New Phone Product</CardTitle>
+                <CardDescription className="text-gray-600">
+                  List a specific smartphone model with its category and quality type.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-6">
+              <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="brand">Brand *</Label>
+                  <div className="space-y-2">
+                    <Label htmlFor="brand">Brand</Label>
                     <Select value={selectedBrand} onValueChange={setSelectedBrand}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select brand" />
+                      <SelectTrigger id="brand">
+                        <SelectValue placeholder="Select a brand" />
                       </SelectTrigger>
                       <SelectContent>
-                        {brands.map(brand => (
-                          <SelectItem key={brand.id} value={brand.id}>
-                            {brand.name}
-                          </SelectItem>
+                        {brands.map((brand) => (
+                          <SelectItem key={brand.id} value={brand.id}>{brand.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
-                  
-                  <div>
-                    <Label htmlFor="model">Phone Model *</Label>
+                  <div className="space-y-2">
+                    <Label htmlFor="model">Model</Label>
                     <Select
                       value={phoneForm.model_id}
-                      onValueChange={(value) => setPhoneForm(prev => ({ ...prev, model_id: value }))}
+                      onValueChange={(value) => setPhoneForm({ ...phoneForm, model_id: value })}
                       disabled={!selectedBrand}
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select phone model" />
+                      <SelectTrigger id="model">
+                        <SelectValue placeholder="Select a model" />
                       </SelectTrigger>
                       <SelectContent>
-                        {filteredModels.map(model => (
-                          <SelectItem key={model.id} value={model.id}>
-                            {model.model_name}
-                          </SelectItem>
+                        {filteredModels.map((model) => (
+                          <SelectItem key={model.id} value={model.id}>{model.model_name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -707,47 +642,41 @@ const AddProduct = () => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="category">Category *</Label>
+                  <div className="space-y-2">
+                    <Label htmlFor="category">Category</Label>
                     <Select
                       value={phoneForm.category_id}
                       onValueChange={(value) => {
-                        setPhoneForm(prev => ({ ...prev, category_id: value }));
-                        setSelectedCategory(value);
+                        setPhoneForm(prev => ({ ...prev, category_id: value, quality_type_id: '' }));
+                        const selectedCat = categories.find(cat => cat.id === value);
+                        if (selectedCat) {
+                          setFilteredQualityTypes(getCategoryQualityTypes(selectedCat.name));
+                        }
                       }}
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select category" />
+                      <SelectTrigger id="category">
+                        <SelectValue placeholder="Select a category" />
                       </SelectTrigger>
                       <SelectContent>
-                        {categories.map(category => (
-                          <SelectItem key={category.id} value={category.id}>
-                            {category.name}
-                          </SelectItem>
+                        {categories.map((category) => (
+                          <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
-                  
-                  <div>
-                    <Label htmlFor="quality">Quality Type *</Label>
+                  <div className="space-y-2">
+                    <Label htmlFor="quality">Quality Type</Label>
                     <Select
                       value={phoneForm.quality_type_id}
-                      onValueChange={(value) => setPhoneForm(prev => ({ ...prev, quality_type_id: value }))}
+                      onValueChange={(value) => setPhoneForm({ ...phoneForm, quality_type_id: value })}
+                      disabled={!phoneForm.category_id}
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select quality type" />
+                      <SelectTrigger id="quality">
+                        <SelectValue placeholder="Select quality" />
                       </SelectTrigger>
                       <SelectContent>
-                        {filteredQualityTypes.map(qt => (
-                          <SelectItem key={qt.id} value={qt.id}>
-                            <div className="flex flex-col">
-                              <span>{qt.name}</span>
-                              {qt.description && (
-                                <span className="text-xs text-gray-500">{qt.description}</span>
-                              )}
-                            </div>
-                          </SelectItem>
+                        {filteredQualityTypes.map((quality) => (
+                          <SelectItem key={quality.id} value={quality.id}>{quality.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -755,236 +684,170 @@ const AddProduct = () => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="price">Price (₹) *</Label>
+                  <div className="space-y-2">
+                    <Label htmlFor="price">Selling Price (₹)</Label>
                     <Input
                       id="price"
                       type="number"
-                      placeholder="Enter selling price"
+                      placeholder="e.g., 1500"
                       value={phoneForm.price}
-                      onChange={(e) => setPhoneForm(prev => ({ ...prev, price: e.target.value }))}
+                      onChange={(e) => setPhoneForm({ ...phoneForm, price: e.target.value })}
                     />
                   </div>
-                  
-                  <div>
-                    <Label htmlFor="originalPrice">Original Price (₹)</Label>
+                  <div className="space-y-2">
+                    <Label htmlFor="original-price">Original Price (Optional, ₹)</Label>
                     <Input
-                      id="originalPrice"
+                      id="original-price"
                       type="number"
-                      placeholder="Enter original price (for discounts)"
+                      placeholder="e.g., 2000"
                       value={phoneForm.original_price}
-                      onChange={(e) => setPhoneForm(prev => ({ ...prev, original_price: e.target.value }))}
+                      onChange={(e) => setPhoneForm({ ...phoneForm, original_price: e.target.value })}
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="stock">Stock Quantity *</Label>
+                  <div className="space-y-2">
+                    <Label htmlFor="warranty">Warranty (Months)</Label>
+                    <Input
+                      id="warranty"
+                      type="number"
+                      placeholder="e.g., 6"
+                      value={phoneForm.warranty_months}
+                      onChange={(e) => setPhoneForm({ ...phoneForm, warranty_months: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="stock">Stock Quantity</Label>
                     <Input
                       id="stock"
                       type="number"
-                      placeholder="Available quantity"
+                      placeholder="e.g., 100"
                       value={phoneForm.stock_quantity}
-                      onChange={(e) => setPhoneForm(prev => ({ ...prev, stock_quantity: e.target.value }))}
+                      onChange={(e) => setPhoneForm({ ...phoneForm, stock_quantity: e.target.value })}
                     />
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="warranty">Warranty (Months)</Label>
-                    <Select
-                      value={phoneForm.warranty_months}
-                      onValueChange={(value) => setPhoneForm(prev => ({ ...prev, warranty_months: value }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="0">No Warranty</SelectItem>
-                        <SelectItem value="3">3 Months</SelectItem>
-                        <SelectItem value="6">6 Months</SelectItem>
-                        <SelectItem value="12">12 Months</SelectItem>
-                        <SelectItem value="24">24 Months</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
                 </div>
 
-                <div className="flex justify-end pt-4">
-                  <Button onClick={submitPhoneProduct} disabled={loading} className="min-w-[120px]">
-                    {loading ? (
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    ) : (
-                      <>
-                        <Package className="h-4 w-4 mr-2" />
-                        Add Product
-                      </>
-                    )}
-                  </Button>
-                </div>
+                <Button onClick={submitPhoneProduct} className="w-full" disabled={loading}>
+                  {loading ? 'Adding Product...' : 'Add Phone Product'}
+                </Button>
               </CardContent>
             </Card>
           </TabsContent>
 
-          {/* Generic Products Tab */}
+          {/* Commented out Generic Product upload section as per request */}
+          {/*
           <TabsContent value="generic" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Cable className="h-5 w-5" />
-                  Add Generic Product
-                </CardTitle>
-                <CardDescription>
-                  Add products that are not specific to phone models (cables, chargers, etc.)
+                <CardTitle className="text-lg font-semibold text-gray-800">Add New Generic Product</CardTitle>
+                <CardDescription className="text-gray-600">
+                  List a generic product with a category and quality type.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="genericCategory">Category *</Label>
-                    <Select
-                      value={selectedCategory}
-                      onValueChange={(value) => {
-                        setSelectedCategory(value);
-                        setGenericForm(prev => ({ ...prev, generic_product_id: '', quality_type_id: '' }));
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select category" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {categories.map(category => (
-                          <SelectItem key={category.id} value={category.id}>
-                            {category.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="genericProduct">Generic Product *</Label>
-                    <Select
-                      value={genericForm.generic_product_id}
-                      onValueChange={(value) => setGenericForm(prev => ({ ...prev, generic_product_id: value }))}
-                      disabled={!selectedCategory}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select generic product" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {filteredGenericProducts.map(gp => (
-                          <SelectItem key={gp.id} value={gp.id}>
-                            <div className="flex flex-col">
-                              <span>{gp.name}</span>
-                              {gp.description && (
-                                <span className="text-xs text-gray-500">{gp.description}</span>
-                              )}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div>
-                  <Label htmlFor="genericQuality">Quality Type *</Label>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="generic-category">Category</Label>
                   <Select
-                    value={genericForm.quality_type_id}
-                    onValueChange={(value) => setGenericForm(prev => ({ ...prev, quality_type_id: value }))}
+                    value={genericForm.generic_product_id ? 
+                      (genericProducts.find(gp => gp.id === genericForm.generic_product_id)?.category_id || '') : ''
+                    }
+                    onValueChange={(value) => {
+                      const selectedGenericProduct = genericProducts.find(gp => gp.id === value);
+                      setGenericForm(prev => ({
+                        ...prev,
+                        generic_product_id: value,
+                        quality_type_id: ''
+                      }));
+                      if (selectedGenericProduct) {
+                        setFilteredQualityTypes(getCategoryQualityTypes(categories.find(cat => cat.id === selectedGenericProduct.category_id)?.name || ''));
+                      }
+                    }}
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select quality type" />
+                    <SelectTrigger id="generic-category">
+                      <SelectValue placeholder="Select a category" />
                     </SelectTrigger>
                     <SelectContent>
-                      {filteredQualityTypes.map(qt => (
-                        <SelectItem key={qt.id} value={qt.id}>
-                          <div className="flex flex-col">
-                            <span>{qt.name}</span>
-                            {qt.description && (
-                              <span className="text-xs text-gray-500">{qt.description}</span>
-                            )}
-                          </div>
-                        </SelectItem>
+                      {genericProducts.map((gp) => (
+                        <SelectItem key={gp.id} value={gp.id}>{categories.find(cat => cat.id === gp.category_id)?.name} - {gp.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="generic-quality">Quality Type</Label>
+                  <Select
+                    value={genericForm.quality_type_id}
+                    onValueChange={(value) => setGenericForm({ ...genericForm, quality_type_id: value })}
+                    disabled={!genericForm.generic_product_id}
+                  >
+                    <SelectTrigger id="generic-quality">
+                      <SelectValue placeholder="Select quality" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredQualityTypes.map((quality) => (
+                        <SelectItem key={quality.id} value={quality.id}>{quality.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="genericPrice">Price (₹) *</Label>
+                  <div className="space-y-2">
+                    <Label htmlFor="generic-price">Selling Price (₹)</Label>
                     <Input
-                      id="genericPrice"
+                      id="generic-price"
                       type="number"
-                      placeholder="Enter selling price"
+                      placeholder="e.g., 1500"
                       value={genericForm.price}
-                      onChange={(e) => setGenericForm(prev => ({ ...prev, price: e.target.value }))}
+                      onChange={(e) => setGenericForm({ ...genericForm, price: e.target.value })}
                     />
                   </div>
-                  
-                  <div>
-                    <Label htmlFor="genericOriginalPrice">Original Price (₹)</Label>
+                  <div className="space-y-2">
+                    <Label htmlFor="generic-original-price">Original Price (Optional, ₹)</Label>
                     <Input
-                      id="genericOriginalPrice"
+                      id="generic-original-price"
                       type="number"
-                      placeholder="Enter original price (for discounts)"
+                      placeholder="e.g., 2000"
                       value={genericForm.original_price}
-                      onChange={(e) => setGenericForm(prev => ({ ...prev, original_price: e.target.value }))}
+                      onChange={(e) => setGenericForm({ ...genericForm, original_price: e.target.value })}
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="genericStock">Stock Quantity *</Label>
+                  <div className="space-y-2">
+                    <Label htmlFor="generic-warranty">Warranty (Months)</Label>
                     <Input
-                      id="genericStock"
+                      id="generic-warranty"
                       type="number"
-                      placeholder="Available quantity"
-                      value={genericForm.stock_quantity}
-                      onChange={(e) => setGenericForm(prev => ({ ...prev, stock_quantity: e.target.value }))}
+                      placeholder="e.g., 6"
+                      value={genericForm.warranty_months}
+                      onChange={(e) => setGenericForm({ ...genericForm, warranty_months: e.target.value })}
                     />
                   </div>
-                  
-                  <div>
-                    <Label htmlFor="genericWarranty">Warranty (Months)</Label>
-                    <Select
-                      value={genericForm.warranty_months}
-                      onValueChange={(value) => setGenericForm(prev => ({ ...prev, warranty_months: value }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="0">No Warranty</SelectItem>
-                        <SelectItem value="3">3 Months</SelectItem>
-                        <SelectItem value="6">6 Months</SelectItem>
-                        <SelectItem value="12">12 Months</SelectItem>
-                        <SelectItem value="24">24 Months</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  <div className="space-y-2">
+                    <Label htmlFor="generic-stock">Stock Quantity</Label>
+                    <Input
+                      id="generic-stock"
+                      type="number"
+                      placeholder="e.g., 100"
+                      value={genericForm.stock_quantity}
+                      onChange={(e) => setGenericForm({ ...genericForm, stock_quantity: e.target.value })}
+                    />
                   </div>
                 </div>
 
-                <div className="flex justify-end pt-4">
-                  <Button onClick={submitGenericProduct} disabled={loading} className="min-w-[120px]">
-                    {loading ? (
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    ) : (
-                      <>
-                        <Package className="h-4 w-4 mr-2" />
-                        Add Product
-                      </>
-                    )}
-                  </Button>
-                </div>
+                <Button onClick={submitGenericProduct} className="w-full" disabled={loading}>
+                  {loading ? 'Adding Product...' : 'Add Generic Product'}
+                </Button>
               </CardContent>
             </Card>
           </TabsContent>
+          */}
 
-          {/* Bulk Upload Tab */}
           <TabsContent value="bulk" className="space-y-6">
             <Card>
               <CardHeader>
