@@ -31,6 +31,9 @@ import AdminVendorManagement from "./pages/AdminVendorManagement";
 import AdminVendorWallets from "./pages/AdminVendorWallets";
 import AdminDeliveryWallets from "./pages/AdminDeliveryWallets";
 import AdminPayoutManagement from "./pages/AdminPayoutManagement";
+import AdminSectorManagement from "./pages/AdminSectorManagement";
+import AdminSlotManagement from "./pages/AdminSlotManagement";
+import AdminDeliveryPartnerManagement from "./pages/AdminDeliveryPartnerManagement";
 import UserProfilePage from "./pages/UserProfilePage";
 import NotFound from "./pages/NotFound";
 import About from "./pages/About";
@@ -173,6 +176,9 @@ const App = () => (
                 <Route path="/admin/vendor-wallets" element={<ProtectedRoute allowedRoles={['admin']}><AdminVendorWallets /></ProtectedRoute>} />
                 <Route path="/admin/delivery-wallets" element={<ProtectedRoute allowedRoles={['admin']}><AdminDeliveryWallets /></ProtectedRoute>} />
                 <Route path="/admin/payouts" element={<ProtectedRoute allowedRoles={['admin']}><AdminPayoutManagement /></ProtectedRoute>} />
+                <Route path="/admin/sectors" element={<ProtectedRoute allowedRoles={['admin']}><AdminSectorManagement /></ProtectedRoute>} />
+                <Route path="/admin/slots" element={<ProtectedRoute allowedRoles={['admin']}><AdminSlotManagement /></ProtectedRoute>} />
+                <Route path="/admin/delivery-partners" element={<ProtectedRoute allowedRoles={['admin']}><AdminDeliveryPartnerManagement /></ProtectedRoute>} />
 
                 {/* Delivery Partner routes */}
                 <Route path="/delivery-partner-dashboard" element={<ProtectedRoute allowedRoles={['delivery_partner']}><DeliveryPartnerDashboard /></ProtectedRoute>} />

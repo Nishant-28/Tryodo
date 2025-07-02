@@ -43,9 +43,19 @@ interface CommissionRule {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  quality_id?: string | null;
+  smartphone_model_id?: string | null;
   category?: {
     id: string;
     name: string;
+  };
+  quality?: {
+    id: string;
+    name: string;
+  };
+  model?: {
+    id: string;
+    model_name: string;
   };
   created_by_profile?: {
     full_name: string;
@@ -57,6 +67,16 @@ interface Category {
   name: string;
 }
 
+interface QualityCategory {
+  id: string;
+  name: string;
+}
+
+interface SmartphoneModel {
+  id: string;
+  model_name: string;
+}
+
 interface CommissionForm {
   id?: string;
   categoryId: string;
@@ -66,6 +86,8 @@ interface CommissionForm {
   effectiveFrom: string;
   effectiveUntil: string;
   notes: string;
+  qualityId?: string;
+  smartphoneModelId?: string;
 }
 
 const AdminCommissionRules: React.FC = () => {
@@ -76,6 +98,8 @@ const AdminCommissionRules: React.FC = () => {
   // State management
   const [commissionRules, setCommissionRules] = useState<CommissionRule[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [qualityCategories, setQualityCategories] = useState<QualityCategory[]>([]);
+  const [smartphoneModels, setSmartphoneModels] = useState<SmartphoneModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [createLoading, setCreateLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -92,12 +116,16 @@ const AdminCommissionRules: React.FC = () => {
     effectiveFrom: new Date().toISOString().split('T')[0],
     effectiveUntil: '',
     notes: '',
+    qualityId: '',
+    smartphoneModelId: '',
   });
 
   // Filtered rules
   const filteredRules = commissionRules.filter(rule => {
     const matchesSearch = searchTerm === '' || 
       rule.category?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      rule.quality?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      rule.model?.model_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       rule.notes?.toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesCategory = filterCategory === 'all' || rule.category_id === filterCategory;
@@ -108,6 +136,8 @@ const AdminCommissionRules: React.FC = () => {
   useEffect(() => {
     loadCommissionRules();
     loadCategories();
+    loadQualityCategories();
+    loadSmartphoneModels();
   }, []);
 
   const loadCommissionRules = async () => {
@@ -143,6 +173,36 @@ const AdminCommissionRules: React.FC = () => {
     }
   };
 
+  const loadQualityCategories = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('quality_categories')
+        .select('id, name')
+        .eq('is_active', true)
+        .order('name');
+
+      if (error) throw error;
+      setQualityCategories(data || []);
+    } catch (error) {
+      console.error('Error loading quality categories:', error);
+    }
+  };
+
+  const loadSmartphoneModels = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('smartphone_models')
+        .select('id, model_name')
+        .eq('is_active', true)
+        .order('model_name');
+
+      if (error) throw error;
+      setSmartphoneModels(data || []);
+    } catch (error) {
+      console.error('Error loading smartphone models:', error);
+    }
+  };
+
   const handleCreateRule = async () => {
     if (!commissionForm.categoryId || !commissionForm.commissionPercentage) {
       toast({
@@ -174,7 +234,9 @@ const AdminCommissionRules: React.FC = () => {
         effectiveFrom: commissionForm.effectiveFrom,
         effectiveUntil: commissionForm.effectiveUntil || undefined,
         notes: commissionForm.notes,
-        createdBy: currentProfile.id
+        createdBy: currentProfile.id,
+        qualityId: commissionForm.qualityId || undefined,
+        smartphoneModelId: commissionForm.smartphoneModelId || undefined,
       });
 
       if (result.success) {
@@ -192,6 +254,8 @@ const AdminCommissionRules: React.FC = () => {
           effectiveFrom: new Date().toISOString().split('T')[0],
           effectiveUntil: '',
           notes: '',
+          qualityId: '',
+          smartphoneModelId: '',
         });
         
         setShowCreateDialog(false);
@@ -222,6 +286,8 @@ const AdminCommissionRules: React.FC = () => {
       effectiveFrom: rule.effective_from.split('T')[0],
       effectiveUntil: rule.effective_until?.split('T')[0] || '',
       notes: rule.notes || '',
+      qualityId: rule.quality_id || '',
+      smartphoneModelId: rule.smartphone_model_id || '',
     });
     setShowCreateDialog(true);
   };
@@ -263,6 +329,8 @@ const AdminCommissionRules: React.FC = () => {
       effectiveFrom: new Date().toISOString().split('T')[0],
       effectiveUntil: '',
       notes: '',
+      qualityId: '',
+      smartphoneModelId: '',
     });
     setEditingRule(null);
   };
@@ -322,6 +390,46 @@ const AdminCommissionRules: React.FC = () => {
                     {categories.map((category) => (
                       <SelectItem key={category.id} value={category.id}>
                         {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label>Quality Category - Optional</Label>
+                <Select
+                  value={commissionForm.qualityId}
+                  onValueChange={(value) => setCommissionForm(prev => ({ ...prev, qualityId: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select quality category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Any Quality</SelectItem>
+                    {qualityCategories.map((quality) => (
+                      <SelectItem key={quality.id} value={quality.id}>
+                        {quality.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label>Smartphone Model - Optional</Label>
+                <Select
+                  value={commissionForm.smartphoneModelId}
+                  onValueChange={(value) => setCommissionForm(prev => ({ ...prev, smartphoneModelId: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select smartphone model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Any Model</SelectItem>
+                    {smartphoneModels.map((model) => (
+                      <SelectItem key={model.id} value={model.id}>
+                        {model.model_name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -479,7 +587,7 @@ const AdminCommissionRules: React.FC = () => {
               <div className="relative">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                 <Input
-                  placeholder="Search by category or notes..."
+                  placeholder="Search by category, quality, or model..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -519,7 +627,11 @@ const AdminCommissionRules: React.FC = () => {
               <div key={rule.id} className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="flex-1">
                   <div className="flex items-center space-x-3">
-                    <h4 className="font-semibold">{rule.category?.name || 'Unknown Category'}</h4>
+                    <h4 className="font-semibold">
+                      {rule.category?.name || 'Unknown Category'}
+                      {rule.quality?.name && ` - ${rule.quality.name}`}
+                      {rule.model?.model_name && ` (${rule.model.model_name})`}
+                    </h4>
                     <Badge variant={rule.is_active ? "default" : "secondary"}>
                       {rule.is_active ? "Active" : "Inactive"}
                     </Badge>

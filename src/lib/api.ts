@@ -613,21 +613,41 @@ export class OrderAPI {
    */
   static async getCustomerOrders(customerId: string): Promise<ApiResponse<any[]>> {
     try {
-      // OPTIMIZED: Two efficient queries instead of excessively deep joins
+      // Fetch orders first, selecting only the necessary IDs and basic order info
       const { data: orders, error } = await supabase
         .from('orders')
         .select(`
-          *,
-          order_items (
-            *,
-            vendor:vendors (
-              id,
-              business_name,
-              contact_phone,
-              business_city,
-              business_state
-            )
-          )
+          id,
+          order_number,
+          customer_id,
+          total_amount,
+          order_status,
+          payment_status,
+          delivery_address_id,
+          created_at,
+          updated_at,
+          subtotal,
+          shipping_charges,
+          tax_amount,
+          discount_amount,
+          estimated_delivery_date,
+          actual_delivery_date,
+          preferred_delivery_time,
+          delivery_attempts,
+          last_delivery_attempt,
+          cancelled_date,
+          payment_method,
+          payment_id,
+          notes,
+          cancellation_reason,
+          delivery_instructions,
+          special_instructions,
+          slot_id,
+          sector_id,
+          delivery_date,
+          pickup_time,
+          out_for_delivery_time,
+          estimated_delivery_time
         `)
         .eq('customer_id', customerId)
         .order('created_at', { ascending: false });
@@ -642,74 +662,112 @@ export class OrderAPI {
         };
       }
 
-             // Get delivery partner info for all orders in a single query
-       const orderIds = orders.map(order => order.id);
-       const { data: deliveryData } = await supabase
-         .from('delivery_partner_orders')
-         .select('order_id, pickup_otp, delivery_otp, assigned_at, status, delivery_partner_id')
-         .in('order_id', orderIds);
+      const orderIds = orders.map(order => order.id);
+      const deliveryAddressIds = orders.map(order => order.delivery_address_id).filter(Boolean);
 
-               // Get delivery partner profiles separately to avoid deep nesting
-        const deliveryPartnerIds = deliveryData?.map(d => d.delivery_partner_id).filter(Boolean) || [];
-        const partnerProfiles = new Map();
-        
-        if (deliveryPartnerIds.length > 0) {
-          const { data: partners } = await supabase
-            .from('delivery_partners')
-            .select('id, profile_id')
-            .in('id', deliveryPartnerIds);
-          
-          // Get profile details separately
-          const profileIds = partners?.map(p => p.profile_id).filter(Boolean) || [];
-          if (profileIds.length > 0) {
-            const { data: profiles } = await supabase
-              .from('profiles')
-              .select('id, full_name, phone')
-              .in('id', profileIds);
-            
-            // Create profile lookup map
-            const profileMap = new Map();
-            profiles?.forEach(profile => {
-              profileMap.set(profile.id, profile);
+      // Fetch order items separately
+      const { data: orderItems, error: orderItemsError } = await supabase
+        .from('order_items')
+        .select(`
+          *,
+          vendor:vendors ( id, business_name, contact_phone, business_city, business_state )
+        `)
+        .in('order_id', orderIds);
+      if (orderItemsError) throw orderItemsError;
+
+      // Fetch delivery partner orders separately
+      const { data: deliveryPartnerOrders, error: deliveryPartnerOrdersError } = await supabase
+        .from('delivery_partner_orders')
+        .select(`
+          order_id,
+          pickup_otp,
+          delivery_otp,
+          assigned_at,
+          status,
+          delivery_partner_id
+        `)
+        .in('order_id', orderIds);
+      if (deliveryPartnerOrdersError) throw deliveryPartnerOrdersError;
+
+      // Fetch delivery partner profiles separately (if needed for name/phone)
+      const deliveryPartnerIds = deliveryPartnerOrders?.map(dpo => dpo.delivery_partner_id).filter(Boolean) || [];
+      const partnerProfilesMap = new Map();
+      if (deliveryPartnerIds.length > 0) {
+        const { data: partners, error: partnersError } = await supabase
+          .from('delivery_partners')
+          .select('id, profile_id');
+        if (partnersError) throw partnersError;
+
+        const profileIds = partners?.map(p => p.profile_id).filter(Boolean) || [];
+        if (profileIds.length > 0) {
+          const { data: profiles, error: profilesError } = await supabase
+            .from('profiles')
+            .select('id, full_name, phone')
+            .in('id', profileIds);
+          if (profilesError) throw profilesError;
+
+          const profileLookup = new Map(profiles?.map(p => [p.id, p]));
+          partners?.forEach(partner => {
+            partnerProfilesMap.set(partner.id, {
+              id: partner.id,
+              profile: profileLookup.get(partner.profile_id)
             });
-            
-            // Combine partner and profile data
-            partners?.forEach(partner => {
-              const profile = profileMap.get(partner.profile_id);
-              partnerProfiles.set(partner.id, {
-                id: partner.id,
-                profile: profile
-              });
-            });
-          }
+          });
         }
+      }
 
-      // Create a map for quick lookup of delivery data by order_id
+      // Fetch customer addresses separately
+      let customerAddressesMap = new Map();
+      if (deliveryAddressIds.length > 0) {
+        const { data: addresses, error: addressesError } = await supabase
+          .from('customer_addresses')
+          .select('id, address_box, pincode')
+          .in('id', deliveryAddressIds);
+
+        if (addressesError) throw addressesError;
+        addresses?.forEach(addr => customerAddressesMap.set(addr.id, addr));
+      }
+
+      // Organize order items by order_id
+      const orderItemsMap = new Map();
+      orderItems?.forEach(item => {
+        if (!orderItemsMap.has(item.order_id)) {
+          orderItemsMap.set(item.order_id, []);
+        }
+        orderItemsMap.get(item.order_id).push(item);
+      });
+
+      // Organize delivery partner orders by order_id
       const deliveryMap = new Map();
-      deliveryData?.forEach(item => {
+      deliveryPartnerOrders?.forEach(item => {
         deliveryMap.set(item.order_id, item);
       });
 
-      // Transform the results
-      const enhancedOrders = orders.map((order) => {
+      // Transform and reconstruct orders
+      const enhancedOrders = orders.map(order => {
         const deliveryInfo = deliveryMap.get(order.id);
-        let deliveryDetails = null;
+        const address = customerAddressesMap.get(order.delivery_address_id);
+        const reconstructedDeliveryAddress = address ? `${address.address_box}, ${address.pincode}` : null;
 
-        if (deliveryInfo?.delivery_partner) {
+        let deliveryDetails = null;
+        if (deliveryInfo) {
+          const partnerProfile = partnerProfilesMap.get(deliveryInfo.delivery_partner_id);
           deliveryDetails = {
-            delivery_partner_id: deliveryInfo.delivery_partner.id,
-            delivery_partner_name: deliveryInfo.delivery_partner.profile?.full_name,
-            delivery_partner_phone: deliveryInfo.delivery_partner.profile?.phone,
+            delivery_partner_id: deliveryInfo.delivery_partner_id,
+            delivery_partner_name: partnerProfile?.profile?.full_name,
+            delivery_partner_phone: partnerProfile?.profile?.phone,
             pickup_otp: deliveryInfo.pickup_otp,
             delivery_otp: deliveryInfo.delivery_otp,
             delivery_assigned_at: deliveryInfo.assigned_at,
-            delivery_status: deliveryInfo.status
+            delivery_status: deliveryInfo.status,
           };
         }
 
         return {
           ...order,
-          ...deliveryDetails,
+          delivery_address: reconstructedDeliveryAddress,
+          order_items: orderItemsMap.get(order.id) || [],
+          delivery_details: deliveryDetails,
           current_delivery_status: this.getCurrentDeliveryStatus(order, deliveryDetails)
         };
       });
@@ -745,9 +803,20 @@ export class OrderAPI {
           table: 'orders',
           filter: `customer_id=eq.${customerId}`
         },
-        (payload) => {
+        async (payload) => { // Added async here
           console.log('Order update received:', payload);
-          onUpdate(payload);
+          // Re-fetch order to get updated details including reconstructed address
+          if ((payload.new as any)?.id) {
+            const { data, error } = await this.getOrderById((payload.new as any).id);
+            if (data) {
+              onUpdate({ ...payload, new: data }); // Send updated full order object
+            } else if (error) {
+              console.error("Error re-fetching order after update:", error);
+              onUpdate(payload); // Fallback to original payload if re-fetch fails
+            }
+          } else {
+             onUpdate(payload);
+          }
         }
       )
       .subscribe();
@@ -762,7 +831,7 @@ export class OrderAPI {
           schema: 'public',
           table: 'order_items'
         },
-                 async (payload) => {
+        async (payload) => {
            // Check if this order item belongs to the customer
            const orderId = (payload.new as any)?.order_id || (payload.old as any)?.order_id;
            if (orderId) {
@@ -774,7 +843,14 @@ export class OrderAPI {
 
              if (order?.customer_id === customerId) {
                console.log('Order item update received:', payload);
-               onUpdate(payload);
+               // Re-fetch affected order to get updated details
+               const { data, error } = await this.getOrderById(orderId);
+               if (data) {
+                 onUpdate({ ...payload, new: data });
+               } else if (error) {
+                 console.error("Error re-fetching order after item update:", error);
+                 onUpdate(payload);
+               }
              }
            }
          }
@@ -791,7 +867,7 @@ export class OrderAPI {
           schema: 'public',
           table: 'delivery_partner_orders'
         },
-                 async (payload) => {
+        async (payload) => {
            // Check if this delivery update belongs to the customer
            const orderId = (payload.new as any)?.order_id || (payload.old as any)?.order_id;
            if (orderId) {
@@ -803,7 +879,14 @@ export class OrderAPI {
 
              if (order?.customer_id === customerId) {
                console.log('Delivery update received:', payload);
-               onUpdate(payload);
+               // Re-fetch affected order to get updated details
+               const { data, error } = await this.getOrderById(orderId);
+               if (data) {
+                 onUpdate({ ...payload, new: data });
+               } else if (error) {
+                 console.error("Error re-fetching order after delivery update:", error);
+                 onUpdate(payload);
+               }
              }
            }
          }
@@ -823,72 +906,140 @@ export class OrderAPI {
    */
   static async getOrderById(orderId: string): Promise<ApiResponse<any>> {
     try {
-      const { data: order, error } = await supabase
+      // Fetch the order
+      const { data: order, error: orderError } = await supabase
         .from('orders')
         .select(`
           *,
-          order_items (
-            *,
-            vendor:vendors (
-              id,
-              business_name,
-              contact_phone,
-              business_city,
-              business_state
-            )
-          )
+          delivery_address_id
         `)
         .eq('id', orderId)
         .single();
 
-      if (error) throw error;
+      if (orderError) throw orderError;
+      if (!order) {
+        return { success: false, error: 'Order not found' };
+      }
+
+      // Fetch order items for this order
+      const { data: orderItems, error: orderItemsError } = await supabase
+        .from('order_items')
+        .select(`
+          *,
+          vendor:vendors ( id, business_name, contact_phone, business_city, business_state )
+        `)
+        .eq('order_id', orderId);
+      if (orderItemsError) throw orderItemsError;
+
+      // Fetch customer details
+      const { data: customerData, error: customerError } = await supabase
+        .from('customers')
+        .select('profile_id')
+        .eq('id', order.customer_id)
+        .single();
+      if (customerError) throw customerError;
+
+      let customerProfile = null;
+      if (customerData?.profile_id) {
+        const { data: profileData, error: customerProfileError } = await supabase
+          .from('profiles')
+          .select('full_name, phone')
+          .eq('id', customerData.profile_id)
+          .single();
+        if (customerProfileError) throw customerProfileError;
+        customerProfile = profileData;
+      }
+
+
+      // Fetch customer address details
+      let customerAddress = null;
+      if (order.delivery_address_id) {
+        const { data: addressData, error: addressError } = await supabase
+          .from('customer_addresses')
+          .select('address_box, pincode')
+          .eq('id', order.delivery_address_id)
+          .single();
+
+        if (addressError) throw addressError;
+        customerAddress = addressData;
+      }
+
+      // Reconstruct delivery_address
+      const reconstructedDeliveryAddress = customerAddress
+        ? `${customerAddress.address_box}, ${customerAddress.pincode}`
+        : null;
 
       // Get delivery partner information
       let deliveryInfo = null;
+      let deliveryPartnerProfile = null;
       try {
-        const { data: deliveryData } = await supabase
+        const { data: deliveryData, error: deliveryDataError } = await supabase
           .from('delivery_partner_orders')
           .select(`
             *,
-            delivery_partner:delivery_partners (
-              id,
-              profile:profiles (
-                full_name,
-                phone
-              )
-            )
+            delivery_partner_id
           `)
           .eq('order_id', orderId)
           .single();
 
-        if (deliveryData?.delivery_partner) {
-          deliveryInfo = {
-            delivery_partner_id: deliveryData.delivery_partner.id,
-            delivery_partner_name: deliveryData.delivery_partner.profile?.full_name,
-            delivery_partner_phone: deliveryData.delivery_partner.profile?.phone,
-            pickup_otp: deliveryData.pickup_otp,
-            delivery_otp: deliveryData.delivery_otp,
-            delivery_assigned_at: deliveryData.assigned_at,
-            delivery_status: deliveryData.status
-          };
+        if (deliveryDataError && deliveryDataError.code !== 'PGRST116') { // PGRST116 is "No rows found"
+          throw deliveryDataError;
         }
-      } catch (e) {
-        // Delivery partner not assigned yet
+
+        if (deliveryData) {
+          deliveryInfo = deliveryData;
+          if (deliveryData.delivery_partner_id) {
+            const { data: partnerEntity, error: partnerEntityError } = await supabase
+              .from('delivery_partners')
+              .select('profile_id')
+              .eq('id', deliveryData.delivery_partner_id)
+              .single();
+
+            if (partnerEntityError) throw partnerEntityError;
+
+            if (partnerEntity?.profile_id) {
+              const { data: dpProfile, error: dpProfileError } = await supabase
+                .from('profiles')
+                .select('full_name, phone')
+                .eq('id', partnerEntity.profile_id)
+                .single();
+              if (dpProfileError) throw dpProfileError;
+              deliveryPartnerProfile = dpProfile;
+            }
+          }
+        }
+      } catch (e: any) {
+        console.error('Error fetching delivery partner info:', e.message);
+        // Continue even if delivery info fails, as it's optional
       }
+
+      // Build tracking timeline
+      const trackingUpdates = this.buildTrackingTimeline(order, {
+        ...deliveryInfo,
+        delivery_partner: {
+          profile: deliveryPartnerProfile
+        }
+      });
 
       return {
         success: true,
         data: {
           ...order,
-          ...deliveryInfo,
+          delivery_address: reconstructedDeliveryAddress, // Add the reconstructed address
+          order_items: orderItems,
+          customer_name: customerProfile?.full_name,
+          customer_phone: customerProfile?.phone,
+          delivery_partner: deliveryPartnerProfile, // Flatten delivery partner details
+          delivery_status_details: deliveryInfo, // Raw delivery info
+          tracking_updates: trackingUpdates,
           current_delivery_status: this.getCurrentDeliveryStatus(order, deliveryInfo)
         },
-        message: 'Order retrieved successfully'
+        message: 'Order details retrieved successfully'
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to fetch order'
+        error: error.message || 'Failed to fetch order details'
       };
     }
   }
@@ -909,9 +1060,9 @@ export class OrderAPI {
           updated_at: new Date().toISOString(),
           ...(notes && { notes }),
           ...(status === 'delivered' && { actual_delivery_date: new Date().toISOString() }),
-          ...(status === 'shipped' && { shipped_date: new Date().toISOString() }),
-          ...(status === 'picked_up' && { picked_up_date: new Date().toISOString() }),
-          ...(status === 'out_for_delivery' && { out_for_delivery_date: new Date().toISOString() })
+          ...(status === 'shipped' && { out_for_delivery_time: new Date().toISOString() }), // Assuming shipped implies out for delivery
+          ...(status === 'picked_up' && { pickup_time: new Date().toISOString() }),
+          ...(status === 'out_for_delivery' && { out_for_delivery_time: new Date().toISOString() })
         })
         .eq('id', orderId)
         .select()
@@ -996,63 +1147,13 @@ export class OrderAPI {
    */
   static async getOrderTracking(orderId: string): Promise<ApiResponse<any>> {
     try {
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .select(`
-          *,
-          order_items (
-            *,
-            vendor:vendors (
-              id,
-              business_name,
-              contact_phone
-            )
-          )
-        `)
-        .eq('id', orderId)
-        .single();
-
-      if (orderError) throw orderError;
-
-      // Get delivery partner information
-      let deliveryPartner = null;
-      const { data: deliveryData } = await supabase
-        .from('delivery_partner_orders')
-        .select(`
-          *,
-          delivery_partner:delivery_partners (
-            profile:profiles (
-              full_name,
-              phone
-            )
-          )
-        `)
-        .eq('order_id', orderId)
-        .single();
-
-      if (deliveryData?.delivery_partner) {
-        deliveryPartner = {
-          id: deliveryData.delivery_partner_id,
-          name: deliveryData.delivery_partner.profile?.full_name,
-          phone: deliveryData.delivery_partner.profile?.phone,
-          pickup_otp: deliveryData.pickup_otp,
-          delivery_otp: deliveryData.delivery_otp,
-          assigned_at: deliveryData.assigned_at,
-          status: deliveryData.status
-        };
-      }
-
-      // Build tracking timeline
-      const trackingUpdates = this.buildTrackingTimeline(order, deliveryPartner);
+      const { data: order, error } = await this.getOrderById(orderId);
+      
+      if (error) throw error;
 
       return {
         success: true,
-        data: {
-          ...order,
-          delivery_partner: deliveryPartner,
-          tracking_updates: trackingUpdates,
-          current_delivery_status: this.getCurrentDeliveryStatus(order, deliveryPartner)
-        },
+        data: order,
         message: 'Order tracking retrieved successfully'
       };
     } catch (error: any) {
@@ -1077,11 +1178,15 @@ export class OrderAPI {
           updated_at: new Date().toISOString()
         })
         .eq('id', orderId)
-        .eq('order_status', 'pending') // Only allow cancelling pending orders
+        .in('order_status', ['pending', 'confirmed']) // Only allow cancelling pending or confirmed orders
         .select()
         .single();
 
       if (error) throw error;
+      
+      if (!data) {
+        return { success: false, error: 'Order cannot be cancelled at its current stage.' };
+      }
 
       // Also cancel all order items
       await supabase
@@ -1123,6 +1228,10 @@ export class OrderAPI {
         .single();
 
       if (error) throw error;
+      
+      if (!data) {
+        return { success: false, error: 'Order is not in a returnable state.' };
+      }
 
       return {
         success: true,
@@ -1141,8 +1250,8 @@ export class OrderAPI {
    * Helper method to determine current delivery status
    */
   private static getCurrentDeliveryStatus(order: any, deliveryInfo?: any): string {
-    if (deliveryInfo?.delivery_status) {
-      return deliveryInfo.delivery_status;
+    if (deliveryInfo?.status) {
+      return deliveryInfo.status;
     }
     
     // Map order status to delivery status
@@ -1179,30 +1288,30 @@ export class OrderAPI {
       updates.push({
         id: 'assigned',
         status: 'Assigned to Delivery Partner',
-        message: `Order assigned to ${deliveryPartner.name}`,
+        message: `Order assigned to ${deliveryPartner.delivery_partner?.profile?.full_name || 'delivery partner'}`,
         timestamp: deliveryPartner.assigned_at,
         location: 'Delivery Hub'
       });
     }
 
     // Picked up
-    if (order.picked_up_date) {
+    if (order.pickup_time) {
       updates.push({
         id: 'picked_up',
         status: 'Picked Up',
         message: 'Order has been picked up by delivery partner',
-        timestamp: order.picked_up_date,
+        timestamp: order.pickup_time,
         location: 'Vendor Location'
       });
     }
 
     // Out for delivery
-    if (order.out_for_delivery_date) {
+    if (order.out_for_delivery_time) {
       updates.push({
         id: 'out_for_delivery',
         status: 'Out for Delivery',
         message: 'Order is on the way to your location',
-        timestamp: order.out_for_delivery_date,
+        timestamp: order.out_for_delivery_time,
         location: 'En Route'
       });
     }
@@ -1241,34 +1350,16 @@ export class OrderAPI {
       try {
         const { data, error } = await supabase
           .from('order_items')
-          .upsert({
-            id: orderItemId,
+          .update({
             item_status: status,
             updated_at: new Date().toISOString()
-          }, {
-            onConflict: 'id'
           })
+          .eq('id', orderItemId)
           .select()
           .single();
 
         if (error) {
-          console.error('Upsert error:', error);
-          
-          // Try alternative approach with rpc call if available
-          try {
-            const { data: rpcData, error: rpcError } = await supabase.rpc('update_order_item_status', {
-              item_id: orderItemId,
-              new_status: status
-            });
-
-            if (rpcError) throw rpcError;
-            
-            console.log('Update successful via RPC:', rpcData);
-            return { success: true, data: rpcData, message: 'Order item status updated successfully' };
-          } catch (rpcErr) {
-            console.warn('RPC also failed:', rpcErr);
-            throw error; // Throw original upsert error
-          }
+          throw error;
         }
 
         console.log('Update successful via upsert:', data);
@@ -1292,13 +1383,12 @@ export class OrderAPI {
         // Update with all required fields
         const { data: updateData, error: updateError } = await supabase
           .from('order_items')
-          .upsert({
+          .update({
             ...currentItem,
             item_status: status,
             updated_at: new Date().toISOString()
-          }, {
-            onConflict: 'id'
           })
+          .eq('id', orderItemId)
           .select()
           .single();
 
@@ -1313,6 +1403,77 @@ export class OrderAPI {
     } catch (error: any) {
       console.error('OrderAPI.updateOrderItemStatus error:', error);
       return { success: false, error: error.message || 'Failed to update order item status' };
+    }
+  }
+
+  static async createOrder(orderData: {
+    customerId: string;
+    delivery_address_id: string;
+    items: any[]; // Consider defining a proper type for cart items
+    subtotal: number;
+    shipping_charges: number;
+    tax_amount: number;
+    discount_amount: number;
+    total_amount: number;
+    payment_method: string;
+    payment_status: string;
+    notes?: string;
+    delivery_instructions?: string;
+    special_instructions?: string;
+    slot_id: string;
+    sector_id: string;
+    delivery_date: string;
+  }): Promise<ApiResponse<any>> {
+    try {
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .insert([{
+          customer_id: orderData.customerId,
+          delivery_address_id: orderData.delivery_address_id,
+          subtotal: orderData.subtotal,
+          shipping_charges: orderData.shipping_charges,
+          tax_amount: orderData.tax_amount,
+          discount_amount: orderData.discount_amount,
+          total_amount: orderData.total_amount,
+          payment_method: orderData.payment_method,
+          payment_status: orderData.payment_status,
+          notes: orderData.notes,
+          delivery_instructions: orderData.delivery_instructions,
+          special_instructions: orderData.special_instructions,
+          slot_id: orderData.slot_id,
+          sector_id: orderData.sector_id,
+          delivery_date: orderData.delivery_date,
+          order_status: 'pending',
+        }])
+        .select()
+        .single();
+
+      if (orderError) throw orderError;
+
+      const orderItems = orderData.items.map(item => ({
+        order_id: order.id,
+        vendor_id: item.vendorId,
+        vendor_product_id: item.productId, // Fixed: use vendor_product_id instead of product_id
+        product_name: item.name,
+        quantity: item.quantity,
+        unit_price: item.price,
+        line_total: item.price * item.quantity,
+        // Add other relevant item fields here
+      }));
+
+      const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
+      if (itemsError) throw itemsError;
+
+      return {
+        success: true,
+        data: order,
+        message: 'Order created successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to create order'
+      };
     }
   }
 }
@@ -1589,17 +1750,63 @@ export class TransactionAPI {
   }
 }
 
+export interface CommissionRule {
+  id: string;
+  category_id: string;
+  commission_percentage: number;
+  minimum_commission: number;
+  maximum_commission: number | null;
+  is_active: boolean;
+  effective_from: string;
+  effective_until: string | null;
+  created_by: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  quality_id: string | null;
+  smartphone_model_id: string | null;
+  category?: { id: string; name: string };
+  quality?: { id: string; name: string };
+  model?: { id: string; model_name: string };
+  created_by_profile?: { full_name: string };
+}
+
+export interface VendorCommissionOverride {
+  id: string;
+  vendor_id: string;
+  category_id: string;
+  commission_percentage: number;
+  minimum_commission: number;
+  maximum_commission: number | null;
+  is_active: boolean;
+  effective_from: string;
+  effective_until: string | null;
+  created_by: string | null;
+  reason: string | null;
+  created_at: string;
+  updated_at: string;
+  quality_id: string | null;
+  smartphone_model_id: string | null;
+  vendor?: { business_name: string };
+  category?: { name: string };
+  quality?: { name: string };
+  model?: { model_name: string };
+  created_by_profile?: { full_name: string };
+}
+
 export class CommissionAPI {
   /**
    * Get all commission rules
    */
-  static async getCommissionRules(): Promise<ApiResponse<any[]>> {
+  static async getCommissionRules(): Promise<ApiResponse<CommissionRule[]>> {
     try {
       const { data, error } = await supabase
         .from('commission_rules')
         .select(`
           *,
           category:categories(name, id),
+          quality:quality_categories(name, id),
+          model:smartphone_models(model_name, id),
           created_by_profile:profiles(full_name)
         `)
         .eq('is_active', true)
@@ -1633,7 +1840,9 @@ export class CommissionAPI {
     effectiveUntil?: string;
     notes?: string;
     createdBy: string;
-  }): Promise<ApiResponse<any>> {
+    qualityId?: string;
+    smartphoneModelId?: string;
+  }): Promise<ApiResponse<CommissionRule>> {
     try {
       const { data, error } = await supabase
         .from('commission_rules')
@@ -1646,7 +1855,9 @@ export class CommissionAPI {
           effective_from: ruleData.effectiveFrom || new Date().toISOString(),
           effective_until: ruleData.effectiveUntil,
           notes: ruleData.notes,
-          created_by: ruleData.createdBy
+          created_by: ruleData.createdBy,
+          quality_id: ruleData.qualityId,
+          smartphone_model_id: ruleData.smartphoneModelId,
         }])
         .select()
         .single();
@@ -1669,7 +1880,7 @@ export class CommissionAPI {
   /**
    * Get vendor commission overrides
    */
-  static async getVendorCommissionOverrides(vendorId?: string): Promise<ApiResponse<any[]>> {
+  static async getVendorCommissionOverrides(vendorId?: string): Promise<ApiResponse<VendorCommissionOverride[]>> {
     try {
       let query = supabase
         .from('vendor_commission_overrides')
@@ -1677,6 +1888,8 @@ export class CommissionAPI {
           *,
           vendor:vendors(business_name),
           category:categories(name),
+          quality:quality_categories(name, id),
+          model:smartphone_models(model_name, id),
           created_by_profile:profiles(full_name)
         `)
         .eq('is_active', true)
@@ -1716,7 +1929,9 @@ export class CommissionAPI {
     effectiveUntil?: string;
     reason?: string;
     createdBy: string;
-  }): Promise<ApiResponse<any>> {
+    qualityId?: string;
+    smartphoneModelId?: string;
+  }): Promise<ApiResponse<VendorCommissionOverride>> {
     try {
       const { data, error } = await supabase
         .from('vendor_commission_overrides')
@@ -1729,7 +1944,9 @@ export class CommissionAPI {
           effective_from: overrideData.effectiveFrom || new Date().toISOString(),
           effective_until: overrideData.effectiveUntil,
           reason: overrideData.reason,
-          created_by: overrideData.createdBy
+          created_by: overrideData.createdBy,
+          quality_id: overrideData.qualityId,
+          smartphone_model_id: overrideData.smartphoneModelId,
         }])
         .select()
         .single();
@@ -1755,13 +1972,17 @@ export class CommissionAPI {
   static async calculateCommission(
     vendorId: string,
     categoryId: string,
-    amount: number
+    amount: number,
+    qualityId?: string,
+    smartphoneModelId?: string
   ): Promise<ApiResponse<any>> {
     try {
       const { data, error } = await supabase.rpc('calculate_commission', {
         p_vendor_id: vendorId,
         p_category_id: categoryId,
-        p_amount: amount
+        p_amount: amount,
+        p_quality_id: qualityId,
+        p_smartphone_model_id: smartphoneModelId,
       });
 
       if (error) throw error;
@@ -1775,7 +1996,8 @@ export class CommissionAPI {
           commissionAmount: result.commission_amount,
           vendorEarning: result.vendor_earning,
           ruleType: result.rule_type,
-          ruleId: result.rule_id
+          ruleId: result.rule_id,
+          overrideId: result.override_id,
         },
         message: 'Commission calculated successfully'
       };
@@ -2115,7 +2337,7 @@ export class PayoutAPI {
       const randomSuffix = Math.floor(Math.random() * 999999).toString().padStart(6, '0');
       const recipientSuffix = payoutData.recipientId.slice(0, 8);
       
-      const payoutNumber = `PAY-${timestamp}-${payoutData.recipientType.toUpperCase()}-${recipientSuffix}-${randomSuffix}`;
+      const payoutNumber = `PAY-${timestamp}-${microseconds}-${recipientSuffix}-${randomSuffix}`;
 
       const { data, error } = await supabase
         .from('payouts')
@@ -2198,21 +2420,26 @@ export class PayoutAPI {
     periodEnd?: string
   ): Promise<ApiResponse<any>> {
     try {
-      let walletTable, walletIdField;
-      
-      if (recipientType === 'vendor') {
-        walletTable = 'vendor_wallets';
-        walletIdField = 'vendor_id';
-      } else {
-        walletTable = 'delivery_partner_wallets';
-        walletIdField = 'delivery_partner_id';
-      }
+      let data, error;
 
-      const { data, error } = await supabase
-        .from(walletTable)
-        .select('available_balance, total_earned, total_paid_out')
-        .eq(walletIdField, recipientId)
-        .single();
+      if (recipientType === 'vendor') {
+        const { data: walletData, error: walletError } = await supabase
+          .from('vendor_wallets')
+          .select('available_balance, total_earned, total_paid_out')
+          .eq('vendor_id', recipientId)
+          .single();
+        data = walletData;
+        error = walletError;
+
+      } else {
+        const { data: walletData, error: walletError } = await supabase
+          .from('delivery_partner_wallets')
+          .select('available_balance, total_earned, total_paid_out')
+          .eq('delivery_partner_id', recipientId)
+          .single();
+        data = walletData;
+        error = walletError;
+      }
 
       if (error) throw error;
 

@@ -1,0 +1,213 @@
+Date : 2025-07-02 02:00:40
+Directory : /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website
+Total : 161 files,  58027 codes, 2097 comments, 5924 blanks, all 66048 lines
+
+Languages
++--------------------+------------+------------+------------+------------+------------+
+| language           | files      | code       | comment    | blank      | total      |
++--------------------+------------+------------+------------+------------+------------+
+| TypeScript JSX     |        113 |     30,407 |      1,538 |      3,092 |     35,037 |
+| JSON               |          9 |     12,643 |          4 |         12 |     12,659 |
+| YAML               |          1 |      7,080 |          0 |      1,642 |      8,722 |
+| TypeScript         |         16 |      5,451 |        426 |        753 |      6,630 |
+| CSS                |          2 |        609 |         59 |        135 |        803 |
+| Markdown           |          4 |        538 |          0 |        136 |        674 |
+| JavaScript JSX     |          1 |        473 |          0 |         46 |        519 |
+| MS SQL             |          4 |        275 |         32 |         25 |        332 |
+| JavaScript         |          5 |        267 |         24 |         49 |        340 |
+| HTML               |          3 |        264 |         13 |         32 |        309 |
+| JSON with Comments |          1 |         19 |          0 |          1 |         20 |
+| XML                |          1 |          1 |          0 |          0 |          1 |
+| Ignore             |          1 |          0 |          1 |          1 |          2 |
++--------------------+------------+------------+------------+------------+------------+
+
+Directories
++-----------------------------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                                                                                  | files      | code       | comment    | blank      | total      |
++-----------------------------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                                                                                     |        161 |     58,027 |      2,097 |      5,924 |     66,048 |
+| . (Files)                                                                                                             |         22 |     21,277 |         34 |      1,885 |     23,196 |
+| .cursor                                                                                                               |          1 |         16 |          0 |          1 |         17 |
+| public                                                                                                                |          4 |        318 |          6 |         23 |        347 |
+| src                                                                                                                   |        130 |     36,141 |      2,025 |      3,990 |     42,156 |
+| src (Files)                                                                                                           |          6 |        849 |         78 |        172 |      1,099 |
+| src/components                                                                                                        |         77 |      7,932 |        177 |        941 |      9,050 |
+| src/components (Files)                                                                                                |         14 |      1,957 |         74 |        222 |      2,253 |
+| src/components/customer                                                                                               |          3 |        838 |         32 |         80 |        950 |
+| src/components/magicui                                                                                                |         10 |        765 |         47 |        116 |        928 |
+| src/components/ui                                                                                                     |         50 |      4,372 |         24 |        523 |      4,919 |
+| src/contexts                                                                                                          |          2 |        633 |         44 |        103 |        780 |
+| src/hooks                                                                                                             |          4 |        289 |          3 |         57 |        349 |
+| src/lib                                                                                                               |          9 |      4,780 |        416 |        694 |      5,890 |
+| src/pages                                                                                                             |         32 |     21,658 |      1,307 |      2,023 |     24,988 |
+| supabase                                                                                                              |          4 |        275 |         32 |         25 |        332 |
+| supabase/migrations                                                                                                   |          4 |        275 |         32 |         25 |        332 |
++-----------------------------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++-----------------------------------------------------------------------------------------------------------------------+--------------------+------------+------------+------------+------------+
+| filename                                                                                                              | language           | code       | comment    | blank      | total      |
++-----------------------------------------------------------------------------------------------------------------------+--------------------+------------+------------+------------+------------+
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/.cursor/mcp.json                                             | JSON               |         16 |          0 |          1 |         17 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/.cursorignore                                                | Ignore             |          0 |          1 |          1 |          2 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/FIXES_SUMMARY.md                                             | Markdown           |         17 |          0 |          8 |         25 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/ORDER_SYSTEM_FIXES.md                                        | Markdown           |        108 |          0 |         28 |        136 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/README.md                                                    | Markdown           |         81 |          0 |         24 |        105 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/SLOT_DELIVERY_SYSTEM.md                                      | Markdown           |        332 |          0 |         76 |        408 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/browser-debug.js                                             | JavaScript         |        112 |         10 |         19 |        141 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/components.json                                              | JSON               |         20 |          0 |          0 |         20 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/debug-service-role.js                                        | JavaScript         |         52 |          6 |         13 |         71 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/design-home-page.json                                        | JSON               |          0 |          0 |          1 |          1 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/eslint.config.js                                             | JavaScript         |         28 |          0 |          2 |         30 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/firebase.json                                                | JSON               |         16 |          0 |          1 |         17 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/index.html                                                   | HTML               |         40 |          7 |          9 |         56 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/new-check.jsx                                                | JavaScript JSX     |        473 |          0 |         46 |        519 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/package-lock.json                                            | JSON               |     12,366 |          0 |          1 |     12,367 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/package.json                                                 | JSON               |         89 |          0 |          1 |         90 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/pnpm-lock.yaml                                               | YAML               |      7,080 |          0 |      1,642 |      8,722 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/postcss.config.js                                            | JavaScript         |          6 |          0 |          1 |          7 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/public/index.html                                            | HTML               |         79 |          6 |          5 |         90 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/public/manifest.json                                         | JSON               |         93 |          0 |          0 |         93 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/public/offline.html                                          | HTML               |        145 |          0 |         18 |        163 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/public/placeholder.svg                                       | XML                |          1 |          0 |          0 |          1 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/App.css                                                  | CSS                |         37 |          0 |          6 |         43 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/App.tsx                                                  | TypeScript JSX     |        167 |         10 |         20 |        197 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/CategoryCard.tsx                              | TypeScript JSX     |         31 |          1 |          8 |         40 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/Footer.tsx                                    | TypeScript JSX     |         53 |          4 |          6 |         63 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/Header.tsx                                    | TypeScript JSX     |        263 |         11 |         22 |        296 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/LoadingSpinner.tsx                            | TypeScript JSX     |         94 |          0 |         15 |        109 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/MobileBottomNav.tsx                           | TypeScript JSX     |        198 |         12 |         19 |        229 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/MobileOrderCard.tsx                           | TypeScript JSX     |        433 |         12 |         31 |        476 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/NetworkStatusIndicator.tsx                    | TypeScript JSX     |         23 |          1 |          7 |         31 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/PWAInstallPrompt.tsx                          | TypeScript JSX     |        100 |         11 |         20 |        131 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/PWAStatus.tsx                                 | TypeScript JSX     |         93 |          3 |         10 |        106 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/PhoneSearch.tsx                               | TypeScript JSX     |         82 |          0 |         12 |         94 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ProtectedRoute.tsx                            | TypeScript JSX     |         81 |         10 |         15 |        106 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/SlotSelection.tsx                             | TypeScript JSX     |        254 |          6 |         34 |        294 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/VendorCard.tsx                                | TypeScript JSX     |        134 |          0 |         12 |        146 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/VendorSalesSection.tsx                        | TypeScript JSX     |        118 |          3 |         11 |        132 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/customer/Cart.tsx                             | TypeScript JSX     |        206 |         10 |         24 |        240 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/customer/OrderCard.tsx                        | TypeScript JSX     |        408 |         11 |         29 |        448 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/customer/OrderTracking.tsx                    | TypeScript JSX     |        224 |         11 |         27 |        262 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/magicui/animated-list.tsx                     | TypeScript JSX     |         62 |          0 |         11 |         73 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/magicui/cool-mode.tsx                         | TypeScript JSX     |        196 |          0 |         45 |        241 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/magicui/magic-card.tsx                        | TypeScript JSX     |         97 |          0 |         12 |        109 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/magicui/marquee.tsx                           | TypeScript JSX     |         49 |         22 |          3 |         74 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/magicui/number-ticker.tsx                     | TypeScript JSX     |         60 |          0 |          8 |         68 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/magicui/pulsating-button.tsx                  | TypeScript JSX     |         43 |          0 |          4 |         47 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/magicui/rainbow-button.tsx                    | TypeScript JSX     |         56 |          0 |          7 |         63 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/magicui/ripple-button.tsx                     | TypeScript JSX     |         82 |          0 |         10 |         92 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/magicui/shimmer-button.tsx                    | TypeScript JSX     |         78 |          8 |         11 |         97 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/magicui/shine-border.tsx                      | TypeScript JSX     |         42 |         17 |          5 |         64 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/accordion.tsx                              | TypeScript JSX     |         49 |          0 |          8 |         57 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/alert-dialog.tsx                           | TypeScript JSX     |        126 |          0 |         14 |        140 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/alert.tsx                                  | TypeScript JSX     |         53 |          0 |          7 |         60 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/aspect-ratio.tsx                           | TypeScript JSX     |          3 |          0 |          3 |          6 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/avatar.tsx                                 | TypeScript JSX     |         43 |          0 |          6 |         49 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/badge.tsx                                  | TypeScript JSX     |         31 |          0 |          6 |         37 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/breadcrumb.tsx                             | TypeScript JSX     |        105 |          0 |         11 |        116 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/button.tsx                                 | TypeScript JSX     |         93 |          8 |         10 |        111 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/calendar.tsx                               | TypeScript JSX     |         60 |          0 |          5 |         65 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/card.tsx                                   | TypeScript JSX     |         71 |          0 |          9 |         80 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/carousel.tsx                               | TypeScript JSX     |        231 |          0 |         30 |        261 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/chart.tsx                                  | TypeScript JSX     |        326 |          2 |         36 |        364 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/checkbox.tsx                               | TypeScript JSX     |         25 |          0 |          4 |         29 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/collapsible.tsx                            | TypeScript JSX     |          5 |          0 |          5 |         10 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/command.tsx                                | TypeScript JSX     |        136 |          0 |         18 |        154 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/context-menu.tsx                           | TypeScript JSX     |        181 |          0 |         18 |        199 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/dialog.tsx                                 | TypeScript JSX     |        108 |          0 |         13 |        121 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/drawer.tsx                                 | TypeScript JSX     |        104 |          0 |         13 |        117 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/dropdown-menu.tsx                          | TypeScript JSX     |        181 |          0 |         18 |        199 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/floating-action-button.tsx                 | TypeScript JSX     |         61 |          2 |          7 |         70 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/form.tsx                                   | TypeScript JSX     |        152 |          0 |         25 |        177 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/hover-card.tsx                             | TypeScript JSX     |         22 |          0 |          6 |         28 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/input-otp.tsx                              | TypeScript JSX     |         62 |          0 |          8 |         70 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/input.tsx                                  | TypeScript JSX     |         20 |          0 |          4 |         24 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/label.tsx                                  | TypeScript JSX     |         20 |          0 |          5 |         25 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/menubar.tsx                                | TypeScript JSX     |        216 |          0 |         19 |        235 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/navigation-menu.tsx                        | TypeScript JSX     |        117 |          0 |         12 |        129 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/pagination.tsx                             | TypeScript JSX     |        107 |          0 |         11 |        118 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/popover.tsx                                | TypeScript JSX     |         24 |          0 |          6 |         30 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/progress.tsx                               | TypeScript JSX     |         23 |          0 |          4 |         27 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/radio-group.tsx                            | TypeScript JSX     |         38 |          0 |          5 |         43 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/resizable.tsx                              | TypeScript JSX     |         38 |          0 |          6 |         44 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/scroll-area.tsx                            | TypeScript JSX     |         42 |          0 |          5 |         47 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/select.tsx                                 | TypeScript JSX     |        145 |          0 |         14 |        159 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/separator.tsx                              | TypeScript JSX     |         26 |          0 |          4 |         30 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/sheet.tsx                                  | TypeScript JSX     |        116 |          0 |         16 |        132 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/sidebar.tsx                                | TypeScript JSX     |        696 |         12 |         54 |        762 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/skeleton.tsx                               | TypeScript JSX     |         13 |          0 |          3 |         16 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/slider.tsx                                 | TypeScript JSX     |         23 |          0 |          4 |         27 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/sonner.tsx                                 | TypeScript JSX     |         23 |          0 |          4 |         27 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/switch.tsx                                 | TypeScript JSX     |         24 |          0 |          4 |         28 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/table.tsx                                  | TypeScript JSX     |        107 |          0 |         11 |        118 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/tabs.tsx                                   | TypeScript JSX     |         47 |          0 |          7 |         54 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/textarea.tsx                               | TypeScript JSX     |         20 |          0 |          5 |         25 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/toast.tsx                                  | TypeScript JSX     |        115 |          0 |         13 |        128 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/toaster.tsx                                | TypeScript JSX     |         31 |          0 |          3 |         34 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/toggle-group.tsx                           | TypeScript JSX     |         51 |          0 |          9 |         60 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/toggle.tsx                                 | TypeScript JSX     |         38 |          0 |          6 |         44 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/tooltip.tsx                                | TypeScript JSX     |         22 |          0 |          7 |         29 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/components/ui/use-toast.ts                               | TypeScript         |          2 |          0 |          2 |          4 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/contexts/AuthContext.tsx                                 | TypeScript JSX     |        405 |         28 |         75 |        508 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/contexts/CartContext.tsx                                 | TypeScript JSX     |        228 |         16 |         28 |        272 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/debug-browser.js                                         | JavaScript         |         69 |          8 |         14 |         91 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/hooks/use-mobile.tsx                                     | TypeScript JSX     |         15 |          0 |          5 |         20 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/hooks/use-toast.ts                                       | TypeScript         |        159 |          2 |         31 |        192 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/hooks/useLocationTracking.ts                             | TypeScript         |         69 |          1 |         12 |         82 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/hooks/useRoleAccess.ts                                   | TypeScript         |         46 |          0 |          9 |         55 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/index.css                                                | CSS                |        572 |         59 |        129 |        760 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/lib/api.ts                                               | TypeScript         |      2,035 |        194 |        236 |      2,465 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/lib/apiRouter.ts                                         | TypeScript         |        288 |         24 |         65 |        377 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/lib/authUtils.ts                                         | TypeScript         |         87 |          5 |         16 |        108 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/lib/cartApi.ts                                           | TypeScript         |        434 |         48 |         83 |        565 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/lib/deliveryApi.ts                                       | TypeScript         |      1,701 |        132 |        255 |      2,088 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/lib/profileUtils.ts                                      | TypeScript         |         92 |          4 |         15 |        111 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/lib/pwa.ts                                               | TypeScript         |        131 |          5 |         17 |        153 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/lib/supabase.ts                                          | TypeScript         |          7 |          4 |          5 |         16 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/lib/utils.ts                                             | TypeScript         |          5 |          0 |          2 |          7 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/main.tsx                                                 | TypeScript JSX     |          4 |          0 |          2 |          6 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/About.tsx                                          | TypeScript JSX     |        227 |          7 |         22 |        256 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/AddProduct.tsx                                     | TypeScript JSX     |        761 |        147 |         87 |        995 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/AddressContent.tsx                                 | TypeScript JSX     |        220 |          0 |         12 |        232 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/AdminCategoriesManagement.tsx                      | TypeScript JSX     |        705 |         19 |         88 |        812 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/AdminCommissionRules.tsx                           | TypeScript JSX     |        649 |          8 |         51 |        708 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/AdminDashboard.tsx                                 | TypeScript JSX     |      1,388 |         47 |        115 |      1,550 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/AdminDeliveryWallets.tsx                           | TypeScript JSX     |        626 |          9 |         37 |        672 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/AdminModelsManagement.tsx                          | TypeScript JSX     |      1,138 |         36 |        121 |      1,295 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/AdminPayoutManagement.tsx                          | TypeScript JSX     |        676 |         12 |         55 |        743 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/AdminQualitiesManagement.tsx                       | TypeScript JSX     |        708 |         20 |         83 |        811 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/AdminSectorManagement.tsx                          | TypeScript JSX     |        466 |          7 |         46 |        519 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/AdminSlotManagement.tsx                            | TypeScript JSX     |        626 |          8 |         60 |        694 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/AdminVendorManagement.tsx                          | TypeScript JSX     |        918 |         14 |         83 |      1,015 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/AdminVendorWallets.tsx                             | TypeScript JSX     |        522 |          9 |         34 |        565 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/Checkout.tsx                                       | TypeScript JSX     |        779 |          6 |         68 |        853 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/Contact.tsx                                        | TypeScript JSX     |        350 |         17 |         27 |        394 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/DeliveryBoyDashboard.tsx                           | TypeScript JSX     |        573 |          8 |         56 |        637 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/DeliveryPartnerDashboard.tsx                       | TypeScript JSX     |      1,531 |        110 |        125 |      1,766 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/Index.tsx                                          | TypeScript JSX     |        518 |         26 |         41 |        585 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/Login.tsx                                          | TypeScript JSX     |        278 |         28 |         40 |        346 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/MyOrders.tsx                                       | TypeScript JSX     |        627 |         15 |         49 |        691 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/NotFound.tsx                                       | TypeScript JSX     |         15 |          0 |          3 |         18 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/Order.tsx                                          | TypeScript JSX     |        986 |         54 |        127 |      1,167 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/OrderSuccess.tsx                                   | TypeScript JSX     |        745 |         33 |         87 |        865 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/ProfileContent.tsx                                 | TypeScript JSX     |        308 |         17 |         31 |        356 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/ResetPassword.tsx                                  | TypeScript JSX     |        250 |          9 |         27 |        286 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/SettingsContent.tsx                                | TypeScript JSX     |        204 |          5 |         21 |        230 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/Signup.tsx                                         | TypeScript JSX     |        409 |         19 |         38 |        466 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/UserProfilePage.tsx                                | TypeScript JSX     |        131 |          6 |         12 |        149 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/VendorDashboard.tsx                                | TypeScript JSX     |      2,402 |        358 |        216 |      2,976 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/VendorProductManagement.tsx                        | TypeScript JSX     |      1,437 |         70 |        132 |      1,639 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/pages/VendorProfile.tsx                                  | TypeScript JSX     |        485 |        183 |         29 |        697 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/src/vite-env.d.ts                                            | TypeScript         |          0 |          1 |          1 |          2 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/supabase/migrations/20250701_update_address_concept.sql      | MS SQL             |         33 |          5 |          4 |         42 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/supabase/migrations/20250702_refactor_address_columns.sql    | MS SQL             |          7 |         11 |          4 |         22 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/supabase/migrations/20250703_create_delivery_slot_system.sql | MS SQL             |        113 |         12 |         14 |        139 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/supabase/migrations/20250704_refactor_order_address.sql      | MS SQL             |        122 |          4 |          3 |        129 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/tailwind.config.ts                                           | TypeScript         |        194 |          5 |          2 |        201 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/tsconfig.app.json                                            | JSON               |         25 |          2 |          4 |         31 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/tsconfig.json                                                | JSON with Comments |         19 |          0 |          1 |         20 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/tsconfig.node.json                                           | JSON               |         18 |          2 |          3 |         23 |
+| /home/winter/Desktop/UnKnownWorld/Adminnn/Tryodo-Website/vite.config.ts                                               | TypeScript         |        201 |          1 |          2 |        204 |
+| Total                                                                                                                 |                    |     58,027 |      2,097 |      5,924 |     66,048 |
++-----------------------------------------------------------------------------------------------------------------------+--------------------+------------+------------+------------+------------+

@@ -7,7 +7,7 @@ import {
   Target, Zap, BarChart3, PieChart, Calendar, Filter,
   ChevronUp, ChevronDown, AlertCircle, Star, Truck,
   HeadphonesIcon, ShoppingCart, CreditCard, Timer,
-  Plus, Edit3, XCircle
+  Plus, Edit3, XCircle, MapPin
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,6 +21,7 @@ import { useToast } from '@/hooks/use-toast';
 import TryodoAPI, { TransactionAPI, CommissionAPI, WalletAPI, PayoutAPI } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import VendorSalesSection, { VendorSales } from '@/components/VendorSalesSection';
 
 interface DashboardStats {
   // Core Business Metrics
@@ -182,6 +183,7 @@ const AdminDashboard = () => {
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
   const [commissionRules, setCommissionRules] = useState<CommissionRule[]>([]);
   const [vendorWallets, setVendorWallets] = useState<WalletSummary[]>([]);
+  const [vendorSales, setVendorSales] = useState<VendorSales[]>([]);
   const [deliveryWallets, setDeliveryWallets] = useState<WalletSummary[]>([]);
   const [payouts, setPayouts] = useState<PayoutRecord[]>([]);
   const [platformStats, setPlatformStats] = useState<PlatformStats | null>(null);
@@ -375,59 +377,72 @@ const AdminDashboard = () => {
 
   // Quick Actions Setup
   useEffect(() => {
-    const actions: QuickAction[] = [
+    setQuickActions([
       {
-        id: 'pending-orders',
-        title: 'Pending Orders',
-        description: 'Review and process pending orders',
-        icon: <Clock className="h-5 w-5" />,
-        action: () => navigate('/admin/orders?status=pending'),
-        urgent: stats.pendingOrders > 10,
-        count: stats.pendingOrders
+        id: 'delivery',
+        title: 'Delivery Partners',
+        description: 'Manage delivery partners and zones',
+        icon: <Truck className="h-6 w-6" />,
+        action: () => navigate('/admin/delivery-partners'),
+        count: 0,
+        urgent: true
       },
       {
-        id: 'vendor-approvals',
-        title: 'Vendor Approvals',
-        description: 'Approve new vendor registrations',
-        icon: <Store className="h-5 w-5" />,
-        action: () => navigate('/admin/vendors?status=pending'),
-        count: 3 // Would fetch real count
+        id: 'vendors',
+        title: 'Vendor Management',
+        description: 'Manage vendors, applications and approvals',
+        icon: <Store className="h-6 w-6" />,
+        action: () => navigate('/admin/vendor-management'),
+        count: stats.totalVendors
       },
       {
-        id: 'low-stock',
-        title: 'Low Stock Alerts',
-        description: 'Products running low on inventory',
-        icon: <AlertTriangle className="h-5 w-5" />,
-        action: () => navigate('/admin/inventory?status=low'),
-        urgent: stats.lowStockAlerts > 0,
-        count: stats.lowStockAlerts
+        id: 'categories',
+        title: 'Categories',
+        description: 'Manage product categories and qualities',
+        icon: <Package className="h-6 w-6" />,
+        action: () => navigate('/admin/categories')
       },
       {
-        id: 'customer-support',
-        title: 'Support Tickets',
-        description: 'Resolve customer support issues',
-        icon: <HeadphonesIcon className="h-5 w-5" />,
-        action: () => navigate('/admin/support'),
-        count: 7 // Would fetch real count
+        id: 'commission',
+        title: 'Commission Rules',
+        description: 'Configure commission rates and rules',
+        icon: <DollarSign className="h-6 w-6" />,
+        action: () => navigate('/admin/commission-rules')
+      },
+      {
+        id: 'wallets',
+        title: 'Wallet Management',
+        description: 'Manage vendor and delivery partner wallets',
+        icon: <CreditCard className="h-6 w-6" />,
+        action: () => navigate('/admin/vendor-wallets')
+      },
+      {
+        id: 'payouts',
+        title: 'Payout Management',
+        description: 'Process and manage payouts',
+        icon: <DollarSign className="h-6 w-6" />,
+        action: () => navigate('/admin/payouts')
       }
-    ];
-
-    setQuickActions(actions);
-  }, [stats, navigate]);
+    ]);
+  }, [navigate, stats.totalVendors]);
 
   // Initialize and setup intervals
   useEffect(() => {
     const initialize = async () => {
       await Promise.all([
         checkDatabaseSetup(),
-        fetchDashboardData()
+        fetchDashboardData(),
+        loadFinancialData()
       ]);
     };
 
     initialize();
 
     // Auto-refresh every 30 seconds
-    const interval = setInterval(fetchDashboardData, 30000);
+    const interval = setInterval(() => {
+      fetchDashboardData();
+      loadFinancialData();
+    }, 30000);
     return () => clearInterval(interval);
   }, [checkDatabaseSetup, fetchDashboardData]);
 
@@ -520,6 +535,15 @@ const AdminDashboard = () => {
 
       if (vendorWalletsRes.success) {
         setVendorWallets(vendorWalletsRes.data);
+        // Build vendor sales leaderboard data from wallet summary
+        const salesList: VendorSales[] = (vendorWalletsRes.data || []).map((w: any) => ({
+          vendor_id: w.vendor_id,
+          business_name: w.business_name,
+          orders: w.total_orders ?? 0,
+          gmv: w.total_sales ?? w.total_earned ?? 0,
+          commission: w.total_commission ?? 0
+        })).sort((a, b) => b.gmv - a.gmv);
+        setVendorSales(salesList);
       }
 
       if (deliveryWalletsRes.success) {
@@ -748,6 +772,15 @@ const AdminDashboard = () => {
                 </div>
               </TabsTrigger>
               <TabsTrigger 
+                value="vendor-sales" 
+                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <Store className="h-3 w-3" />
+                  <span>Vendor Sales</span>
+                </div>
+              </TabsTrigger>
+              <TabsTrigger 
                 value="management" 
                 className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
               >
@@ -761,7 +794,7 @@ const AdminDashboard = () => {
 
           {/* Desktop tabs */}
           <div className="hidden sm:block">
-            <TabsList className="grid w-full grid-cols-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
+            <TabsList className="grid w-full grid-cols-7 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
               <TabsTrigger value="overview" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Overview
               </TabsTrigger>
@@ -776,6 +809,9 @@ const AdminDashboard = () => {
               </TabsTrigger>
               <TabsTrigger value="payouts" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Payouts
+              </TabsTrigger>
+              <TabsTrigger value="vendor-sales" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                Vendor Sales
               </TabsTrigger>
               <TabsTrigger value="management" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Management
@@ -1177,6 +1213,10 @@ const AdminDashboard = () => {
             </Card>
           </TabsContent>
 
+          <TabsContent value="vendor-sales" className="space-y-6">
+            <VendorSalesSection vendorSales={vendorSales} />
+          </TabsContent>
+
           <TabsContent value="commissions" className="space-y-6">
             {/* Commission Rules Management */}
             <Card>
@@ -1227,14 +1267,14 @@ const AdminDashboard = () => {
                     <div key={wallet.vendor_id || index} className="flex items-center justify-between p-4 border rounded-lg">
                       <div>
                         <h4 className="font-semibold">{wallet.business_name}</h4>
-                        <p className="text-sm text-gray-600">Total Earned: ₹{wallet.total_earned.toLocaleString()}</p>
+                        <p className="text-sm text-gray-600">Total Earned: ₹{(wallet.total_earned ?? 0).toLocaleString()}</p>
                       </div>
                       <div className="text-right">
                         <p className="text-green-600 font-semibold">
-                          Available: ₹{wallet.available_balance.toLocaleString()}
+                          Available: ₹{(wallet.available_balance ?? 0).toLocaleString()}
                         </p>
                         <p className="text-orange-600 text-sm">
-                          Pending: ₹{wallet.pending_balance.toLocaleString()}
+                          Pending: ₹{(wallet.pending_balance ?? 0).toLocaleString()}
                         </p>
                       </div>
                     </div>
@@ -1259,14 +1299,14 @@ const AdminDashboard = () => {
                     <div key={wallet.delivery_partner_id || index} className="flex items-center justify-between p-4 border rounded-lg">
                       <div>
                         <h4 className="font-semibold">{wallet.delivery_partner_name}</h4>
-                        <p className="text-sm text-gray-600">Total Earned: ₹{wallet.total_earned.toLocaleString()}</p>
+                        <p className="text-sm text-gray-600">Total Earned: ₹{(wallet.total_earned ?? 0).toLocaleString()}</p>
                       </div>
                       <div className="text-right">
                         <p className="text-green-600 font-semibold">
-                          Available: ₹{wallet.available_balance.toLocaleString()}
+                          Available: ₹{(wallet.available_balance ?? 0).toLocaleString()}
                         </p>
                         <p className="text-orange-600 text-sm">
-                          Pending: ₹{wallet.pending_balance.toLocaleString()}
+                          Pending: ₹{(wallet.pending_balance ?? 0).toLocaleString()}
                         </p>
                       </div>
                     </div>
@@ -1423,6 +1463,46 @@ const AdminDashboard = () => {
                 <CardContent>
                   <p className="text-sm text-gray-600">
                     Review vendor applications, manage approvals, and set commission rates
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/admin/sectors')}>
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-5 w-5 text-blue-600" />
+                      Manage Sectors
+                    </div>
+                    <ArrowRight className="h-4 w-4 text-gray-400" />
+                  </CardTitle>
+                  <CardDescription>
+                    Create and manage delivery sectors by grouping pincodes
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-600">
+                    Define delivery zones and optimize routing for efficient deliveries
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/admin/slots')}>
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-5 w-5 text-purple-600" />
+                      Manage Delivery Slots
+                    </div>
+                    <ArrowRight className="h-4 w-4 text-gray-400" />
+                  </CardTitle>
+                  <CardDescription>
+                    Configure delivery time slots and availability for each sector
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-600">
+                    Set up cutoff times, capacity limits, and delivery windows
                   </p>
                 </CardContent>
               </Card>

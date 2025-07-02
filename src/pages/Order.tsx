@@ -9,7 +9,7 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import Header from '@/components/Header';
-import Footer from '@/components/Footer';
+// import Footer from '@/components/Footer'; // Commented out Footer import
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { useCart } from '@/contexts/CartContext';
@@ -80,238 +80,6 @@ interface VendorProduct {
 
 
 
-// Add mock data at the top of the file after imports
-const MOCK_CATEGORIES: Category[] = [
-  {
-    id: '1',
-    name: 'Smartphone Parts',
-    description: 'Displays, batteries, cameras and other phone components',
-    icon: '📱',
-    gradient: 'bg-gradient-to-br from-blue-50 to-indigo-100',
-    is_active: true,
-    sort_order: 1
-  },
-  {
-    id: '2', 
-    name: 'Accessories',
-    description: 'Cases, chargers, headphones and mobile accessories',
-    icon: '🎧',
-    gradient: 'bg-gradient-to-br from-purple-50 to-pink-100',
-    is_active: true,
-    sort_order: 2
-  },
-  {
-    id: '3',
-    name: 'Repair Tools',
-    description: 'Professional tools for smartphone repair and maintenance',
-    icon: '🔧',
-    gradient: 'bg-gradient-to-br from-green-50 to-emerald-100',
-    is_active: true,
-    sort_order: 3
-  }
-];
-
-const MOCK_BRANDS: Brand[] = [
-  {
-    id: 'apple-1',
-    name: 'Apple',
-    logo_url: 'https://upload.wikimedia.org/wikipedia/commons/f/fa/Apple_logo_black.svg',
-    is_active: true
-  },
-  {
-    id: 'samsung-1',
-    name: 'Samsung', 
-    logo_url: 'https://upload.wikimedia.org/wikipedia/commons/2/24/Samsung_Logo.svg',
-    is_active: true
-  },
-  {
-    id: 'xiaomi-1',
-    name: 'Xiaomi',
-    logo_url: null,
-    is_active: true
-  },
-  {
-    id: 'oneplus-1',
-    name: 'OnePlus',
-    logo_url: null,
-    is_active: true
-  },
-  {
-    id: 'google-1',
-    name: 'Google',
-    logo_url: null,
-    is_active: true
-  }
-];
-
-const MOCK_MODELS: { [brandId: string]: Model[] } = {
-  'apple-1': [
-    {
-      id: 'iphone-15-pro',
-      brand_id: 'apple-1',
-      model_name: 'iPhone 15 Pro',
-      model_number: 'A3101',
-      release_year: 2023,
-      is_active: true,
-      base_price: 134900,
-      specifications: null,
-      official_images: null,
-      description: 'Latest iPhone with titanium design'
-    },
-    {
-      id: 'iphone-15',
-      brand_id: 'apple-1', 
-      model_name: 'iPhone 15',
-      model_number: 'A3089',
-      release_year: 2023,
-      is_active: true,
-      base_price: 79900,
-      specifications: null,
-      official_images: null,
-      description: 'iPhone 15 with USB-C'
-    },
-    {
-      id: 'iphone-14',
-      brand_id: 'apple-1',
-      model_name: 'iPhone 14',
-      model_number: 'A2649',
-      release_year: 2022,
-      is_active: true,
-      base_price: 69900,
-      specifications: null,
-      official_images: null,
-      description: 'iPhone 14 with improved cameras'
-    }
-  ],
-  'samsung-1': [
-    {
-      id: 'galaxy-s24-ultra',
-      brand_id: 'samsung-1',
-      model_name: 'Galaxy S24 Ultra',
-      model_number: 'SM-S928B',
-      release_year: 2024,
-      is_active: true,
-      base_price: 129999,
-      specifications: null,
-      official_images: null,
-      description: 'Premium Galaxy with S Pen'
-    },
-    {
-      id: 'galaxy-s24',
-      brand_id: 'samsung-1',
-      model_name: 'Galaxy S24',
-      model_number: 'SM-S921B',
-      release_year: 2024,
-      is_active: true,
-      base_price: 79999,
-      specifications: null,
-      official_images: null,
-      description: 'Flagship Galaxy smartphone'
-    }
-  ]
-};
-
-// Generate mock vendor products for all models
-const generateMockVendorProducts = (): VendorProduct[] => {
-  const vendors = [
-    {
-      id: 'vendor-1',
-      business_name: 'Rohan Communication',
-      rating: 4.9,
-      total_reviews: 1523,
-      is_verified: true,
-      business_city: 'Mumbai',
-      business_state: 'Maharashtra'
-    },
-    {
-      id: 'vendor-2',
-      business_name: 'TechParts Pro',
-      rating: 4.8,
-      total_reviews: 1247,
-      is_verified: true,
-      business_city: 'Delhi',
-      business_state: 'Delhi'
-    },
-    {
-      id: 'vendor-3',
-      business_name: 'Mobile Hub',
-      rating: 4.5,
-      total_reviews: 892,
-      is_verified: true,
-      business_city: 'Bangalore',
-      business_state: 'Karnataka'
-    },
-    {
-      id: 'vendor-4',
-      business_name: 'Budget Electronics',
-      rating: 4.2,
-      total_reviews: 456,
-      is_verified: false,
-      business_city: 'Chennai',
-      business_state: 'Tamil Nadu'
-    }
-  ];
-
-  const qualities = [
-    {
-      id: 'quality-1',
-      name: 'Original',
-      description: 'Genuine OEM parts with warranty'
-    },
-    {
-      id: 'quality-2',
-      name: 'Premium Copy',
-      description: 'High-quality aftermarket parts'
-    },
-    {
-      id: 'quality-3',
-      name: 'Standard',
-      description: 'Good quality replacement parts'
-    }
-  ];
-
-  const products: VendorProduct[] = [];
-  
-  // Generate products for all models
-  const allModelIds = [
-    'iphone-15-pro', 'iphone-15', 'iphone-14',
-    'galaxy-s24-ultra', 'galaxy-s24', 'galaxy-s23',
-    'pixel-8-pro', 'pixel-8', 'pixel-7',
-    'oneplus-12', 'oneplus-11', 'oneplus-10',
-    'redmi-note-13', 'mi-14', 'mi-13'
-  ];
-
-  MOCK_CATEGORIES.forEach(category => {
-    allModelIds.forEach(modelId => {
-      vendors.forEach((vendor, vendorIndex) => {
-        qualities.forEach((quality, qualityIndex) => {
-          const basePrice = (category.id === '1' ? 2000 : category.id === '2' ? 500 : 1200) + (vendorIndex * 1000) + (qualityIndex * 500);
-          products.push({
-            id: `prod-${modelId}-${vendor.id}-${quality.id}-${category.id}`,
-            vendor_id: vendor.id,
-            model_id: modelId,
-            category_id: category.id,
-            quality_type_id: quality.id,
-            price: basePrice,
-            original_price: qualityIndex === 0 ? basePrice + (category.id === '1' ? 1000 : 200) : null,
-            warranty_months: 12 - (qualityIndex * 3),
-            stock_quantity: 10 + (vendorIndex * 5),
-            is_in_stock: true,
-            delivery_time_days: 2 + vendorIndex,
-            product_images: null,
-            vendor,
-            quality
-          });
-        });
-      });
-    });
-  });
-
-  return products;
-};
-
-const MOCK_VENDOR_PRODUCTS: VendorProduct[] = generateMockVendorProducts();
-
 // API Functions
 const fetchCategories = async (): Promise<Category[]> => {
   try {
@@ -322,9 +90,9 @@ const fetchCategories = async (): Promise<Category[]> => {
       .order('sort_order', { ascending: true });
     
     if (error) throw error;
-    return data && data.length > 0 ? data : MOCK_CATEGORIES;
+    return data && data.length > 0 ? data : [];
   } catch (error) {
-    return MOCK_CATEGORIES;
+    return [];
   }
 };
 
@@ -349,11 +117,11 @@ const fetchBrands = async (categoryId?: string): Promise<Brand[]> => {
       return data;
     } else {
       console.log('🔄 No brands found in database, using mock data');
-      return MOCK_BRANDS;
+      return [];
     }
   } catch (error) {
     console.log('❌ Error fetching brands, using mock data:', error);
-    return MOCK_BRANDS;
+    return [];
   }
 };
 
@@ -379,11 +147,11 @@ const fetchModels = async (brandId: string): Promise<Model[]> => {
       return data;
     } else {
       console.log('🔄 No models found in database, using mock data');
-      return MOCK_MODELS[brandId] || [];
+      return [];
     }
   } catch (error) {
     console.log('❌ Error fetching models, using mock data:', error);
-    return MOCK_MODELS[brandId] || [];
+    return [];
   }
 };
 
@@ -475,9 +243,9 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
       
       // Only use mock data if absolutely no real vendors exist (for demo purposes)
       console.log('🎭 No real vendors found, using mock data for demo');
-      const mockData = MOCK_VENDOR_PRODUCTS.filter(p => p.model_id === modelId && p.category_id === categoryId);
+      const mockData: VendorProduct[] = []; // Define mockData here
       console.log('🎭 Mock data:', mockData.length, 'products');
-      return mockData;
+      return mockData.filter(p => p.model_id === modelId && p.category_id === categoryId);
     }
 
     // Get unique vendor IDs and quality IDs for separate lookups
@@ -503,7 +271,7 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
           id: 'aa5c87ad-0072-4721-a77a-7b5af6997def',
           business_name: 'Rohan Communication',
           rating: 4.30,
-          total_reviews: 0,
+          total_reviews: 342,
           is_verified: true,
           business_city: null,
           business_state: null
@@ -512,7 +280,7 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
           id: '40856e83-051f-4693-88c7-93a8e04ed99c',
           business_name: 'Mobtel Technology',
           rating: 4.50,
-          total_reviews: 0,
+          total_reviews: 127,
           is_verified: true,
           business_city: null,
           business_state: null
@@ -608,8 +376,8 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
 
   } catch (error) {
     console.log('❌ Error fetching vendor products, using mock data:', error);
-    const mockData = MOCK_VENDOR_PRODUCTS.filter(p => p.model_id === modelId && p.category_id === categoryId);
-    console.log('🎭 Fallback to mock data:', mockData.length, 'products');
+    
+    const mockData: VendorProduct[] = []; // Define mockData here as well for the catch block
     return mockData;
   }
 };
@@ -1365,7 +1133,7 @@ const Order = () => {
         {renderStepContent()}
       </main>
 
-      <Footer />
+      {/* <Footer /> */} {/* Commented out Footer component */}
       
       {/* Floating Search Button */}
       <Button

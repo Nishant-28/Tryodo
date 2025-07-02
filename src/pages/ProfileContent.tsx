@@ -7,7 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
-import { Eye, EyeOff, User, Lock, Phone, MapPin } from "lucide-react";
+import { Eye, EyeOff, User, Lock, Phone } from "lucide-react";
 
 const ProfileContent = () => {
   const { profile, user, updateProfile } = useAuth();
@@ -17,11 +17,7 @@ const ProfileContent = () => {
   // Profile form data
   const [profileData, setProfileData] = useState({
     full_name: '',
-    phone: '',
-    address: '',
-    city: '',
-    state: '',
-    pincode: ''
+    phone: ''
   });
 
   // Notification preferences
@@ -59,11 +55,7 @@ const ProfileContent = () => {
     if (profile) {
       setProfileData({
         full_name: profile.full_name || '',
-        phone: profile.phone || '',
-        address: profile.address || '',
-        city: profile.city || '',
-        state: profile.state || '',
-        pincode: profile.pincode || ''
+        phone: profile.phone || ''
       });
 
       // Load notification preferences
@@ -237,61 +229,6 @@ const ProfileContent = () => {
                   value={profileData.phone}
                   onChange={handleProfileChange}
                   placeholder="+91 9876543210"
-                  className="w-full"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="pincode" className="text-gray-700 font-medium">PIN Code</Label>
-                <Input
-                  name="pincode"
-                  type="text"
-                  value={profileData.pincode}
-                  onChange={handleProfileChange}
-                  placeholder="123456"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
-                  className="w-full"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="address" className="text-gray-700 font-medium flex items-center gap-1">
-                <MapPin className="h-4 w-4" />
-                Address
-              </Label>
-              <Input
-                name="address"
-                type="text"
-                value={profileData.address}
-                onChange={handleProfileChange}
-                placeholder="Enter your full address"
-                className="w-full"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="city" className="text-gray-700 font-medium">City</Label>
-                <Input
-                  name="city"
-                  type="text"
-                  value={profileData.city}
-                  onChange={handleProfileChange}
-                  placeholder="Enter your city"
-                  className="w-full"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="state" className="text-gray-700 font-medium">State</Label>
-                <Input
-                  name="state"
-                  type="text"
-                  value={profileData.state}
-                  onChange={handleProfileChange}
-                  placeholder="Enter your state"
                   className="w-full"
                 />
               </div>

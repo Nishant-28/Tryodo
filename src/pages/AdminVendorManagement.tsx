@@ -22,7 +22,8 @@ import {
   Settings,
   AlertTriangle,
   Plus,
-  ArrowLeft
+  ArrowLeft,
+  Trash2
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -37,7 +38,7 @@ import { Switch } from '../components/ui/switch';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { useToast } from '../hooks/use-toast';
 import { supabase, supabaseServiceRole } from '../lib/supabase';
-import { CommissionAPI, WalletAPI } from '../lib/api';
+import { CommissionAPI, WalletAPI, VendorCommissionOverride, CommissionRule } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
 interface Vendor {
@@ -76,30 +77,14 @@ interface Category {
   name: string;
 }
 
-interface CommissionRule {
+interface QualityCategory {
   id: string;
-  category_id: string;
-  commission_percentage: number;
-  minimum_commission: number;
-  maximum_commission: number | null;
-  is_active: boolean;
-  category?: {
-    name: string;
-  };
+  name: string;
 }
 
-interface VendorCommissionOverride {
+interface SmartphoneModel {
   id: string;
-  vendor_id: string;
-  category_id: string;
-  commission_percentage: number;
-  minimum_commission: number;
-  maximum_commission: number;
-  is_active: boolean;
-  reason: string;
-  category: {
-    name: string;
-  };
+  model_name: string;
 }
 
 const AdminVendorManagement: React.FC = () => {
@@ -110,6 +95,8 @@ const AdminVendorManagement: React.FC = () => {
   // State management
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [qualityCategories, setQualityCategories] = useState<QualityCategory[]>([]);
+  const [smartphoneModels, setSmartphoneModels] = useState<SmartphoneModel[]>([]);
   const [commissionRules, setCommissionRules] = useState<CommissionRule[]>([]);
   const [vendorOverrides, setVendorOverrides] = useState<VendorCommissionOverride[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,6 +109,8 @@ const AdminVendorManagement: React.FC = () => {
   // Commission form state
   const [commissionForm, setCommissionForm] = useState({
     category_id: '',
+    quality_id: '',
+    smartphone_model_id: '',
     commission_percentage: 10,
     minimum_commission: 0,
     maximum_commission: null as number | null,
@@ -147,6 +136,8 @@ const AdminVendorManagement: React.FC = () => {
     loadVendors();
     loadCategories();
     loadCommissionRules();
+    loadQualityCategories();
+    loadSmartphoneModels();
   }, []);
 
   const loadVendors = async () => {
@@ -253,6 +244,36 @@ const AdminVendorManagement: React.FC = () => {
       }
     } catch (error) {
       console.error('Error loading vendor commissions:', error);
+    }
+  };
+
+  const loadQualityCategories = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('quality_categories')
+        .select('id, name')
+        .eq('is_active', true)
+        .order('name');
+
+      if (error) throw error;
+      setQualityCategories(data || []);
+    } catch (error) {
+      console.error('Error loading quality categories:', error);
+    }
+  };
+
+  const loadSmartphoneModels = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('smartphone_models')
+        .select('id, model_name')
+        .eq('is_active', true)
+        .order('model_name');
+
+      if (error) throw error;
+      setSmartphoneModels(data || []);
+    } catch (error) {
+      console.error('Error loading smartphone models:', error);
     }
   };
 
@@ -391,6 +412,8 @@ const AdminVendorManagement: React.FC = () => {
         minimumCommission: commissionForm.minimum_commission,
         maximumCommission: commissionForm.maximum_commission,
         reason: commissionForm.reason,
+        qualityId: commissionForm.quality_id,
+        smartphoneModelId: commissionForm.smartphone_model_id,
         createdBy: currentProfile?.id
       });
 
@@ -403,6 +426,8 @@ const AdminVendorManagement: React.FC = () => {
           minimum_commission: commissionForm.minimum_commission,
           maximum_commission: commissionForm.maximum_commission,
           reason: commissionForm.reason,
+          quality_id: commissionForm.quality_id || null,
+          smartphone_model_id: commissionForm.smartphone_model_id || null,
           created_by: currentProfile?.id || null,
         }])
         .select();
@@ -422,6 +447,8 @@ const AdminVendorManagement: React.FC = () => {
       // Reset form
       setCommissionForm({
         category_id: '',
+        quality_id: '',
+        smartphone_model_id: '',
         commission_percentage: 10,
         minimum_commission: 0,
         maximum_commission: null,
@@ -437,6 +464,33 @@ const AdminVendorManagement: React.FC = () => {
         description: error.message || "Failed to create commission override",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleDeleteOverride = async (overrideId: string) => {
+    if (!selectedVendor) return;
+    if (window.confirm("Are you sure you want to delete this commission override?")) {
+      try {
+        const { error } = await supabaseServiceRole
+          .from('vendor_commission_overrides')
+          .delete()
+          .eq('id', overrideId);
+
+        if (error) throw error;
+
+        toast({
+          title: "Success",
+          description: "Commission override deleted successfully",
+        });
+        loadVendorCommissions(selectedVendor.id); // Reload overrides
+      } catch (error: any) {
+        console.error('Error deleting commission override:', error);
+        toast({
+          title: "Error",
+          description: `Failed to delete commission override: ${error.message}`,
+          variant: "destructive",
+        });
+      }
     }
   };
 
@@ -806,11 +860,21 @@ const AdminVendorManagement: React.FC = () => {
                   {vendorOverrides.map((override) => (
                     <div key={override.id} className="flex items-center justify-between p-3 border rounded-lg">
                       <div>
-                        <h4 className="font-medium">{override.category.name}</h4>
+                        <h4 className="font-medium">{override.category.name}
+                          {override.quality && <span className="text-sm text-gray-500"> / {override.quality.name}</span>}
+                          {override.model && <span className="text-sm text-gray-500"> / {override.model.model_name}</span>}
+                        </h4>
                         <p className="text-sm text-gray-600">{override.commission_percentage}% commission</p>
-                        <p className="text-xs text-gray-500">{override.reason}</p>
+                        <p className="text-xs text-gray-500">Min: ₹{override.minimum_commission} {override.maximum_commission ? `Max: ₹${override.maximum_commission}` : ''}</p>
+                        {override.reason && <p className="text-xs text-gray-500">Reason: {override.reason}</p>}
                       </div>
-                      <Badge variant="default">Active</Badge>
+                      <Button 
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleDeleteOverride(override.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
                   ))}
                   {vendorOverrides.length === 0 && (
@@ -848,6 +912,46 @@ const AdminVendorManagement: React.FC = () => {
                   {categories.map((category) => (
                     <SelectItem key={category.id} value={category.id}>
                       {category.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label>Quality (Optional)</Label>
+              <Select
+                value={commissionForm.quality_id || ''}
+                onValueChange={(value) => setCommissionForm(prev => ({ ...prev, quality_id: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select quality category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">None</SelectItem>
+                  {qualityCategories.map((quality) => (
+                    <SelectItem key={quality.id} value={quality.id}>
+                      {quality.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label>Smartphone Model (Optional)</Label>
+              <Select
+                value={commissionForm.smartphone_model_id || ''}
+                onValueChange={(value) => setCommissionForm(prev => ({ ...prev, smartphone_model_id: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select smartphone model" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">None</SelectItem>
+                  {smartphoneModels.map((model) => (
+                    <SelectItem key={model.id} value={model.id}>
+                      {model.model_name}
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -10,6 +10,19 @@ import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/lib/supabase';
+
+interface CustomerAddress {
+  id: string;
+  customer_id: string;
+  shop_name?: string;
+  owner_name: string;
+  pincode: string;
+  address_box: string;
+  phone_number: string;
+  created_at: string;
+  updated_at: string;
+}
 
 interface OrderCardProps {
   order: {
@@ -24,7 +37,7 @@ interface OrderCardProps {
     updated_at?: string;
     picked_up_date?: string;
     out_for_delivery_date?: string;
-    delivery_address: any;
+    delivery_address_id: string | null;
     order_items: any[];
     delivery_partner_id?: string;
     delivery_partner_name?: string;
@@ -44,6 +57,35 @@ interface OrderCardProps {
 
 const OrderCard: React.FC<OrderCardProps> = ({ order, onTrackOrder }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [customerAddress, setCustomerAddress] = useState<CustomerAddress | null>(null);
+
+  // Fetch customer address if delivery_address_id exists
+  React.useEffect(() => {
+    if (order.delivery_address_id) {
+      const fetchAddress = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('customer_addresses')
+            .select('*')
+            .eq('id', order.delivery_address_id)
+            .single();
+          
+          if (error) throw error;
+          setCustomerAddress(data);
+        } catch (error) {
+          console.error('Error fetching customer address:', error);
+          toast({
+            title: "Error",
+            description: "Failed to load delivery address.",
+            variant: "destructive"
+          });
+        }
+      };
+      fetchAddress();
+    } else {
+      setCustomerAddress(null);
+    }
+  }, [order.delivery_address_id]);
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
@@ -335,25 +377,25 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, onTrackOrder }) => {
             </div>
 
             {/* Delivery Address */}
-            {order.delivery_address && (
-              <div>
-                <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
-                  <MapPin className="w-4 h-4" />
-                  Delivery Address
-                </h4>
-                <div className="bg-gray-50 p-3 rounded-lg text-sm">
-                  <p className="font-medium">{order.delivery_address.recipient_name}</p>
-                  <p className="text-gray-600">{order.delivery_address.phone}</p>
-                  <p className="text-gray-600 mt-1">
-                    {order.delivery_address.address_line_1}
-                    {order.delivery_address.address_line_2 && `, ${order.delivery_address.address_line_2}`}
-                  </p>
-                  <p className="text-gray-600">
-                    {order.delivery_address.city}, {order.delivery_address.state} {order.delivery_address.postal_code}
-                  </p>
-                </div>
+            <div>
+              <h4 className="font-medium text-gray-900 mb-2 flex items-center gap-2 text-sm">
+                <MapPin className="w-4 h-4" />
+                Delivery Address
+              </h4>
+              <div className="bg-gray-50 p-3 rounded-lg text-sm">
+                {customerAddress ? (
+                  <address className="text-gray-700 not-italic space-y-1">
+                    <p className="font-medium">{customerAddress.owner_name}</p>
+                    {customerAddress.shop_name && <p>{customerAddress.shop_name}</p>}
+                    <p>{customerAddress.address_box}</p>
+                    <p>PIN: {customerAddress.pincode}</p>
+                    <p className="flex items-center gap-1"><Phone className="h-3 w-3 inline-block" /> {customerAddress.phone_number}</p>
+                  </address>
+                ) : (
+                  <p className="text-gray-600">No delivery address available.</p>
+                )}
               </div>
-            )}
+            </div>
 
             {/* Delivery OTP */}
             {order.delivery_otp && order.order_status !== 'delivered' && (

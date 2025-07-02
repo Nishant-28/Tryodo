@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { MapPin, CreditCard, Truck, Shield, ChevronRight, ArrowLeft, Plus, Edit, Check, AlertCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { MapPin, CreditCard, Truck, Shield, Plus, Edit, AlertCircle, Trash2, Clock, CheckCircle, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -13,10 +13,15 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import Header from '@/components/Header';
+import SlotSelection from '@/components/SlotSelection';
 import { supabase } from '@/lib/supabase';
 import { toast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCart } from '@/contexts/CartContext';
+import { PulsatingButton } from "@/components/magicui/pulsating-button";
+import { ShineBorder } from "@/components/magicui/shine-border";
+import { deliveryUtils, type DeliverySlot } from '@/lib/deliveryApi';
+import { OrderAPI } from '@/lib/api';
 
 interface CartItem {
   id: string;
@@ -36,16 +41,21 @@ interface CartItem {
 
 interface Address {
   id: string;
-  address_type: string;
-  address_line1: string;
-  address_line2?: string;
-  city: string;
-  state: string;
+  shop_name: string;
+  owner_name: string;
   pincode: string;
-  landmark?: string;
-  contact_name: string;
-  contact_phone: string;
-  is_default: boolean;
+  address_box: string;
+  phone_number: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface AddressFormData {
+  shop_name: string;
+  owner_name: string;
+  pincode: string;
+  address_box: string;
+  phone_number: string;
 }
 
 interface PaymentMethod {
@@ -55,6 +65,14 @@ interface PaymentMethod {
   icon: React.ReactNode;
   description: string;
 }
+
+const showErrorToast = (message: string) => {
+  toast({
+    title: "Error",
+    description: message,
+    variant: "destructive",
+  });
+};
 
 const Checkout = () => {
   const navigate = useNavigate();
@@ -66,18 +84,20 @@ const Checkout = () => {
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [showAddressModal, setShowAddressModal] = useState(false);
-  const [newAddress, setNewAddress] = useState({
-    address_type: 'home',
-    address_line1: '',
-    address_line2: '',
-    city: '',
-    state: '',
+  const [newAddress, setNewAddress] = useState<AddressFormData>({
+    shop_name: '',
+    owner_name: '',
     pincode: '',
-    landmark: '',
-    contact_name: profile?.full_name || '',
-    contact_phone: '',
-    is_default: false
+    address_box: '',
+    phone_number: '',
   });
+  const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
+  const [customerId, setCustomerId] = useState<string | null>(null);
+  
+  // Slot selection state - Default to today's date
+  const [selectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedSlot, setSelectedSlot] = useState<DeliverySlot | null>(null);
+  const [estimatedDelivery, setEstimatedDelivery] = useState<string>('');
 
   const paymentMethods: PaymentMethod[] = [
     {
@@ -97,295 +117,207 @@ const Checkout = () => {
   ];
 
   useEffect(() => {
-    // Check if user has items in cart
     if (!cart || cart.items.length === 0) {
       navigate('/order');
       return;
     }
 
-    // Load addresses only if user is authenticated
     if (user && profile) {
       loadAddresses();
     }
   }, [cart, navigate, user, profile]);
 
-  const loadAddresses = async () => {
-    if (!user || !profile) return;
+  useEffect(() => {
+    const getCustomerId = async () => {
+      if (!user || !profile) return;
 
-    try {
-      // First, try to get or create customer record
-      let customer;
-      const { data: existingCustomer, error: customerError } = await supabase
-        .from('customers')
-        .select('id')
-        .eq('profile_id', profile.id)
-        .single();
-
-      if (customerError) {
-        // Create customer record if it doesn't exist
-        const { data: newCustomer, error: createError } = await supabase
+      try {
+        const { data: existingCustomer, error: customerError } = await supabase
           .from('customers')
-          .insert([{
-            profile_id: profile.id
-          }])
-          .select()
+          .select('id')
+          .eq('profile_id', profile.id)
           .single();
 
-        if (createError) {
-          console.error('Failed to create customer:', createError);
-          // Fallback to profile addresses
-          loadProfileAddress();
-          return;
+        if (existingCustomer) {
+          setCustomerId(existingCustomer.id);
+        } else if (customerError && customerError.code === 'PGRST116') { // No rows found
+          const { data: newCustomer, error: createError } = await supabase
+            .from('customers')
+            .insert([{ profile_id: profile.id }])
+            .select()
+            .single();
+
+          if (createError) {
+            console.error('Failed to create customer:', createError);
+            showErrorToast("Failed to initialize customer data.");
+            return;
+          }
+          setCustomerId(newCustomer.id);
+        } else if (customerError) {
+          throw customerError;
         }
-        
-        customer = newCustomer;
-      } else {
-        customer = existingCustomer;
+      } catch (error: any) {
+        console.error('Error getting customer ID:', error);
+        showErrorToast(error.message || "Failed to retrieve customer data.");
       }
+    };
+    getCustomerId();
+  }, [user, profile]);
 
-      if (!customer) {
-        loadProfileAddress();
-        return;
-      }
+  const loadAddresses = async () => {
+    if (!user || !profile || !customerId) return;
 
-      // Try to load addresses from customer_addresses table
+    try {
       const { data: addressesData, error } = await supabase
         .from('customer_addresses')
         .select('*')
-        .eq('customer_id', customer.id)
-        .order('is_default', { ascending: false });
+        .eq('customer_id', customerId)
+        .order('created_at', { ascending: false });
 
       if (error) {
         console.error('Error loading customer addresses:', error);
-        loadProfileAddress();
-        return;
-      }
-
-      // If no addresses in customer_addresses table, check profile
-      if (!addressesData || addressesData.length === 0) {
-        loadProfileAddress();
+        showErrorToast("Failed to load addresses.");
         return;
       }
 
       setAddresses(addressesData);
-      
-      // Auto-select default address
-      const defaultAddress = addressesData.find(addr => addr.is_default);
-      if (defaultAddress) {
-        setSelectedAddress(defaultAddress.id);
-      }
-    } catch (error) {
-      console.error('Error loading addresses:', error);
-      loadProfileAddress();
-    }
-  };
 
-  const loadProfileAddress = () => {
-    // Fallback: Load address from profile if it exists
-    if (profile?.address && profile?.city && profile?.state && profile?.pincode) {
-      const profileAddress: Address = {
-        id: 'profile-address',
-        address_type: 'home',
-        address_line1: profile.address,
-        address_line2: '',
-        city: profile.city,
-        state: profile.state,
-        pincode: profile.pincode,
-        landmark: '',
-        contact_name: profile.full_name || '',
-        contact_phone: profile.phone || '',
-        is_default: true
-      };
-      
-      setAddresses([profileAddress]);
-      setSelectedAddress('profile-address');
-    } else {
-      setAddresses([]);
-    }
-  };
-
-  const migrateProfileAddressToCustomer = async () => {
-    if (!user || !profile || !profile.address) return;
-
-    try {
-      // Get or create customer record
-      let customer;
-      const { data: existingCustomer, error: customerError } = await supabase
-        .from('customers')
-        .select('id')
-        .eq('profile_id', profile.id)
-        .single();
-
-      if (customerError) {
-        // Create customer record
-        const { data: newCustomer, error: createError } = await supabase
-          .from('customers')
-          .insert([{
-            profile_id: profile.id
-          }])
-          .select()
-          .single();
-
-        if (createError) {
-          throw createError;
+      if (addressesData.length > 0) {
+        if (!selectedAddress || !addressesData.find(addr => addr.id === selectedAddress)) {
+          setSelectedAddress(addressesData[0].id);
         }
-        customer = newCustomer;
-      } else {
-        customer = existingCustomer;
       }
 
-      // Check if address already exists in customer_addresses
-      const { data: existingAddresses } = await supabase
-        .from('customer_addresses')
-        .select('*')
-        .eq('customer_id', customer.id);
-
-      if (existingAddresses && existingAddresses.length > 0) {
-        // Address already migrated
-        return;
-      }
-
-      // Migrate profile address to customer_addresses
-      const { data: migratedAddress, error: insertError } = await supabase
-        .from('customer_addresses')
-        .insert([{
-          customer_id: customer.id,
-          address_type: 'home',
-          address_line1: profile.address,
-          address_line2: '',
-          city: profile.city || '',
-          state: profile.state || '',
-          pincode: profile.pincode || '',
-          landmark: '',
-          contact_name: profile.full_name || '',
-          contact_phone: profile.phone || '',
-          is_default: true
-        }])
-        .select()
-        .single();
-
-      if (insertError) {
-        throw insertError;
-      }
-
-      // Reload addresses to reflect the migration
-      loadAddresses();
-
-      toast({
-        title: "Success",
-        description: "Address migrated successfully",
-      });
-
-    } catch (error) {
-      console.error('Error migrating address:', error);
+    } catch (error: any) {
+      console.error('Error loading addresses:', error);
+      showErrorToast(error.message || 'Failed to load addresses');
     }
   };
 
-  const handleAddAddress = async () => {
-    if (!user || !profile) return;
+  const handleAddressFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { id, value } = e.target;
+    setNewAddress(prev => ({ ...prev, [id]: value }));
+  };
 
-    // Validation
-    if (!newAddress.address_line1.trim() || !newAddress.city.trim() || 
-        !newAddress.state.trim() || !newAddress.pincode.trim()) {
-      toast({
-        title: "Error",
-        description: "Please fill in all required fields",
-        variant: "destructive",
-      });
+  const handleAddOrUpdateAddress = async () => {
+    if (!user || !profile || !customerId) return;
+
+    if (
+      !newAddress.shop_name.trim() ||
+      !newAddress.owner_name.trim() ||
+      !newAddress.pincode.trim() ||
+      !newAddress.address_box.trim() ||
+      !newAddress.phone_number.trim()
+    ) {
+      showErrorToast("Please fill in all required fields.");
       return;
     }
 
     if (!/^\d{6}$/.test(newAddress.pincode)) {
-      toast({
-        title: "Error",
-        description: "PIN code must be 6 digits",
-        variant: "destructive",
-      });
+      showErrorToast("Pincode must be 6 digits.");
+      return;
+    }
+
+    const MAX_ADDRESSES = 5;
+    if (!editingAddressId && addresses.length >= MAX_ADDRESSES) {
+      showErrorToast(`You can add up to ${MAX_ADDRESSES} addresses only.`);
       return;
     }
 
     try {
-      // First, try to get or create customer record
-      let customer;
-      const { data: existingCustomer, error: customerError } = await supabase
-        .from('customers')
-        .select('id')
-        .eq('profile_id', profile.id)
-        .single();
+      let operationSuccess = false;
 
-      if (customerError) {
-        // Create customer record if it doesn't exist
-        const { data: newCustomer, error: createError } = await supabase
-          .from('customers')
-          .insert([{
-            profile_id: profile.id
-          }])
+      if (editingAddressId) {
+        const { error } = await supabase
+          .from('customer_addresses')
+          .update(newAddress)
+          .eq('id', editingAddressId)
+          .eq('customer_id', customerId);
+
+        if (error) throw error;
+        operationSuccess = true;
+
+        setAddresses(addresses.map(addr =>
+          addr.id === editingAddressId ? { ...addr, ...newAddress } : addr
+        ));
+        toast({
+          title: "Success",
+          description: "Address updated successfully.",
+        });
+      } else {
+        const { data, error } = await supabase
+          .from('customer_addresses')
+          .insert([
+            {
+              ...newAddress,
+              customer_id: customerId
+            }
+          ])
           .select()
           .single();
 
-        if (createError) {
-          console.error('Failed to create customer:', createError);
-          throw new Error('Database setup required. Please contact support.');
-        }
-        
-        customer = newCustomer;
-      } else {
-        customer = existingCustomer;
+        if (error) throw error;
+        operationSuccess = true;
+
+        setAddresses([...addresses, data]);
+        setSelectedAddress(data.id);
+        toast({
+          title: "Success",
+          description: "Address added successfully.",
+        });
       }
 
-      if (!customer) {
-        throw new Error('Unable to access customer account');
+      if (operationSuccess) {
+        setShowAddressModal(false);
+        setNewAddress({
+          shop_name: '',
+          owner_name: '',
+          pincode: '',
+          address_box: '',
+          phone_number: '',
+        });
+        setEditingAddressId(null);
       }
 
-      // Insert new address
-      const { data, error } = await supabase
+    } catch (error: any) {
+      console.error('Error saving address:', error);
+      showErrorToast(error.message || "Failed to save address.");
+    }
+  };
+
+  const handleDeleteAddress = async (addressId: string) => {
+    if (!user || !profile || !customerId) return;
+
+    const MIN_ADDRESSES = 1;
+    if (addresses.length === MIN_ADDRESSES) {
+      showErrorToast(`You must have at least ${MIN_ADDRESSES} address.`);
+      return;
+    }
+
+    try {
+      const { error } = await supabase
         .from('customer_addresses')
-        .insert([{
-          ...newAddress,
-          customer_id: customer.id
-        }])
-        .select()
-        .single();
+        .delete()
+        .eq('id', addressId)
+        .eq('customer_id', customerId); 
 
       if (error) throw error;
 
-      // Update addresses list
-      const updatedAddresses = [...addresses, data];
-      
-      // If this is the first address, make it default
-      if (addresses.length === 0) {
-        data.is_default = true;
-      }
-      
+      const updatedAddresses = addresses.filter(addr => addr.id !== addressId);
       setAddresses(updatedAddresses);
-      setSelectedAddress(data.id);
-      setShowAddressModal(false);
-      
-      // Reset form
-      setNewAddress({
-        address_type: 'home',
-        address_line1: '',
-        address_line2: '',
-        city: '',
-        state: '',
-        pincode: '',
-        landmark: '',
-        contact_name: profile?.full_name || '',
-        contact_phone: '',
-        is_default: false
-      });
+      if (selectedAddress === addressId && updatedAddresses.length > 0) {
+        setSelectedAddress(updatedAddresses[0].id);
+      } else if (updatedAddresses.length === 0) {
+        setSelectedAddress('');
+      }
 
       toast({
         title: "Success",
-        description: "Address added successfully",
+        description: "Address deleted successfully.",
       });
-    } catch (error) {
-      console.error('Error adding address:', error);
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to add address",
-        variant: "destructive",
-      });
+    } catch (error: any) {
+      console.error('Error deleting address:', error);
+      showErrorToast(error.message || "Failed to delete address.");
     }
   };
 
@@ -398,125 +330,71 @@ const Checkout = () => {
     return { subtotal, shippingCharges, taxAmount, total };
   };
 
+  // Slot selection handlers
+  const handleSlotSelect = (slot: DeliverySlot | null, estimatedDeliveryTime: string) => {
+    setSelectedSlot(slot);
+    setEstimatedDelivery(estimatedDeliveryTime);
+  };
+
+  const getSelectedAddressPincode = () => {
+    const selectedAddr = addresses.find(addr => addr.id === selectedAddress);
+    return selectedAddr ? parseInt(selectedAddr.pincode) : 0;
+  };
+
   const handlePlaceOrder = async () => {
-    if (!selectedAddress || !selectedPayment) {
-      toast({
-        title: "Error",
-        description: "Please select delivery address and payment method",
-        variant: "destructive",
-      });
+    if (!selectedAddress) {
+      showErrorToast("Please select a delivery address.");
       return;
     }
-
-    // Check for invalid cart items (from localStorage)
-    const invalidItems = cart.items.filter(item => !item.vendorId || item.vendorId === 'unknown');
-    if (invalidItems.length > 0) {
-      toast({
-        title: "Cart Error",
-        description: "Some items in your cart are invalid. Please remove them and add products again from the Order page.",
-        variant: "destructive",
-      });
-      console.error('Invalid cart items detected:', invalidItems);
+    if (!selectedSlot) {
+      showErrorToast("Please select a delivery slot.");
+      return;
+    }
+    if (!selectedPayment) {
+      showErrorToast("Please select a payment method.");
+      return;
+    }
+    if (!user || !profile || !customerId) {
+      showErrorToast("You must be logged in to place an order.");
       return;
     }
 
     setIsPlacingOrder(true);
 
     try {
-      // Get or create customer
-      let customer;
-      const { data: existingCustomer, error: customerError } = await supabase
-        .from('customers')
-        .select('id')
-        .eq('profile_id', profile?.id)
-        .single();
+      const { subtotal, total } = calculateTotals();
+      
+      const orderData = {
+        customerId: customerId,
+        delivery_address_id: selectedAddress,
+        items: cart.items,
+        subtotal: subtotal,
+        shipping_charges: 50, // Example shipping charges
+        tax_amount: 0, // Assuming tax is included or not applicable for now
+        discount_amount: 0, // Example discount
+        total_amount: total,
+        payment_method: selectedPayment,
+        payment_status: selectedPayment === 'cod' ? 'pending' : 'awaiting_payment',
+        special_instructions: specialInstructions,
+        slot_id: selectedSlot.id,
+        sector_id: selectedSlot.sector_id,
+        delivery_date: selectedDate,
+      };
 
-      if (customerError && customerError.code === 'PGRST116') {
-        // Customer doesn't exist, create one
-        const { data: newCustomer, error: createError } = await supabase
-          .from('customers')
-          .insert([{
-            profile_id: profile?.id
-          }])
-          .select()
-          .single();
+      const result = await OrderAPI.createOrder(orderData);
 
-        if (createError) throw createError;
-        customer = newCustomer;
-      } else if (customerError) {
-        throw customerError;
+      if (result.success) {
+        toast({
+          title: "Order Placed Successfully!",
+          description: `Your order #${result.data.order_number} has been placed.`,
+        });
+        clearCart();
+        navigate(`/order-success?orderId=${result.data.id}`);
       } else {
-        customer = existingCustomer;
+        throw new Error(result.error || "Failed to place order.");
       }
-
-      if (!customer) throw new Error('Customer not found');
-
-      const selectedAddr = addresses.find(addr => addr.id === selectedAddress);
-      if (!selectedAddr) throw new Error('Address not found');
-
-      const { subtotal, shippingCharges, taxAmount, total } = calculateTotals();
-
-      // Create order
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .insert([{
-          customer_id: customer.id,
-          delivery_address: selectedAddr,
-          subtotal,
-          shipping_charges: 0,
-          tax_amount: 0,
-          total_amount: total,
-          payment_method: selectedPayment,
-          payment_status: selectedPayment === 'cod' ? 'pending' : 'paid', // Set payment status based on method
-          special_instructions: specialInstructions,
-          estimated_delivery_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-        }])
-        .select()
-        .single();
-
-      if (orderError) throw orderError;
-
-      // Create order items
-      const orderItems = cart.items.map(item => ({
-        order_id: order.id,
-        vendor_id: item.vendorId,
-        vendor_product_id: item.productId, // Use productId instead of id
-        product_name: item.name,
-        product_description: `Quality product from ${item.vendor}`,
-        unit_price: item.price,
-        quantity: item.quantity,
-        line_total: item.price * item.quantity
-      }));
-
-      const { error: itemsError } = await supabase
-        .from('order_items')
-        .insert(orderItems);
-
-      if (itemsError) throw itemsError;
-
-      // Clear cart
-      clearCart();
-
-      // Navigate to order success page
-      navigate('/order-success', { 
-        state: { 
-          orderId: order.order_number,
-          orderDetails: order 
-        } 
-      });
-
-      toast({
-        title: "Success",
-        description: "Order placed successfully!",
-      });
-
-    } catch (error) {
-      console.error('Error placing order:', error);
-      toast({
-        title: "Error",
-        description: `Failed to place order: ${error.message}`,
-        variant: "destructive",
-      });
+    } catch (error: any) {
+      showErrorToast(error.message);
     } finally {
       setIsPlacingOrder(false);
     }
@@ -527,12 +405,12 @@ const Checkout = () => {
   if (cart.items.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Header onCartClick={() => {}} />
+        <Header onCartClick={() => { }} />
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
             <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">No items in cart</h2>
-            <p className="text-gray-600 mb-4">Add some items to your cart before checking out</p>
+            <h2 className="text-xl font-semibold text-gray-800 mb-2">Your cart is empty!</h2>
+            <p className="text-gray-600 mb-6">Looks like you haven't added anything to your cart yet.</p>
             <Button onClick={() => navigate('/order')}>
               Start Shopping
             </Button>
@@ -542,11 +420,10 @@ const Checkout = () => {
     );
   }
 
-  // Show loading state while checking authentication
   if (!user) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Header onCartClick={() => {}} />
+        <Header onCartClick={() => { }} />
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
@@ -560,401 +437,341 @@ const Checkout = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header onCartClick={() => {}} />
-      
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Debug Section - Remove in production
-        {process.env.NODE_ENV === 'development' && (
-          <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <h3 className="font-semibold text-yellow-800 mb-2">Debug Info:</h3>
-            <div className="text-sm text-yellow-700">
-              <p>User authenticated: {user ? 'Yes' : 'No'}</p>
-              <p>Profile loaded: {profile ? 'Yes' : 'No'}</p>
-              <p>Cart items count: {cart.items.length}</p>
-              <p>Addresses loaded: {addresses.length}</p>
-              {cart.items.length > 0 && (
-                <details className="mt-2">
-                  <summary className="cursor-pointer">Cart Items</summary>
-                  <pre className="mt-2 text-xs">{JSON.stringify(cart.items, null, 2)}</pre>
-                </details>
-              )}
-            </div>
-          </div>
-        )} */}
-
-        {/* Header */}
-        <div className="flex items-center gap-4 mb-8">
-          <Button 
-            variant="ghost" 
-            size="sm"
-            onClick={() => navigate('/order')}
-          >
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Shopping
-          </Button>
-          <h1 className="text-2xl font-bold text-gray-900">Checkout</h1>
-        </div>
-
+      <Header onCartClick={() => navigate('/cart')} />
+      <main className="container mx-auto px-4 py-8 md:py-12">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left Column - Checkout Form */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Delivery Address */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <MapPin className="h-5 w-5" />
-                  Select Delivery Address
+          <div className="lg:col-span-2 space-y-8">
+            <Card className="bg-white rounded-2xl shadow-lg">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                  <MapPin className="h-6 w-6 text-orange-500" />
+                  Delivery Address
                 </CardTitle>
-                <CardDescription>
-                  Choose from saved addresses or add a new delivery address
-                </CardDescription>
+                <Dialog open={showAddressModal} onOpenChange={setShowAddressModal}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm" className="flex items-center gap-2">
+                      <Plus className="h-4 w-4" /> Add New Address
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                      <DialogTitle>{editingAddressId ? "Edit Address" : "Add New Address"}</DialogTitle>
+                      <DialogDescription>
+                        {editingAddressId ? "Edit the details of your address." : "Add a new delivery address to your account. You can add up to 5 addresses."}
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="shop_name">Shop Name</Label>
+                        <Input
+                          id="shop_name"
+                          value={newAddress.shop_name}
+                          onChange={handleAddressFormChange}
+                          placeholder="Shop Name"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="owner_name">Owner Name</Label>
+                        <Input
+                          id="owner_name"
+                          value={newAddress.owner_name}
+                          onChange={handleAddressFormChange}
+                          placeholder="Owner Name"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="pincode">Pincode</Label>
+                        <Input
+                          id="pincode"
+                          value={newAddress.pincode}
+                          onChange={handleAddressFormChange}
+                          placeholder="Pincode (e.g., 123456)"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="address_box">Address Box</Label>
+                        <Textarea
+                          id="address_box"
+                          value={newAddress.address_box}
+                          onChange={handleAddressFormChange}
+                          placeholder="House no, Building name, Street, Area, Locality"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="phone_number">Phone Number</Label>
+                        <Input
+                          id="phone_number"
+                          value={newAddress.phone_number}
+                          onChange={handleAddressFormChange}
+                          placeholder="Phone Number"
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button type="submit" onClick={handleAddOrUpdateAddress}>
+                        {editingAddressId ? "Update Address" : "Add Address"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </CardHeader>
               <CardContent className="space-y-4">
                 {addresses.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-gray-600 mb-4">No saved addresses found</p>
-                    <Button onClick={() => setShowAddressModal(true)}>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Address
-                    </Button>
-                  </div>
+                  <Alert>
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>
+                      No addresses found. Please add a new address.
+                    </AlertDescription>
+                  </Alert>
                 ) : (
-                  <>
-                    {/* Show migration notice for profile address */}
-                    {addresses.some(addr => addr.id === 'profile-address') && (
-                      <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <p className="text-sm text-blue-700">
-                              📍 Address loaded from your profile. 
-                            </p>
-                            <p className="text-xs text-blue-600 mt-1">
-                              Want to save multiple addresses? Click below to upgrade to the full address system.
-                            </p>
-                          </div>
+                  <RadioGroup
+                    onValueChange={setSelectedAddress}
+                    value={selectedAddress}
+                    className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                  >
+                    {addresses.map((address) => (
+                      <div
+                        key={address.id}
+                        className={
+                          `relative p-4 border rounded-lg flex flex-col gap-2 cursor-pointer ` +
+                          (selectedAddress === address.id
+                            ? "border-orange-500 ring-2 ring-orange-500" : "border-gray-200")
+                        }
+                        onClick={() => setSelectedAddress(address.id)}
+                      >
+                        {selectedAddress === address.id && (
+                          <ShineBorder
+                            className="absolute inset-0 z-0"
+                            shineColor={["#ff6b35", "#f7931e", "#ffd700"]}
+                            borderWidth={2}
+                            duration={3}
+                          />
+                        )}
+                        <RadioGroupItem value={address.id} id={address.id} className="sr-only" />
+                        <Label htmlFor={address.id} className="flex flex-col space-y-1 cursor-pointer">
+                          <span className="font-semibold text-gray-900">{address.shop_name}</span>
+                          <span className="text-sm text-gray-600">{address.owner_name}</span>
+                          <span className="text-sm text-gray-600">{address.address_box}, {address.pincode}</span>
+                          <span className="text-sm text-gray-600">Phone: {address.phone_number}</span>
+                        </Label>
+                        <div className="absolute top-2 right-2 flex gap-1">
                           <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={migrateProfileAddressToCustomer}
-                            className="ml-2 text-xs"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-gray-500 hover:text-orange-500"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setNewAddress({
+                                shop_name: address.shop_name,
+                                owner_name: address.owner_name,
+                                pincode: address.pincode,
+                                address_box: address.address_box,
+                                phone_number: address.phone_number,
+                              });
+                              setEditingAddressId(address.id);
+                              setShowAddressModal(true);
+                            }}
                           >
-                            Save to Addresses
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-gray-500 hover:text-red-500"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteAddress(address.id);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       </div>
-                    )}
-                    
-                    <RadioGroup value={selectedAddress} onValueChange={setSelectedAddress}>
-                      {addresses.map((address) => (
-                        <div key={address.id} className="flex items-start space-x-3 p-4 border rounded-lg">
-                          <RadioGroupItem value={address.id} id={address.id} className="mt-1" />
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <Label htmlFor={address.id} className="font-medium">
-                                {address.contact_name}
-                              </Label>
-                              <Badge variant="outline" className="text-xs">
-                                {address.address_type}
-                              </Badge>
-                              {address.is_default && (
-                                <Badge variant="secondary" className="text-xs">Default</Badge>
-                              )}
-                              {address.id === 'profile-address' && (
-                                <Badge variant="outline" className="text-xs bg-orange-100 text-orange-700">
-                                  From Profile
-                                </Badge>
-                              )}
-                            </div>
-                            <p className="text-sm text-gray-600">
-                              {address.address_line1}, {address.address_line2 && `${address.address_line2}, `}
-                              {address.city}, {address.state} - {address.pincode}
-                            </p>
-                            <p className="text-sm text-gray-500">{address.contact_phone}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </RadioGroup>
-                    
-                    <Button 
-                      variant="outline" 
-                      className="w-full"
-                      onClick={() => setShowAddressModal(true)}
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add New Address
-                    </Button>
-                  </>
+                    ))}
+                  </RadioGroup>
                 )}
               </CardContent>
             </Card>
 
-            {/* Payment Method */}
-            <Card>
+            {/* Slot Selection Section */}
+            <Card className="bg-white rounded-2xl shadow-lg relative">
+              {selectedSlot && (
+                <ShineBorder
+                  className="absolute inset-0 z-0"
+                  shineColor={["#2563eb", "#3b82f6", "#60a5fa"]}
+                  borderWidth={2}
+                  duration={4}
+                />
+              )}
+              <CardHeader className="relative z-10">
+                <CardTitle className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                  <Clock className="h-6 w-6 text-blue-600" />
+                  Delivery Date & Slot
+                </CardTitle>
+                <CardDescription>Choose when you want your order delivered</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6 relative z-10">
+                {/* Today's Date Display */}
+                <div className="space-y-3">
+                  <Label className="text-sm font-medium text-gray-700">Delivery Date</Label>
+                  <div className="p-3 border rounded-lg bg-blue-50 border-blue-200">
+                    <div className="flex items-center gap-2">
+                      <Calendar className="h-4 w-4 text-blue-600" />
+                      <span className="font-medium text-blue-900">
+                        Today - {new Date().toLocaleDateString('en-IN', { 
+                          weekday: 'long', 
+                          year: 'numeric', 
+                          month: 'long', 
+                          day: 'numeric' 
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Slot Selection */}
+                {selectedAddress && addresses.find(addr => addr.id === selectedAddress) && (
+                  <SlotSelection
+                    customerPincode={getSelectedAddressPincode()}
+                    selectedDate={selectedDate}
+                    onSlotSelect={handleSlotSelect}
+                    selectedSlotId={selectedSlot?.id}
+                    className="border-0 shadow-none bg-transparent p-0"
+                  />
+                )}
+
+                {selectedSlot && estimatedDelivery && (
+                  <Alert className="border-green-200 bg-green-50">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    <AlertDescription className="text-green-800">
+                      <strong>Selected:</strong> {selectedSlot.slot_name} • {estimatedDelivery}
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white rounded-2xl shadow-lg">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CreditCard className="h-5 w-5" />
+                <CardTitle className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                  <CreditCard className="h-6 w-6 text-purple-600" />
                   Payment Method
                 </CardTitle>
+                <CardDescription>Select your preferred payment method</CardDescription>
               </CardHeader>
               <CardContent>
-                <RadioGroup value={selectedPayment} onValueChange={setSelectedPayment}>
+                <RadioGroup
+                  onValueChange={setSelectedPayment}
+                  value={selectedPayment}
+                  className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+                >
                   {paymentMethods.map((method) => (
-                    <div key={method.id} className="flex items-center space-x-3 p-4 border rounded-lg">
-                      <RadioGroupItem value={method.id} id={method.id} />
-                      <div className="flex items-center gap-3 flex-1">
+                    <Label
+                      key={method.id}
+                      htmlFor={method.id}
+                      className={
+                        `relative flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 ` +
+                        `hover:bg-accent hover:text-accent-foreground cursor-pointer ` +
+                        (selectedPayment === method.id ? "border-primary" : "")
+                      }
+                    >
+                      {selectedPayment === method.id && (
+                        <ShineBorder
+                          className="absolute inset-0 z-0"
+                          shineColor={["#8b5cf6", "#a855f7", "#c084fc"]}
+                          borderWidth={2}
+                          duration={3}
+                        />
+                      )}
+                      <RadioGroupItem id={method.id} value={method.id} className="sr-only" />
+                      <div className="relative z-10 flex items-center space-x-3 w-full">
                         {method.icon}
-                        <div>
-                          <Label htmlFor={method.id} className="font-medium">
-                            {method.name}
-                          </Label>
-                          <p className="text-sm text-gray-500">{method.description}</p>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{method.name}</span>
+                          <span className="text-sm text-muted-foreground">{method.description}</span>
                         </div>
                       </div>
-                    </div>
+                    </Label>
                   ))}
                 </RadioGroup>
               </CardContent>
             </Card>
 
-            
-          </div>
-
-          {/* Right Column - Order Summary */}
-          <div className="space-y-6">
-            {/* Order Summary */}
-            <Card>
+            <Card className="bg-white rounded-2xl shadow-lg">
               <CardHeader>
-                <CardTitle>Order Summary</CardTitle>
+                <CardTitle className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                  <Shield className="h-6 w-6 text-blue-600" />
+                  Special Instructions
+                </CardTitle>
+                <CardDescription>Add any specific instructions for your order.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Warning for invalid items */}
-                {cart.items.some(item => !item.vendorId || item.vendorId === 'unknown') && (
-                  <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription className="flex items-center justify-between">
-                      <span>Some items in your cart are invalid and need to be removed. Please clear your cart and add products again from the Order page.</span>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={() => {
-                          clearCart();
-                          toast({
-                            title: "Cart Cleared",
-                            description: "Invalid items have been removed. Please add products again from the Order page.",
-                          });
-                        }}
-                      >
-                        Clear Cart
-                      </Button>
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {/* Items */}
-                <div className="space-y-3">
-                  {cart.items.map((item) => {
-                    const isInvalid = !item.vendorId || item.vendorId === 'unknown';
-                    return (
-                      <div key={item.id} className={`flex items-center gap-3 ${isInvalid ? 'bg-red-50 border border-red-200 rounded-lg p-2' : ''}`}>
-                        <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
-                          <div className="w-6 h-6 bg-gray-200 rounded"></div>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-medium truncate ${isInvalid ? 'text-red-700' : ''}`}>
-                            {item.name}
-                            {isInvalid && <span className="text-red-500 ml-2">⚠️ Invalid</span>}
-                          </p>
-                          <div className="flex flex-col gap-1">
-                            <div className="flex items-center gap-2">
-                              <p className="text-xs text-gray-600 font-medium">🏪 {item.vendor || 'Unknown Vendor'}</p>
-                              {item.qualityName && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                  {item.qualityName}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <p className="text-xs text-gray-500">Qty: {item.quantity}</p>
-                              {item.warranty > 0 && (
-                                <span className="text-xs text-green-600">🛡️ {item.warranty}mo warranty</span>
-                              )}
-                            </div>
-                            {item.brandName && item.modelName && (
-                              <p className="text-xs text-gray-500">{item.brandName} • {item.modelName}</p>
-                            )}
-                          </div>
-                        </div>
-                        <p className={`text-sm font-medium ${isInvalid ? 'text-red-700' : ''}`}>
-                          ₹{(item.price * item.quantity).toLocaleString()}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <Separator />
-
-                {/* Price Breakdown */}
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>Subtotal</span>
-                    <span>₹{subtotal.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span>Delivery Fee</span>
-                    <span className="text-green-600">FREE</span>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between font-semibold">
-                    <span>Total</span>
-                    <span>₹{total.toLocaleString()}</span>
-                  </div>
-                </div>
-
-                {/* Place Order Button */}
-                <Button 
-                  className="w-full mt-6" 
-                  size="lg"
-                  onClick={handlePlaceOrder}
-                  disabled={!selectedAddress || !selectedPayment || isPlacingOrder}
-                >
-                  {isPlacingOrder ? (
-                    <>Placing Order...</>
-                  ) : (
-                    <>
-                      <Shield className="h-4 w-4 mr-2" />
-                      Place Order - ₹{total.toLocaleString()}
-                    </>
-                  )}
-                </Button>
-
-                {/* Security Info */}
-                <div className="text-xs text-gray-500 text-center">
-                  <Shield className="h-3 w-3 inline mr-1" />
-                  Your payment information is secure and encrypted
-                </div>
+              <CardContent>
+                <Textarea
+                  placeholder="e.g., Leave at the gate, Call me upon arrival, etc."
+                  value={specialInstructions}
+                  onChange={(e) => setSpecialInstructions(e.target.value)}
+                  rows={3}
+                />
               </CardContent>
             </Card>
+          </div>
 
-            
+          <div className="lg:col-span-1 space-y-8">
+            <Card className="bg-white rounded-2xl shadow-lg sticky top-4">
+              <CardHeader>
+                <CardTitle className="text-2xl font-bold text-gray-900">Order Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  {cart.items.map((item) => (
+                    <div key={item.id} className="flex justify-between items-start">
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-gray-900">
+                          {item.brandName} {item.modelName}
+                        </span>
+                        <span className="text-sm text-gray-600">
+                          <span className="font-medium">🏪 {item.vendor}</span>
+                          {item.qualityName && <span className="ml-2 px-2 py-0.5 bg-gray-100 rounded-full text-xs text-gray-500">{item.qualityName}</span>}
+                        </span>
+                        <span className="text-sm text-gray-600">Qty: {item.quantity}</span>
+                      </div>
+                      <span className="font-semibold text-gray-900">₹{item.price * item.quantity}</span>
+                    </div>
+                  ))}
+                </div>
+                <Separator />
+                <div className="flex justify-between font-semibold text-gray-800">
+                  <span>Subtotal</span>
+                  <span>₹{subtotal.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-semibold text-gray-800">
+                  <span>Shipping Charges</span>
+                  <span>₹{shippingCharges.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-semibold text-gray-800">
+                  <span>Tax Amount</span>
+                  <span>₹{taxAmount.toFixed(2)}</span>
+                </div>
+                <Separator />
+                <div className="flex justify-between font-bold text-xl text-green-600">
+                  <span>Total</span>
+                  <span>₹{total.toFixed(2)}</span>
+                </div>
+                <PulsatingButton
+                  onClick={handlePlaceOrder}
+                  disabled={isPlacingOrder || addresses.length === 0 || !selectedAddress || !selectedPayment || !selectedSlot}
+                  className="w-full py-3 mt-6 rounded-lg text-lg font-semibold transition-colors duration-300 bg-green-500 text-white hover:bg-green-600"
+                  pulseColor="#22C55E"
+                >
+                  {isPlacingOrder ? 'Placing Order...' : `Place Order - ₹${total.toFixed(2)}`}
+                </PulsatingButton>
+              </CardContent>
+            </Card>
           </div>
         </div>
-      </div>
-
-      {/* Add Address Modal */}
-      <Dialog open={showAddressModal} onOpenChange={setShowAddressModal}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add New Address</DialogTitle>
-            <DialogDescription>
-              Add a new delivery address to your account
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="contact_name">Name</Label>
-                <Input
-                  id="contact_name"
-                  value={newAddress.contact_name}
-                  onChange={(e) => setNewAddress(prev => ({ ...prev, contact_name: e.target.value }))}
-                  placeholder="Full name"
-                />
-              </div>
-              <div>
-                <Label htmlFor="contact_phone">Phone</Label>
-                <Input
-                  id="contact_phone"
-                  value={newAddress.contact_phone}
-                  onChange={(e) => setNewAddress(prev => ({ ...prev, contact_phone: e.target.value }))}
-                  placeholder="Phone number"
-                />
-              </div>
-            </div>
-
-            <div>
-              <Label htmlFor="address_line1">Address Line 1</Label>
-              <Input
-                id="address_line1"
-                value={newAddress.address_line1}
-                onChange={(e) => setNewAddress(prev => ({ ...prev, address_line1: e.target.value }))}
-                placeholder="House no, Building name, Street"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="address_line2">Address Line 2 (Optional)</Label>
-              <Input
-                id="address_line2"
-                value={newAddress.address_line2}
-                onChange={(e) => setNewAddress(prev => ({ ...prev, address_line2: e.target.value }))}
-                placeholder="Area, Locality"
-              />
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <Label htmlFor="city">City</Label>
-                <Input
-                  id="city"
-                  value={newAddress.city}
-                  onChange={(e) => setNewAddress(prev => ({ ...prev, city: e.target.value }))}
-                  placeholder="City"
-                />
-              </div>
-              <div>
-                <Label htmlFor="state">State</Label>
-                <Input
-                  id="state"
-                  value={newAddress.state}
-                  onChange={(e) => setNewAddress(prev => ({ ...prev, state: e.target.value }))}
-                  placeholder="State"
-                />
-              </div>
-              <div>
-                <Label htmlFor="pincode">Pincode</Label>
-                <Input
-                  id="pincode"
-                  value={newAddress.pincode}
-                  onChange={(e) => setNewAddress(prev => ({ ...prev, pincode: e.target.value }))}
-                  placeholder="Pincode"
-                />
-              </div>
-            </div>
-
-            <div>
-              <Label htmlFor="address_type">Address Type</Label>
-              <Select 
-                value={newAddress.address_type} 
-                onValueChange={(value) => setNewAddress(prev => ({ ...prev, address_type: value }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="home">Home</SelectItem>
-                  <SelectItem value="work">Work</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddressModal(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleAddAddress}>
-              Add Address
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
+      </main>
     </div>
   );
 };
 
-export default Checkout; 
+export default Checkout;

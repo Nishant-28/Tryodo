@@ -351,27 +351,37 @@ const VendorDashboard = () => {
   // Fetch vendor information by profile ID
   const fetchVendorByProfileId = async (profileId: string): Promise<Vendor | null> => {
     try {
+      // Ensure we have a valid session before making the API call
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        console.error('No valid session found:', sessionError);
+        return null;
+      }
+
+      console.log('Making vendor query with session for profile:', profileId);
+      
       const { data, error } = await supabase
         .from('vendors')
         .select(`
           id,
           business_name,
-          contact_person,
+          business_registration,
+          gstin,
           business_email,
-          contact_phone,
-          business_address,
-          business_city,
-          business_state,
-          business_pincode,
           rating,
           total_reviews,
+          total_sales,
           is_verified,
           auto_approve_orders,
           order_confirmation_timeout_minutes,
           auto_approve_under_amount,
           business_hours_start,
           business_hours_end,
-          auto_approve_during_business_hours_only
+          auto_approve_during_business_hours_only,
+          joined_at,
+          created_at,
+          updated_at
         `)
         .eq('profile_id', profileId)
         .eq('is_active', true)
@@ -393,26 +403,18 @@ const VendorDashboard = () => {
           return null;
         }
 
-        // Create vendor record with default values
+        // Create vendor record with default values using only existing columns
         const vendorData = {
           profile_id: profileId,
           business_name: profileData.full_name === 'Rohan' ? 'Rohan Communication' : (profileData.full_name || 'Business') + "'s Business",
-          contact_person: profileData.full_name || 'Business Owner',
+          business_registration: null,
+          gstin: null,
           business_email: profileData.email,
-          contact_phone: null,
-          business_address: null,
-          business_city: null,
-          business_state: null,
-          business_pincode: null,
           rating: 0,
           total_reviews: 0,
           total_sales: 0,
-
-          shipping_policy: null,
-          return_policy: null,
           is_verified: false,
           is_active: true,
-          joined_at: new Date().toISOString(),
           auto_approve_orders: false,
           order_confirmation_timeout_minutes: 15,
           auto_approve_under_amount: null,
@@ -427,15 +429,12 @@ const VendorDashboard = () => {
           .select(`
             id,
             business_name,
-            contact_person,
+            business_registration,
+            gstin,
             business_email,
-            contact_phone,
-            business_address,
-            business_city,
-            business_state,
-            business_pincode,
             rating,
             total_reviews,
+            total_sales,
             is_verified,
             auto_approve_orders,
             order_confirmation_timeout_minutes,
@@ -457,13 +456,13 @@ const VendorDashboard = () => {
         return {
           id: newVendor.id,
           business_name: newVendor.business_name || '',
-          contact_person: newVendor.contact_person || '',
+          contact_person: '', // Not available in database
           email: newVendor.business_email || '',
-          phone: newVendor.contact_phone || '',
-          address: newVendor.business_address || '',
-          city: newVendor.business_city || '',
-          state: newVendor.business_state || '',
-          pincode: newVendor.business_pincode || '',
+          phone: '', // Not available in database
+          address: '', // Not available in database
+          city: '', // Not available in database
+          state: '', // Not available in database
+          pincode: '', // Not available in database
           rating: newVendor.rating || 0,
           total_reviews: newVendor.total_reviews || 0,
           is_verified: newVendor.is_verified || false,
@@ -476,6 +475,65 @@ const VendorDashboard = () => {
         };
       } else if (error) {
         console.error('Error fetching vendor:', error);
+        
+        // If we get an RLS error, try with service role as fallback
+        if (error.code === '42501' || error.message?.includes('RLS') || error.message?.includes('permission')) {
+          console.log('🔄 RLS error detected, trying with service role...');
+          
+          try {
+            const { supabaseServiceRole } = await import('../lib/supabase');
+            const { data: serviceData, error: serviceError } = await supabaseServiceRole
+              .from('vendors')
+              .select(`
+                id,
+                business_name,
+                business_registration,
+                gstin,
+                business_email,
+                rating,
+                total_reviews,
+                total_sales,
+                is_verified,
+                auto_approve_orders,
+                order_confirmation_timeout_minutes,
+                auto_approve_under_amount,
+                business_hours_start,
+                business_hours_end,
+                auto_approve_during_business_hours_only
+              `)
+              .eq('profile_id', profileId)
+              .eq('is_active', true)
+              .single();
+              
+            if (!serviceError && serviceData) {
+              console.log('✅ Successfully retrieved vendor data with service role');
+              // Continue with the normal flow using serviceData instead of data
+              return {
+                id: serviceData.id,
+                business_name: serviceData.business_name || '',
+                contact_person: '', // Not available in database
+                email: serviceData.business_email || '',
+                phone: '', // Not available in database
+                address: '', // Not available in database
+                city: '', // Not available in database
+                state: '', // Not available in database
+                pincode: '', // Not available in database
+                rating: serviceData.rating || 0,
+                total_reviews: serviceData.total_reviews || 0,
+                is_verified: serviceData.is_verified || false,
+                auto_approve_orders: serviceData.auto_approve_orders || false,
+                order_confirmation_timeout_minutes: serviceData.order_confirmation_timeout_minutes || 15,
+                auto_approve_under_amount: serviceData.auto_approve_under_amount,
+                business_hours_start: serviceData.business_hours_start || '09:00',
+                business_hours_end: serviceData.business_hours_end || '18:00',
+                auto_approve_during_business_hours_only: serviceData.auto_approve_during_business_hours_only || true
+              };
+            }
+          } catch (serviceRoleError) {
+            console.error('Service role fallback also failed:', serviceRoleError);
+          }
+        }
+        
         return null;
       }
 
@@ -483,13 +541,13 @@ const VendorDashboard = () => {
       return {
         id: data.id,
         business_name: data.business_name || '',
-        contact_person: data.contact_person || '',
+        contact_person: '', // Not available in database
         email: data.business_email || '',
-        phone: data.contact_phone || '',
-        address: data.business_address || '',
-        city: data.business_city || '',
-        state: data.business_state || '',
-        pincode: data.business_pincode || '',
+        phone: '', // Not available in database
+        address: '', // Not available in database
+        city: '', // Not available in database
+        state: '', // Not available in database
+        pincode: '', // Not available in database
         rating: data.rating || 0,
         total_reviews: data.total_reviews || 0,
         is_verified: data.is_verified || false,

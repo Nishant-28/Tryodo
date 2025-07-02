@@ -5,17 +5,27 @@ import {
   AlertTriangle, Timer, User, Store, Phone, MapPin, RefreshCw,
   Star, Verified, Copy, Facebook, Twitter, MessageCircle, Mail,
   Calendar, CreditCard, Shield, Headphones, RotateCcw, ExternalLink,
-  Gift, Zap, Heart, Award
+  Gift, Zap, Heart, Award, ShoppingBag, List
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Progress } from '@/components/ui/progress';
 import Header from '@/components/Header';
-import Footer from '@/components/Footer';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
+
+interface CustomerAddress {
+  id: string;
+  customer_id: string;
+  shop_name?: string;
+  owner_name: string;
+  pincode: string;
+  address_box: string;
+  phone_number: string;
+  created_at: string;
+  updated_at: string;
+}
 
 interface OrderDetails {
   id: string;
@@ -24,7 +34,7 @@ interface OrderDetails {
   estimated_delivery_date: string;
   order_status: string;
   payment_method: string;
-  delivery_address: any;
+  delivery_address_id: string | null;
   created_at: string;
   customer_id: string;
   subtotal?: number;
@@ -97,6 +107,7 @@ const OrderSuccess = () => {
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [shareUrl, setShareUrl] = useState('');
   const [realtimeSubscription, setRealtimeSubscription] = useState<any>(null);
+  const [customerAddress, setCustomerAddress] = useState<CustomerAddress | null>(null);
   
   // Initialize with real order data only - NO MORE DUMMY DATA
   useEffect(() => {
@@ -110,6 +121,9 @@ const OrderSuccess = () => {
       setOrderDetails(details);
       setShareUrl(window.location.origin + `/order-tracking/${orderId}`);
       loadRealOrderItems(details.id);
+      if (details.delivery_address_id) {
+        fetchCustomerAddress(details.delivery_address_id);
+      }
     } else {
       // Check URL params as fallback
       const urlParams = new URLSearchParams(location.search);
@@ -158,6 +172,9 @@ const OrderSuccess = () => {
       setShareUrl(window.location.origin + `/order-tracking/${orderNumber}`);
       
       await loadRealOrderItems(orderData.id);
+      if (orderData.delivery_address_id) {
+        fetchCustomerAddress(orderData.delivery_address_id);
+      }
       
     } catch (error) {
       console.error('Error loading order by number:', error);
@@ -166,6 +183,8 @@ const OrderSuccess = () => {
         description: "Failed to load order details"
       });
       navigate('/my-orders');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -249,6 +268,25 @@ const OrderSuccess = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchCustomerAddress = async (addressId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('customer_addresses')
+        .select('*')
+        .eq('id', addressId)
+        .single();
+
+      if (error) throw error;
+      setCustomerAddress(data);
+    } catch (error: any) {
+      console.error('Error fetching customer address:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load delivery address."
+      });
     }
   };
 
@@ -464,12 +502,6 @@ const OrderSuccess = () => {
     return `${hours}h ${mins}m left`;
   };
 
-  const getOverallProgress = () => {
-    if (vendorStatuses.length === 0) return 0;
-    const confirmedVendors = vendorStatuses.filter(v => v.overall_status === 'confirmed').length;
-    return (confirmedVendors / vendorStatuses.length) * 100;
-  };
-
   // Share functionality
   const copyToClipboard = async (text: string) => {
     try {
@@ -532,7 +564,6 @@ const OrderSuccess = () => {
             <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
           </div>
         </div>
-        <Footer />
       </div>
     );
   }
@@ -549,18 +580,14 @@ const OrderSuccess = () => {
             <Button onClick={() => navigate('/order')}>Continue Shopping</Button>
           </div>
         </div>
-        <Footer />
       </div>
     );
   }
 
-  const deliveryAddress = orderDetails.delivery_address || {};
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50">
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-start pt-16 pb-8 px-4 sm:px-6 lg:px-8">
       <Header />
-      
-      <div className="container mx-auto px-4 py-8">
+      <div className="flex-grow w-full max-w-4xl">
         {/* Success Header */}
         <div className="text-center mb-8">
           {orderDetails.id === 'demo-order-001' && (
@@ -584,14 +611,6 @@ const OrderSuccess = () => {
           <p className="text-lg text-gray-600 mb-4">
             Thank you for choosing Tryodo. Your order <span className="font-semibold text-blue-600">#{orderDetails.order_number}</span> has been received.
           </p>
-          
-          <div className="max-w-md mx-auto">
-            <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
-              <span>Order Progress</span>
-              <span>{Math.round(getOverallProgress())}% Complete</span>
-            </div>
-            <Progress value={getOverallProgress()} className="h-2" />
-          </div>
         </div>
 
         {/* Quick Actions Bar */}
@@ -685,100 +704,87 @@ const OrderSuccess = () => {
               </CardContent>
             </Card>
 
-            {/* Delivery Information */}
-            <Card className="border-2 border-green-100">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <MapPin className="h-5 w-5 text-green-600" />
-                  Delivery Information
-                </CardTitle>
+            {/* Delivery Address */}
+            <Card className="border-2 border-green-200 shadow-inner bg-green-50">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-green-700">Delivery Address</CardTitle>
+                <MapPin className="h-4 w-4 text-green-500" />
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="bg-green-50 rounded-lg p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <User className="h-4 w-4 text-green-600" />
-                    <span className="font-semibold text-green-800">
-                      {deliveryAddress.contact_name || deliveryAddress.name || 'Customer'}
-                    </span>
-                  </div>
-                  
-                  <div className="space-y-2 text-sm">
-                    <p className="text-gray-700">
-                      {deliveryAddress.address_line1 || deliveryAddress.street_address || 'Address not available'}
+              <CardContent>
+                {customerAddress ? (
+                  <address className="text-gray-900 not-italic">
+                    <p className="font-semibold text-lg">{customerAddress.owner_name}</p>
+                    {customerAddress.shop_name && <p className="text-sm">{customerAddress.shop_name}</p>}
+                    <p className="text-sm">{customerAddress.address_box}</p>
+                    <p className="text-sm">PIN: {customerAddress.pincode}</p>
+                    <p className="text-sm flex items-center gap-1">
+                      <Phone className="h-3 w-3 inline-block" /> {customerAddress.phone_number}
                     </p>
-                    {(deliveryAddress.address_line2 || deliveryAddress.address_line_2) && (
-                      <p className="text-gray-700">
-                        {deliveryAddress.address_line2 || deliveryAddress.address_line_2}
-                      </p>
-                    )}
-                    <p className="text-gray-700">
-                      {deliveryAddress.city}, {deliveryAddress.state} - {deliveryAddress.pincode || deliveryAddress.postal_code}
-                    </p>
-                    {(deliveryAddress.contact_phone || deliveryAddress.phone) && (
-                      <div className="flex items-center gap-2 mt-2">
-                        <Phone className="h-4 w-4 text-green-600" />
-                        <span className="text-gray-700">{deliveryAddress.contact_phone || deliveryAddress.phone}</span>
-                      </div>
-                    )}
-                  </div>
+                  </address>
+                ) : (orderDetails.delivery_address_id ? (
+                  <p className="text-gray-600">Loading delivery address...</p>
+                ) : (
+                  <p className="text-gray-600">No delivery address provided.</p>
+                ))}
+                {orderDetails.special_instructions && (
+                  <p className="text-sm text-gray-600 mt-2">
+                    <strong className="text-green-700">Instructions:</strong> {orderDetails.special_instructions}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Payment Information */}
+            <Card className="border-2 border-blue-200 shadow-inner bg-blue-50">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-blue-700">Payment Information</CardTitle>
+                <CreditCard className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm text-gray-600">Payment Method</span>
+                  <span className="font-medium capitalize">{orderDetails.payment_method}</span>
                 </div>
-                
-                <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg">
-                  <Truck className="h-5 w-5 text-blue-600" />
-                  <div>
-                    <p className="font-medium text-blue-800">Expected Delivery</p>
-                    <p className="text-sm text-blue-600">
-                      {new Date(orderDetails.estimated_delivery_date).toLocaleDateString('en-IN', {
-                        weekday: 'long',
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric'
-                      })}
-                    </p>
-                  </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-gray-600">Payment Status</span>
+                  <Badge variant={orderDetails.payment_status === 'paid' ? 'default' : 'secondary'}>
+                    {orderDetails.payment_status || 'Pending'}
+                  </Badge>
                 </div>
               </CardContent>
             </Card>
 
-{/* Share section removed as requested */}
-
             {/* Quick Actions */}
-            <Card>
+            <Card className="mt-6 shadow-lg bg-white">
               <CardHeader>
-                <CardTitle className="text-lg">Quick Actions</CardTitle>
+                <CardTitle className="text-lg font-semibold text-gray-800 flex items-center">
+                  <Zap className="mr-2 h-5 w-5 text-yellow-500" /> Quick Actions
+                </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <Button onClick={handleTrackOrder} className="w-full gap-2" size="lg">
-                  <MapPin className="h-5 w-5" />
-                  Track Your Order
-                </Button>
-                
-                <Button onClick={handleViewOrders} variant="outline" className="w-full gap-2">
-                  <Package className="h-4 w-4" />
-                  View All Orders
-                </Button>
-                
-                <Button onClick={handleContinueShopping} variant="outline" className="w-full gap-2">
-                  <ArrowRight className="h-4 w-4" />
+              <CardContent className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <Button variant="outline" onClick={handleContinueShopping} className="flex flex-col h-auto py-4 items-center justify-center text-center text-gray-700 hover:text-blue-600">
+                  <ShoppingBag className="h-6 w-6 mb-1 text-blue-500" />
                   Continue Shopping
                 </Button>
-                
-                <Separator />
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <Button onClick={handleDownloadInvoice} variant="ghost" size="sm" className="gap-2">
-                    <Download className="h-4 w-4" />
-                    Invoice
-                  </Button>
-                  <Button onClick={handleReorder} variant="ghost" size="sm" className="gap-2">
-                    <RotateCcw className="h-4 w-4" />
-                    Reorder
-                  </Button>
-                </div>
-                
-                <Button onClick={handleContactSupport} variant="ghost" size="sm" className="w-full gap-2 text-orange-600 hover:bg-orange-50">
-                  <Headphones className="h-4 w-4" />
-                  Need Help? Contact Support
+                <Button variant="outline" onClick={handleViewOrders} className="flex flex-col h-auto py-4 items-center justify-center text-center text-gray-700 hover:text-blue-600">
+                  <List className="h-6 w-6 mb-1 text-green-500" />
+                  View All Orders
+                </Button>
+                <Button variant="outline" onClick={handleContactSupport} className="flex flex-col h-auto py-4 items-center justify-center text-center text-gray-700 hover:text-blue-600">
+                  <Headphones className="h-6 w-6 mb-1 text-purple-500" />
+                  Contact Support
+                </Button>
+                <Button variant="outline" onClick={handleDownloadInvoice} className="flex flex-col h-auto py-4 items-center justify-center text-center text-gray-700 hover:text-blue-600">
+                  <Download className="h-6 w-6 mb-1 text-red-500" />
+                  Download Invoice
+                </Button>
+                <Button variant="outline" onClick={handleReorder} className="flex flex-col h-auto py-4 items-center justify-center text-center text-gray-700 hover:text-blue-600">
+                  <RotateCcw className="h-6 w-6 mb-1 text-indigo-500" />
+                  Reorder Items
+                </Button>
+                <Button variant="outline" onClick={handleTrackOrder} className="flex flex-col h-auto py-4 items-center justify-center text-center text-gray-700 hover:text-blue-600">
+                  <MapPin className="h-6 w-6 mb-1 text-orange-500" />
+                  Track Order
                 </Button>
               </CardContent>
             </Card>
@@ -848,9 +854,12 @@ const OrderSuccess = () => {
         </Card>
       </div>
       
-      <Footer />
+      <div className="mt-8 text-center text-sm text-gray-500">
+        <p>You will receive an email shortly with your order details.</p>
+        <p>For any inquiries, please contact our <a href="#" onClick={handleContactSupport} className="text-blue-600 hover:underline">customer support</a>.</p>
+      </div>
     </div>
   );
 };
 
-export default OrderSuccess; 
+export default OrderSuccess;
