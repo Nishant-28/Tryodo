@@ -396,13 +396,35 @@ const VendorDashboard = () => {
   };
 
   const loadFinancialSummary = async (vendorId: string) => {
-    const { data, error } = await AnalyticsAPI.getVendorFinancialSummary(vendorId);
-    if (data) {
-      setFinancialSummary(data);
-    }
-    if(error){
-      toast.error("Failed to load financial summary.");
-      console.error(error);
+    try {
+      const response = await AnalyticsAPI.getVendorFinancialSummary(vendorId);
+      if (response.success && response.data) {
+        setFinancialSummary(response.data);
+      } else {
+        toast.error("Failed to load financial summary: " + (response.error || "Unknown error"));
+        console.error("Financial summary error:", response.error);
+        // Set default values to prevent showing zeros
+        setFinancialSummary({
+          total_sales: 0,
+          total_commission: 0,
+          net_earnings: 0,
+          pending_payouts: 0,
+          total_orders: 0,
+          total_products: 0
+        });
+      }
+    } catch (error: any) {
+      toast.error("Failed to load financial summary: " + error.message);
+      console.error("Financial summary error:", error);
+      // Set default values to prevent showing zeros
+      setFinancialSummary({
+        total_sales: 0,
+        total_commission: 0,
+        net_earnings: 0,
+        pending_payouts: 0,
+        total_orders: 0,
+        total_products: 0
+      });
     }
   };
 
@@ -999,8 +1021,21 @@ const VendorDashboard = () => {
       console.log('VendorDashboard: Setting analytics data:', analyticsData);
       setAnalytics(analyticsData);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading analytics:', error);
+      toast.error("Failed to load analytics data: " + (error.message || error));
+      // Set default analytics values to prevent undefined errors
+      setAnalytics({
+        totalProducts: 0,
+        totalOrders: 0,
+        pendingOrders: 0,
+        confirmedOrders: 0,
+        deliveredOrders: 0,
+        totalRevenue: 0,
+        averageOrderValue: 0,
+        responseRate: 0,
+        autoApprovalRate: 0
+      });
     }
   };
 
@@ -1025,8 +1060,12 @@ const VendorDashboard = () => {
         setTransactions(transactionsResponse.data);
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading financial data:', error);
+      toast.error("Failed to load financial data: " + (error.message || error));
+      // Set default values to prevent undefined errors
+      setWallet(null);
+      setTransactions([]);
     } finally {
       setLoadingFinancials(false);
     }
@@ -1095,8 +1134,12 @@ const VendorDashboard = () => {
         setCategoryBreakdown(categoryBreakdown);
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading enhanced analytics:', error);
+      toast.error("Failed to load enhanced analytics: " + (error.message || error));
+      // Set default values to prevent undefined errors
+      setMonthlyEarnings([]);
+      setCategoryBreakdown([]);
     } finally {
       setLoadingChartData(false);
     }

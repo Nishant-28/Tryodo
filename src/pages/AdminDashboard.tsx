@@ -206,6 +206,11 @@ const AdminDashboard = () => {
     notes: ''
   });
 
+  // Add vendor analytics states
+  const [allVendorAnalytics, setAllVendorAnalytics] = useState<any[]>([]);
+  const [loadingVendorAnalytics, setLoadingVendorAnalytics] = useState(false);
+  const [vendorAnalyticsError, setVendorAnalyticsError] = useState<string | null>(null);
+
   const { toast } = useToast();
 
   // Real-time Data Fetching
@@ -431,7 +436,8 @@ const AdminDashboard = () => {
       await Promise.all([
         checkDatabaseSetup(),
         fetchDashboardData(),
-        loadFinancialData()
+        loadFinancialData(),
+        loadAllVendorAnalytics()
       ]);
     };
 
@@ -441,6 +447,7 @@ const AdminDashboard = () => {
     const interval = setInterval(() => {
       fetchDashboardData();
       loadFinancialData();
+      loadAllVendorAnalytics();
     }, 30000);
     return () => clearInterval(interval);
   }, [checkDatabaseSetup, fetchDashboardData]);
@@ -641,6 +648,126 @@ const AdminDashboard = () => {
         variant: "destructive"
       });
     }
+  };
+
+  // Add function to load all vendor analytics
+  const loadAllVendorAnalytics = async () => {
+    try {
+      setLoadingVendorAnalytics(true);
+      setVendorAnalyticsError(null);
+
+      // Get all vendors first
+      const { data: vendors, error: vendorsError } = await supabase
+        .from('vendors')
+        .select('id, business_name, is_verified, rating, total_reviews')
+        .eq('is_active', true)
+        .order('business_name');
+
+      if (vendorsError) throw vendorsError;
+
+      if (!vendors || vendors.length === 0) {
+        setAllVendorAnalytics([]);
+        return;
+      }
+
+      // Get analytics for each vendor
+      const vendorAnalytics = await Promise.all(
+        vendors.map(async (vendor) => {
+          try {
+                         const response = await TryodoAPI.Analytics.getVendorFinancialSummary(vendor.id);
+            const walletResponse = await WalletAPI.getVendorWallet(vendor.id);
+            
+            const analytics = response.success ? response.data : {
+              total_sales: 0,
+              total_commission: 0,
+              net_earnings: 0,
+              pending_payouts: 0,
+              total_orders: 0,
+              total_products: 0
+            };
+
+            const wallet = walletResponse.success ? walletResponse.data : {
+              available_balance: 0,
+              pending_balance: 0,
+              total_earned: 0,
+              total_paid_out: 0
+            };
+
+            return {
+              ...vendor,
+              analytics,
+              wallet,
+              performance_score: calculateVendorPerformanceScore(analytics, vendor)
+            };
+          } catch (error) {
+            console.error(`Error loading analytics for vendor ${vendor.id}:`, error);
+            return {
+              ...vendor,
+              analytics: {
+                total_sales: 0,
+                total_commission: 0,
+                net_earnings: 0,
+                pending_payouts: 0,
+                total_orders: 0,
+                total_products: 0
+              },
+              wallet: {
+                available_balance: 0,
+                pending_balance: 0,
+                total_earned: 0,
+                total_paid_out: 0
+              },
+              performance_score: 0,
+              error: true
+            };
+          }
+        })
+      );
+
+      // Sort by total sales descending
+      vendorAnalytics.sort((a, b) => (b.analytics?.total_sales || 0) - (a.analytics?.total_sales || 0));
+      setAllVendorAnalytics(vendorAnalytics);
+
+    } catch (error: any) {
+      console.error('Error loading vendor analytics:', error);
+      setVendorAnalyticsError(error.message || 'Failed to load vendor analytics');
+      toast({
+        title: "Error",
+        description: "Failed to load vendor analytics: " + (error.message || 'Unknown error'),
+        variant: "destructive"
+      });
+    } finally {
+      setLoadingVendorAnalytics(false);
+    }
+  };
+
+  // Helper function to calculate vendor performance score
+  const calculateVendorPerformanceScore = (analytics: any, vendor: any): number => {
+    if (!analytics) return 0;
+    
+    let score = 0;
+    
+    // Sales volume (40% weight)
+    const salesScore = Math.min((analytics.total_sales || 0) / 100000 * 40, 40);
+    score += salesScore;
+    
+    // Order count (20% weight)
+    const orderScore = Math.min((analytics.total_orders || 0) / 100 * 20, 20);
+    score += orderScore;
+    
+    // Product count (15% weight)
+    const productScore = Math.min((analytics.total_products || 0) / 50 * 15, 15);
+    score += productScore;
+    
+    // Rating (15% weight)
+    const ratingScore = (vendor.rating || 0) / 5 * 15;
+    score += ratingScore;
+    
+    // Verification status (10% weight)
+    const verificationScore = vendor.is_verified ? 10 : 0;
+    score += verificationScore;
+    
+    return Math.round(score);
   };
 
   if (loading) {
