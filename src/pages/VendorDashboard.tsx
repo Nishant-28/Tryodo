@@ -397,17 +397,17 @@ const VendorDashboard = () => {
 
   const loadFinancialSummary = async (vendorId: string) => {
     try {
-      console.log('🔍 Loading financial summary for vendor ID:', vendorId);
+      console.log('🔍 [DEBUG] Loading financial summary for vendor ID:', vendorId);
       const response = await AnalyticsAPI.getVendorFinancialSummary(vendorId);
-      console.log('📊 Financial summary response:', response);
+      console.log('📊 [DEBUG] Financial summary response:', response);
       
       if (response.success && response.data) {
-        console.log('✅ Setting financial summary data:', response.data);
+        console.log('✅ [DEBUG] Setting financial summary data:', response.data);
         setFinancialSummary(response.data);
+        toast.success(`Financial data loaded: ₹${response.data.total_sales?.toLocaleString()} total sales`);
       } else {
-        console.error('❌ Financial summary failed:', response.error);
+        console.error('❌ [DEBUG] Financial summary failed:', response.error);
         toast.error("Failed to load financial summary: " + (response.error || "Unknown error"));
-        console.error("Financial summary error:", response.error);
         // Set default values to prevent showing zeros
         setFinancialSummary({
           total_sales: 0,
@@ -419,9 +419,8 @@ const VendorDashboard = () => {
         });
       }
     } catch (error: any) {
-      console.error('💥 Exception in loadFinancialSummary:', error);
+      console.error('💥 [DEBUG] Exception in loadFinancialSummary:', error);
       toast.error("Failed to load financial summary: " + error.message);
-      console.error("Financial summary error:", error);
       // Set default values to prevent showing zeros
       setFinancialSummary({
         total_sales: 0,
@@ -432,6 +431,13 @@ const VendorDashboard = () => {
         total_products: 0
       });
     }
+  };
+
+  // Add a test function to manually test with Rohan's vendor ID
+  const testVendorAnalytics = async () => {
+    const testVendorId = 'aa5c87ad-0072-4721-a77a-7b5af6997def'; // Rohan Communication
+    console.log('🧪 [TEST] Testing vendor analytics with Rohan Communication vendor ID');
+    await loadFinancialSummary(testVendorId);
   };
 
   // Fetch vendor information by profile ID
@@ -1816,6 +1822,16 @@ const VendorDashboard = () => {
                 >
                   <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
                   <span>{refreshing ? 'Updating...' : 'Refresh'}</span>
+                </Button>
+
+                {/* Debug Test Button */}
+                <Button
+                  variant="outline"
+                  onClick={testVendorAnalytics}
+                  className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-orange-200 hover:border-orange-300 hover:bg-orange-50 transition-all duration-200 font-medium text-orange-600"
+                >
+                  <BarChart3 className="h-4 w-4" />
+                  <span>Test Analytics</span>
                 </Button>
 
                 {/* Product Management Button */}
