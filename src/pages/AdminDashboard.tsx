@@ -1340,7 +1340,216 @@ const AdminDashboard = () => {
           </TabsContent>
 
           <TabsContent value="vendor-sales" className="space-y-6">
-            <VendorSalesSection vendorSales={vendorSales} />
+            {/* Vendor Analytics Dashboard */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+              {/* Overall Vendor Metrics */}
+              <Card className="lg:col-span-1">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Store className="h-5 w-5 text-blue-600" />
+                    Vendor Overview
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">Total Vendors</span>
+                    <span className="font-semibold">{allVendorAnalytics.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">Active Vendors</span>
+                    <span className="font-semibold text-green-600">
+                      {allVendorAnalytics.filter(v => v.analytics?.total_sales > 0).length}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">Total Sales</span>
+                    <span className="font-semibold text-blue-600">
+                      ₹{allVendorAnalytics.reduce((sum, v) => sum + (v.analytics?.total_sales || 0), 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">Total Commission</span>
+                    <span className="font-semibold text-purple-600">
+                      ₹{allVendorAnalytics.reduce((sum, v) => sum + (v.analytics?.total_commission || 0), 0).toLocaleString()}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Top Performing Vendors */}
+              <Card className="lg:col-span-2">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <TrendingUp className="h-5 w-5 text-green-600" />
+                    Top Performing Vendors
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {allVendorAnalytics
+                      .filter(vendor => vendor.analytics?.total_sales > 0)
+                      .sort((a, b) => (b.analytics?.total_sales || 0) - (a.analytics?.total_sales || 0))
+                      .slice(0, 5)
+                      .map((vendor, index) => (
+                        <div key={vendor.vendor?.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+                              index === 0 ? 'bg-yellow-500' : index === 1 ? 'bg-gray-400' : index === 2 ? 'bg-orange-400' : 'bg-blue-500'
+                            }`}>
+                              {index + 1}
+                            </div>
+                            <div>
+                              <p className="font-semibold">{vendor.vendor?.business_name}</p>
+                              <p className="text-xs text-gray-600">
+                                {vendor.analytics?.total_orders} orders • {vendor.analytics?.total_products} products
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-bold text-green-600">₹{vendor.analytics?.total_sales?.toLocaleString()}</p>
+                            <p className="text-xs text-gray-600">
+                              Commission: ₹{vendor.analytics?.total_commission?.toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    {allVendorAnalytics.filter(v => v.analytics?.total_sales > 0).length === 0 && (
+                      <div className="text-center py-8 text-gray-500">
+                        No vendor sales data available
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Detailed Vendor Analytics Table */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className="h-5 w-5 text-blue-600" />
+                    Detailed Vendor Analytics
+                  </div>
+                  <Button 
+                    onClick={loadAllVendorAnalytics} 
+                    disabled={loadingVendorAnalytics}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {loadingVendorAnalytics ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                        Refreshing...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Refresh
+                      </>
+                    )}
+                  </Button>
+                </CardTitle>
+                <CardDescription>
+                  Complete analytics overview for all vendors in the system
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loadingVendorAnalytics ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    <span className="ml-3 text-gray-600">Loading vendor analytics...</span>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr className="border-b bg-gray-50">
+                          <th className="text-left p-4 font-semibold">Vendor</th>
+                          <th className="text-right p-4 font-semibold">Total Sales</th>
+                          <th className="text-right p-4 font-semibold">Orders</th>
+                          <th className="text-right p-4 font-semibold">Products</th>
+                          <th className="text-right p-4 font-semibold">Commission</th>
+                          <th className="text-right p-4 font-semibold">Net Earnings</th>
+                          <th className="text-right p-4 font-semibold">Avg Order</th>
+                          <th className="text-center p-4 font-semibold">Performance</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allVendorAnalytics.map((vendorData) => {
+                          const analytics = vendorData.analytics;
+                          const vendor = vendorData.vendor;
+                          const performanceScore = calculateVendorPerformanceScore(analytics, vendor);
+                          
+                          return (
+                            <tr key={vendor?.id} className="border-b hover:bg-gray-50 transition-colors">
+                              <td className="p-4">
+                                <div>
+                                  <p className="font-semibold">{vendor?.business_name}</p>
+                                  <p className="text-xs text-gray-600">{vendor?.email}</p>
+                                  <Badge variant={vendor?.is_verified ? "default" : "secondary"} className="text-xs mt-1">
+                                    {vendor?.is_verified ? "Verified" : "Unverified"}
+                                  </Badge>
+                                </div>
+                              </td>
+                              <td className="p-4 text-right">
+                                <span className="font-bold text-green-600">
+                                  ₹{(analytics?.total_sales || 0).toLocaleString()}
+                                </span>
+                              </td>
+                              <td className="p-4 text-right">
+                                <span className="font-semibold">{analytics?.total_orders || 0}</span>
+                              </td>
+                              <td className="p-4 text-right">
+                                <span className="font-semibold">{analytics?.total_products || 0}</span>
+                              </td>
+                              <td className="p-4 text-right">
+                                <span className="font-semibold text-purple-600">
+                                  ₹{(analytics?.total_commission || 0).toLocaleString()}
+                                </span>
+                              </td>
+                              <td className="p-4 text-right">
+                                <span className="font-semibold text-blue-600">
+                                  ₹{(analytics?.net_earnings || 0).toLocaleString()}
+                                </span>
+                              </td>
+                              <td className="p-4 text-right">
+                                <span className="font-semibold">
+                                  ₹{(analytics?.average_order_value || 0).toLocaleString()}
+                                </span>
+                              </td>
+                              <td className="p-4 text-center">
+                                <div className="flex items-center justify-center">
+                                  <div className={`w-16 h-2 rounded-full ${
+                                    performanceScore >= 80 ? 'bg-green-500' :
+                                    performanceScore >= 60 ? 'bg-yellow-500' :
+                                    performanceScore >= 40 ? 'bg-orange-500' : 'bg-red-500'
+                                  }`}>
+                                    <div 
+                                      className="h-full bg-white rounded-full transition-all duration-300"
+                                      style={{ width: `${Math.max(0, 100 - performanceScore)}%` }}
+                                    ></div>
+                                  </div>
+                                  <span className="ml-2 text-xs font-semibold">{performanceScore}%</span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    
+                    {allVendorAnalytics.length === 0 && (
+                      <div className="text-center py-12 text-gray-500">
+                        <Store className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                        <p className="text-lg font-semibold mb-2">No vendor analytics available</p>
+                        <p className="text-sm">Vendor analytics will appear here once vendors have sales data.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="commissions" className="space-y-6">

@@ -611,65 +611,75 @@ export class AnalyticsAPI {
   static async getVendorFinancialSummary(vendorId: string): Promise<ApiResponse<any>> {
     try {
       // Try the RPC first (preferred – uses DB-side function for performance)
-      const { data, error } = await supabase.rpc('get_vendor_financial_summary', {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('get_vendor_financial_summary', {
         p_vendor_id: vendorId,
       });
 
       // If RPC succeeds and returns data, use it
-      if (!error && data && data.length > 0) {
+      if (!rpcError && rpcData && rpcData.length > 0) {
         return {
           success: true,
-          data: data[0],
+          data: rpcData[0],
           message: 'Vendor financial summary retrieved successfully',
         };
       }
 
-      // Fallback: compute summary directly from tables if RPC unavailable or empty
-      const fallback = await this.computeVendorFinancialSummary(vendorId);
-      return fallback;
-    } catch (error: any) {
-      // In case of any unexpected failure, attempt fallback once more
-      console.warn('getVendorFinancialSummary RPC failed, switching to fallback:', error?.message);
-      const fallback = await this.computeVendorFinancialSummary(vendorId);
-      return fallback;
-    }
-  }
-
-  /**
-   * Fallback – compute vendor financial summary in the client by querying tables directly.
-   * Note: this is less efficient than the RPC but allows the dashboard to work even when
-   * the database function/view is missing.
-   */
-  private static async computeVendorFinancialSummary(vendorId: string): Promise<ApiResponse<any>> {
-    try {
-      // 1. Total products (active)
-      const [{ count: productCount }, { count: genericCount }] = await Promise.all([
-        supabase.from('vendor_products').select('*', { count: 'exact', head: true }).eq('vendor_id', vendorId),
-        supabase.from('vendor_generic_products').select('*', { count: 'exact', head: true }).eq('vendor_id', vendorId),
-      ]);
-
-      // 2. Pull order items for sales & commission calculation (delivered / confirmed)
-      const { data: orderItems, error: oiError } = await supabase
+      // Fallback: compute summary directly from order_items and orders
+      console.log('RPC failed or returned empty, computing from order_items...');
+      
+      // Get vendor's sales data from order_items
+      const { data: orderItems, error: orderError } = await supabase
         .from('order_items')
-        .select('line_total, commission_amount, item_status')
-        .eq('vendor_id', vendorId)
-        .in('item_status', ['confirmed', 'shipped', 'delivered', 'completed']);
-      if (oiError) throw oiError;
+        .select(`
+          line_total,
+          unit_price,
+          quantity,
+          order:orders (
+            order_status,
+            payment_status,
+            created_at
+          )
+        `)
+        .eq('vendor_id', vendorId);
 
-      const totalOrders = orderItems?.length || 0;
-      const totalSales = orderItems?.reduce((sum, o) => sum + (o.line_total || 0), 0) || 0;
-      // Some schemas store commission_amount in order_items; if not present, default 0
-      const totalCommission = orderItems?.reduce((sum, o) => sum + (o.commission_amount || 0), 0) || 0;
+      if (orderError) {
+        console.error('Error fetching order items:', orderError);
+        return {
+          success: false,
+          error: 'Failed to fetch order data: ' + orderError.message,
+          data: null,
+        };
+      }
+
+      // Get vendor products count
+      const { count: productCount, error: productError } = await supabase
+        .from('vendor_products')
+        .select('*', { count: 'exact', head: true })
+        .eq('vendor_id', vendorId)
+        .eq('is_active', true);
+
+      if (productError) {
+        console.warn('Error fetching product count:', productError);
+      }
+
+      // Calculate metrics from order_items
+      const items = orderItems || [];
+      const totalSales = items.reduce((sum, item) => sum + parseFloat(item.line_total || 0), 0);
+      const totalOrders = new Set(items.map(item => item.order?.created_at)).size; // Unique orders
+      const deliveredItems = items.filter(item => item.order?.order_status === 'delivered');
+      const deliveredSales = deliveredItems.reduce((sum, item) => sum + parseFloat(item.line_total || 0), 0);
+      
+      // Calculate commission (assume 15% default commission rate)
+      const commissionRate = 0.15;
+      const totalCommission = totalSales * commissionRate;
       const netEarnings = totalSales - totalCommission;
 
-      // 3. Pending payouts (sum payout_amount where vendor & status pending/processing)
-      const { data: pendingPayoutsRows } = await supabase
-        .from('payouts')
-        .select('payout_amount')
-        .eq('recipient_type', 'vendor')
-        .eq('recipient_id', vendorId)
-        .in('payout_status', ['pending', 'processing']);
-      const pendingPayouts = pendingPayoutsRows?.reduce((s, p) => s + (p.payout_amount || 0), 0) || 0;
+      // Pending payouts (items not yet delivered)
+      const pendingItems = items.filter(item => 
+        item.order?.order_status !== 'delivered' && 
+        item.order?.order_status !== 'cancelled'
+      );
+      const pendingPayouts = pendingItems.reduce((sum, item) => sum + parseFloat(item.line_total || 0), 0);
 
       const summary = {
         total_sales: totalSales,
@@ -677,18 +687,28 @@ export class AnalyticsAPI {
         net_earnings: netEarnings,
         pending_payouts: pendingPayouts,
         total_orders: totalOrders,
-        total_products: (productCount || 0) + (genericCount || 0),
+        total_products: productCount || 0,
+        delivered_sales: deliveredSales,
+        average_order_value: totalOrders > 0 ? totalSales / totalOrders : 0,
+        commission_rate: commissionRate,
+        // Additional metrics for dashboard
+        pending_orders: items.filter(item => item.order?.order_status === 'pending').length,
+        confirmed_orders: items.filter(item => item.order?.order_status === 'confirmed').length,
+        delivered_orders: deliveredItems.length,
       };
 
       return {
         success: true,
         data: summary,
-        message: 'Vendor financial summary (fallback) computed successfully',
+        message: 'Vendor financial summary computed from order data',
       };
+
     } catch (error: any) {
+      console.error('Error in getVendorFinancialSummary:', error);
       return {
         success: false,
-        error: error.message || 'Failed to compute vendor financial summary',
+        error: error.message || 'Unknown error in vendor financial summary',
+        data: null,
       };
     }
   }

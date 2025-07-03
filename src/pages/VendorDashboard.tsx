@@ -397,10 +397,15 @@ const VendorDashboard = () => {
 
   const loadFinancialSummary = async (vendorId: string) => {
     try {
+      console.log('🔍 Loading financial summary for vendor ID:', vendorId);
       const response = await AnalyticsAPI.getVendorFinancialSummary(vendorId);
+      console.log('📊 Financial summary response:', response);
+      
       if (response.success && response.data) {
+        console.log('✅ Setting financial summary data:', response.data);
         setFinancialSummary(response.data);
       } else {
+        console.error('❌ Financial summary failed:', response.error);
         toast.error("Failed to load financial summary: " + (response.error || "Unknown error"));
         console.error("Financial summary error:", response.error);
         // Set default values to prevent showing zeros
@@ -414,6 +419,7 @@ const VendorDashboard = () => {
         });
       }
     } catch (error: any) {
+      console.error('💥 Exception in loadFinancialSummary:', error);
       toast.error("Failed to load financial summary: " + error.message);
       console.error("Financial summary error:", error);
       // Set default values to prevent showing zeros
