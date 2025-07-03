@@ -156,7 +156,10 @@ const MyOrders = () => {
   const filterOrders = () => {
     let filtered = orders;
     if (activeTab !== 'all') {
-      filtered = filtered.filter(order => order.order_status === activeTab);
+      filtered = filtered.filter(order => {
+        const status = (order.order_status || '').toLowerCase();
+        return status === activeTab;
+      });
     }
     setFilteredOrders(filtered);
   };
@@ -317,14 +320,14 @@ const MyOrders = () => {
   }
 
   const orderTabs = [
-    { key: 'pending', label: 'Pending', count: orders.filter(o => o.order_status === 'pending').length },
-    { key: 'confirmed', label: 'Confirmed', count: orders.filter(o => o.order_status === 'confirmed').length },
-    { key: 'out_for_delivery', label: 'Out for Delivery', count: orders.filter(o => o.order_status === 'out_for_delivery').length },
-    { key: 'delivered', label: 'Delivered', count: orders.filter(o => o.order_status === 'delivered').length },
+    { key: 'pending', label: 'Pending', count: orders.filter(o => (o.order_status || '').toLowerCase() === 'pending').length },
+    { key: 'confirmed', label: 'Confirmed', count: orders.filter(o => (o.order_status || '').toLowerCase() === 'confirmed').length },
+    { key: 'out_for_delivery', label: 'Out for Delivery', count: orders.filter(o => (o.order_status || '').toLowerCase() === 'out_for_delivery').length },
+    { key: 'delivered', label: 'Delivered', count: orders.filter(o => (o.order_status || '').toLowerCase() === 'delivered').length },
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 no-text-select">
       <Header />
       
       <main className="container mx-auto px-4 py-6 max-w-4xl">

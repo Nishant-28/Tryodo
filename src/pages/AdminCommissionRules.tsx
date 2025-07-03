@@ -51,7 +51,7 @@ interface CommissionRule {
   };
   quality?: {
     id: string;
-    name: string;
+    quality_name: string;
   };
   model?: {
     id: string;
@@ -124,7 +124,7 @@ const AdminCommissionRules: React.FC = () => {
   const filteredRules = commissionRules.filter(rule => {
     const matchesSearch = searchTerm === '' || 
       rule.category?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      rule.quality?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+              rule.quality?.quality_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       rule.model?.model_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       rule.notes?.toLowerCase().includes(searchTerm.toLowerCase());
     
@@ -176,13 +176,20 @@ const AdminCommissionRules: React.FC = () => {
   const loadQualityCategories = async () => {
     try {
       const { data, error } = await supabase
-        .from('quality_categories')
-        .select('id, name')
+        .from('category_qualities')
+        .select('id, quality_name')
         .eq('is_active', true)
-        .order('name');
+        .order('quality_name');
 
       if (error) throw error;
-      setQualityCategories(data || []);
+      
+      // Map quality_name to name for component compatibility
+      const mappedData = data?.map(item => ({
+        id: item.id,
+        name: item.quality_name
+      })) || [];
+      
+      setQualityCategories(mappedData);
     } catch (error) {
       console.error('Error loading quality categories:', error);
     }
@@ -629,7 +636,7 @@ const AdminCommissionRules: React.FC = () => {
                   <div className="flex items-center space-x-3">
                     <h4 className="font-semibold">
                       {rule.category?.name || 'Unknown Category'}
-                      {rule.quality?.name && ` - ${rule.quality.name}`}
+                      {rule.quality?.quality_name && ` - ${rule.quality.quality_name}`}
                       {rule.model?.model_name && ` (${rule.model.model_name})`}
                     </h4>
                     <Badge variant={rule.is_active ? "default" : "secondary"}>

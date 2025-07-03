@@ -183,7 +183,7 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-white overscroll-contain">
+    <div className="min-h-screen bg-white overscroll-contain no-text-select">
       <Header hideCartOnMobile={true} />
       
       {/* Hero Section - Modern Tech Design */}

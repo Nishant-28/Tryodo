@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Package, TrendingUp, ShoppingCart, Users, Plus, Eye, Edit, Trash2, 
-  Search, Filter, BarChart3, DollarSign, AlertTriangle, CheckCircle, 
+import {
+  Package, TrendingUp, ShoppingCart, Users, Plus, Eye, Edit, Trash2,
+  Search, Filter, BarChart3, DollarSign, AlertTriangle, CheckCircle,
   Clock, Settings, Bell, Timer, Check, X, RefreshCw, Calendar,
   PlayCircle, PauseCircle, Target, Truck, MapPin, User, Phone, Copy,
-  XCircle, AlertCircle, Star
+  XCircle, AlertCircle, Star, ChefHat
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,10 +19,10 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import Header from '@/components/Header';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { supabase, supabaseServiceRole } from '@/lib/supabase';
 import { toast } from 'sonner';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import { TryodoAPI, TransactionAPI, WalletAPI, CommissionAPI } from '@/lib/api';
+import { TryodoAPI, TransactionAPI, WalletAPI, CommissionAPI, AnalyticsAPI } from '@/lib/api';
 import { DeliveryAPI } from '@/lib/deliveryApi';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
@@ -185,6 +185,39 @@ interface ConfirmedOrder {
   };
 }
 
+interface DeliveredOrder {
+  order_id: string;
+  order_number: string;
+  customer_id: string;
+  customer_name: string | null;
+  customer_phone: string | null;
+  total_amount: number;
+  order_status: string;
+  payment_status: string;
+  created_at: string;
+  delivery_address: any;
+  order_item_id: string;
+  vendor_id: string;
+  product_name: string | null;
+  product_description: string | null;
+  unit_price: number;
+  quantity: number;
+  line_total: number;
+  item_status: string;
+  picked_up_at: string | null;
+  pickup_confirmed_by: string | null;
+  vendor_notes: string | null;
+  updated_at: string;
+  delivery_partner_id: string | null;
+  delivery_partner_name: string | null;
+  delivery_partner_phone: string | null;
+  delivered_at: string | null;
+  delivery_assigned_at: string | null;
+  out_for_delivery_at: string | null;
+  rating?: number;
+  customer_feedback?: string;
+}
+
 interface VendorSettings {
   auto_approve_orders: boolean;
   order_confirmation_timeout_minutes: number;
@@ -194,11 +227,21 @@ interface VendorSettings {
   auto_approve_during_business_hours_only: boolean;
 }
 
+interface FinancialSummary {
+    total_sales: number;
+    total_commission: number;
+    net_earnings: number;
+    pending_payouts: number;
+    total_orders: number;
+    total_products: number;
+}
+
 interface Analytics {
   totalProducts: number;
   totalOrders: number;
   pendingOrders: number;
   confirmedOrders: number;
+  deliveredOrders: number;
   totalRevenue: number;
   averageOrderValue: number;
   responseRate: number;
@@ -231,22 +274,25 @@ const RADIAN = Math.PI / 180;
 
 const VendorDashboard = () => {
   const navigate = useNavigate();
-  const { user, profile } = useAuth();
-  
+  const { profile, loading: authLoading } = useAuth();
+
   const [vendor, setVendor] = useState<Vendor | null>(null);
+  const [financialSummary, setFinancialSummary] = useState<FinancialSummary | null>(null);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [confirmedOrders, setConfirmedOrders] = useState<ConfirmedOrder[]>([]);
+  const [deliveredOrders, setDeliveredOrders] = useState<DeliveredOrder[]>([]);
   const [analytics, setAnalytics] = useState<Analytics>({
     totalProducts: 0,
     totalOrders: 0,
     pendingOrders: 0,
     confirmedOrders: 0,
+    deliveredOrders: 0,
     totalRevenue: 0,
     averageOrderValue: 0,
     responseRate: 0,
     autoApprovalRate: 0
   });
-  
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -276,7 +322,7 @@ const VendorDashboard = () => {
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [productFilter, setProductFilter] = useState<string>('all');
-  
+
   // Add state for enhanced analytics
   const [monthlyEarnings, setMonthlyEarnings] = useState<any[]>([]);
   const [categoryBreakdown, setCategoryBreakdown] = useState<any[]>([]);
@@ -294,10 +340,10 @@ const VendorDashboard = () => {
   }, [loading]);
 
   useEffect(() => {
-    if (user && profile?.role === 'vendor') {
+    if (profile?.id) {
       initializeVendorDashboard();
     }
-  }, [user, profile]);
+  }, [profile, authLoading]);
 
   // Initialize the vendor dashboard by fetching vendor info and then loading all data
   const initializeVendorDashboard = async () => {
@@ -309,7 +355,7 @@ const VendorDashboard = () => {
       // First, get the vendor record using the profile ID
       const vendorData = await fetchVendorByProfileId(profile!.id);
       console.log('VendorDashboard: Vendor data received:', vendorData);
-      
+
       if (!vendorData) {
         console.error('VendorDashboard: No vendor data found for profile ID:', profile!.id);
         setError('Vendor account not found. Please contact support.');
@@ -329,12 +375,13 @@ const VendorDashboard = () => {
 
       console.log('VendorDashboard: Loading dashboard data for vendor ID:', vendorData.id);
       // Load all dashboard data in parallel
-      const results = await Promise.allSettled([
+      const results = await Promise.all([
+        loadFinancialSummary(vendorData.id),
         loadPendingOrders(vendorData.id),
         loadConfirmedOrders(vendorData.id),
-        loadAnalytics(vendorData.id),
-        loadFinancialData(vendorData.id),
+        loadDeliveredOrders(vendorData.id),
         loadVendorProducts(vendorData.id),
+        loadFinancialData(vendorData.id),
         loadEnhancedAnalytics(vendorData.id)
       ]);
 
@@ -348,19 +395,30 @@ const VendorDashboard = () => {
     }
   };
 
+  const loadFinancialSummary = async (vendorId: string) => {
+    const { data, error } = await AnalyticsAPI.getVendorFinancialSummary(vendorId);
+    if (data) {
+      setFinancialSummary(data);
+    }
+    if(error){
+      toast.error("Failed to load financial summary.");
+      console.error(error);
+    }
+  };
+
   // Fetch vendor information by profile ID
   const fetchVendorByProfileId = async (profileId: string): Promise<Vendor | null> => {
     try {
       // Ensure we have a valid session before making the API call
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
+
       if (sessionError || !session) {
         console.error('No valid session found:', sessionError);
         return null;
       }
 
       console.log('Making vendor query with session for profile:', profileId);
-      
+
       const { data, error } = await supabase
         .from('vendors')
         .select(`
@@ -390,14 +448,14 @@ const VendorDashboard = () => {
       if (error && error.code === 'PGRST116') {
         // No vendor record found, let's create one for existing vendor users
         console.log('🏪 No vendor record found, creating one for profile:', profileId);
-        
+
         // Get profile information to use for vendor creation
         const { data: profileData, error: profileError } = await supabase
           .from('profiles')
           .select('full_name, email')
           .eq('id', profileId)
           .single();
-        
+
         if (profileError) {
           console.error('Error fetching profile for vendor creation:', profileError);
           return null;
@@ -451,7 +509,7 @@ const VendorDashboard = () => {
         }
 
         console.log('✅ Vendor record created successfully:', newVendor);
-        
+
         // Map the database fields to the Vendor interface
         return {
           id: newVendor.id,
@@ -475,11 +533,11 @@ const VendorDashboard = () => {
         };
       } else if (error) {
         console.error('Error fetching vendor:', error);
-        
+
         // If we get an RLS error, try with service role as fallback
         if (error.code === '42501' || error.message?.includes('RLS') || error.message?.includes('permission')) {
           console.log('🔄 RLS error detected, trying with service role...');
-          
+
           try {
             const { supabaseServiceRole } = await import('../lib/supabase');
             const { data: serviceData, error: serviceError } = await supabaseServiceRole
@@ -504,7 +562,7 @@ const VendorDashboard = () => {
               .eq('profile_id', profileId)
               .eq('is_active', true)
               .single();
-              
+
             if (!serviceError && serviceData) {
               console.log('✅ Successfully retrieved vendor data with service role');
               // Continue with the normal flow using serviceData instead of data
@@ -533,7 +591,7 @@ const VendorDashboard = () => {
             console.error('Service role fallback also failed:', serviceRoleError);
           }
         }
-        
+
         return null;
       }
 
@@ -581,14 +639,14 @@ const VendorDashboard = () => {
 
   const debugConfirmedOrders = async (vendorId: string) => {
     console.log('🔧 Starting debug for vendor:', vendorId);
-    
+
     // Step 1: Check if vendor has any order items at all
     const { data: allItems } = await supabase
       .from('order_items')
       .select('id, item_status, vendor_id, product_name')
       .eq('vendor_id', vendorId);
     console.log('Step 1 - All order items:', allItems);
-    
+
     // Step 2: Check confirmed order items
     const { data: confirmedItems } = await supabase
       .from('order_items')
@@ -596,13 +654,13 @@ const VendorDashboard = () => {
       .eq('vendor_id', vendorId)
       .eq('item_status', 'confirmed');
     console.log('Step 2 - Confirmed items:', confirmedItems);
-    
+
     // Step 3: Check delivery_partner_orders table
     const { data: deliveryOrders } = await supabase
       .from('delivery_partner_orders')
       .select('*');
     console.log('Step 3 - All delivery orders:', deliveryOrders);
-    
+
     // Step 4: Try simple join
     if (confirmedItems && confirmedItems.length > 0) {
       const { data: withOrders } = await supabase
@@ -694,7 +752,7 @@ const VendorDashboard = () => {
           vendor_notes,
           created_at,
           updated_at,
-          orders (
+          orders!inner(
             id,
             order_number,
             customer_id,
@@ -703,8 +761,11 @@ const VendorDashboard = () => {
             payment_status,
             delivery_address,
             created_at,
-            customers ( id, profile_id ),
-            delivery_partner_orders (
+            customers(
+              id,
+              profile_id
+            ),
+            delivery_partner_orders(
               delivery_partner_id,
               status,
               pickup_otp,
@@ -712,7 +773,12 @@ const VendorDashboard = () => {
               accepted_at,
               picked_up_at,
               delivered_at,
-              delivery_partners ( profiles ( full_name, phone ) )
+              delivery_partners(
+                profiles(
+                  full_name,
+                  phone
+                )
+              )
             )
           )
         `)
@@ -811,17 +877,70 @@ const VendorDashboard = () => {
       setConfirmedOrders(processed);
     } catch (err) {
       console.error('Error loading confirmed orders:', err);
-      toast.error('Failed to load confirmed orders');
+      toast.error(`Failed to load confirmed orders: ${err.message || err}`);
       setConfirmedOrders([]);
     } finally {
       setConfirmedOrdersLoading(false);
     }
   };
 
+  const loadDeliveredOrders = async (vendorId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('order_items')
+        .select('id,order_id,product_name,product_description,unit_price,quantity,line_total,item_status,picked_up_at,pickup_confirmed_by,vendor_notes,created_at,updated_at,orders!inner(id,order_number,customer_id,total_amount,order_status,payment_status,created_at)')
+        .eq('vendor_id', vendorId)
+        .eq('item_status', 'delivered')
+        .order('updated_at', { ascending: false });
+
+      if (error) throw error;
+
+      const processed: DeliveredOrder[] = (data || []).map((item: any) => {
+        const order = item.orders;
+        return {
+          order_id: order.id || '',
+          order_number: order.order_number || '',
+          customer_id: order.customer_id || '',
+          customer_name: null,
+          customer_phone: null,
+          total_amount: order.total_amount || 0,
+          order_status: order.order_status || 'completed',
+          payment_status: order.payment_status || 'paid',
+          created_at: item.created_at,
+          delivery_address: null,
+          order_item_id: item.id,
+          vendor_id: vendorId,
+          product_name: item.product_name,
+          product_description: item.product_description,
+          unit_price: item.unit_price,
+          quantity: item.quantity,
+          line_total: item.line_total,
+          item_status: item.item_status,
+          picked_up_at: item.picked_up_at,
+          pickup_confirmed_by: item.pickup_confirmed_by,
+          vendor_notes: item.vendor_notes,
+          updated_at: item.updated_at,
+          delivery_partner_id: null,
+          delivery_partner_name: null,
+          delivery_partner_phone: null,
+          delivered_at: item.updated_at,
+          delivery_assigned_at: null,
+          out_for_delivery_at: null,
+        } as DeliveredOrder;
+      });
+
+      setDeliveredOrders(processed);
+    } catch (error) {
+      console.error('Error loading delivered orders:', error);
+      toast.error(`Failed to load delivered orders: ${error.message || error}`);
+      setDeliveredOrders([]);
+    }
+  };
+
   const loadAnalytics = async (vendorId: string) => {
     try {
       console.log('VendorDashboard: Loading analytics for vendor ID:', vendorId);
-      
+
       // Get product count
       const { count: productCount } = await supabase
         .from('vendor_products')
@@ -849,18 +968,19 @@ const VendorDashboard = () => {
       const totalOrders = orderStats?.length || 0;
       const pendingOrdersCount = orderStats?.filter(o => o.item_status === 'pending').length || 0;
       const confirmedOrders = orderStats?.filter(o => o.item_status === 'confirmed').length || 0;
+      const deliveredOrders = orderStats?.filter(o => o.item_status === 'delivered').length || 0;
       const totalRevenue = orderStats?.reduce((sum, order) => sum + (order.line_total || 0), 0) || 0;
       const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
       // Calculate response and auto-approval rates
       const last30Days = new Date();
       last30Days.setDate(last30Days.getDate() - 30);
-      
-      const recentOrders = orderStats?.filter(o => 
+
+      const recentOrders = orderStats?.filter(o =>
         new Date(o.created_at) >= last30Days
       ) || [];
-      
-      const responseRate = recentOrders.length > 0 
+
+      const responseRate = recentOrders.length > 0
         ? ((recentOrders.filter(o => o.item_status !== 'pending').length / recentOrders.length) * 100)
         : 0;
 
@@ -869,6 +989,7 @@ const VendorDashboard = () => {
         totalOrders,
         pendingOrders: pendingOrdersCount,
         confirmedOrders,
+        deliveredOrders,
         totalRevenue,
         averageOrderValue,
         responseRate,
@@ -887,13 +1008,13 @@ const VendorDashboard = () => {
   const loadFinancialData = async (vendorId: string) => {
     try {
       setLoadingFinancials(true);
-      
+
       // Load wallet information
       const walletResponse = await WalletAPI.getVendorWallet(vendorId);
       if (walletResponse.success && walletResponse.data) {
         setWallet(walletResponse.data);
       }
-      
+
       // Load recent transactions
       const transactionsResponse = await TransactionAPI.getTransactions({
         vendorId: vendorId,
@@ -903,7 +1024,7 @@ const VendorDashboard = () => {
       if (transactionsResponse.success && transactionsResponse.data) {
         setTransactions(transactionsResponse.data);
       }
-      
+
     } catch (error) {
       console.error('Error loading financial data:', error);
     } finally {
@@ -916,9 +1037,9 @@ const VendorDashboard = () => {
     try {
       setLoadingProducts(true);
       console.log('Loading vendor products for vendor ID:', vendorId);
-      
+
       const response = await TryodoAPI.Vendor.getVendorProducts(vendorId, {}, { limit: 100 });
-      
+
       if (response.success && response.data) {
         console.log('Vendor products loaded:', response.data);
         setVendorProducts(response.data);
@@ -936,20 +1057,20 @@ const VendorDashboard = () => {
   const loadEnhancedAnalytics = async (vendorId: string) => {
     try {
       setLoadingChartData(true);
-      
+
       // Load monthly earnings data
       const transactionsResponse = await TransactionAPI.getTransactions({
         vendorId: vendorId,
         limit: 100,
         startDate: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
       });
-      
+
       if (transactionsResponse.success && transactionsResponse.data) {
         // Process monthly earnings
         const monthlyData = processMonthlyEarnings(transactionsResponse.data);
         setMonthlyEarnings(monthlyData);
       }
-      
+
       // Load category breakdown
       const { data: categoryData } = await supabase
         .from('order_items')
@@ -968,12 +1089,12 @@ const VendorDashboard = () => {
         `)
         .eq('vendor_id', vendorId)
         .eq('item_status', 'confirmed');
-      
+
       if (categoryData) {
         const categoryBreakdown = processCategoryBreakdown(categoryData);
         setCategoryBreakdown(categoryBreakdown);
       }
-      
+
     } catch (error) {
       console.error('Error loading enhanced analytics:', error);
     } finally {
@@ -984,12 +1105,12 @@ const VendorDashboard = () => {
   // Helper function to process monthly earnings
   const processMonthlyEarnings = (transactions: any[]) => {
     const monthlyMap = new Map();
-    
+
     transactions.forEach(transaction => {
       if (transaction.transaction_type === 'vendor_earning') {
         const date = new Date(transaction.transaction_date);
         const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-        
+
         if (!monthlyMap.has(monthKey)) {
           monthlyMap.set(monthKey, {
             month: monthKey,
@@ -997,25 +1118,25 @@ const VendorDashboard = () => {
             orders: 0
           });
         }
-        
+
         const existing = monthlyMap.get(monthKey);
         existing.earnings += transaction.net_amount || 0;
         existing.orders += 1;
       }
     });
-    
+
     return Array.from(monthlyMap.values()).sort((a, b) => a.month.localeCompare(b.month));
   };
 
   // Helper function to process category breakdown
   const processCategoryBreakdown = (data: any[]) => {
     const categoryMap = new Map();
-    
+
     data.forEach(item => {
-      const categoryName = item.vendor_products?.categories?.name || 
-                          item.vendor_generic_products?.categories?.name || 
-                          'Other';
-      
+      const categoryName = item.vendor_products?.categories?.name ||
+        item.vendor_generic_products?.categories?.name ||
+        'Other';
+
       if (!categoryMap.has(categoryName)) {
         categoryMap.set(categoryName, {
           name: categoryName,
@@ -1023,12 +1144,12 @@ const VendorDashboard = () => {
           count: 0
         });
       }
-      
+
       const existing = categoryMap.get(categoryName);
       existing.value += item.line_total || 0;
       existing.count += 1;
     });
-    
+
     return Array.from(categoryMap.values());
   };
 
@@ -1040,22 +1161,22 @@ const VendorDashboard = () => {
           .from('vendor_products')
           .delete()
           .eq('id', productId);
-          
+
         if (error) throw error;
         toast.success('Product deleted successfully');
       } else {
         const { error } = await supabase
           .from('vendor_products')
-          .update({ 
+          .update({
             is_active: action === 'activate',
             updated_at: new Date().toISOString()
           })
           .eq('id', productId);
-          
+
         if (error) throw error;
         toast.success(`Product ${action}d successfully`);
       }
-      
+
       if (vendor) {
         await loadVendorProducts(vendor.id);
       }
@@ -1070,16 +1191,16 @@ const VendorDashboard = () => {
     try {
       const { error } = await supabase
         .from('vendor_products')
-        .update({ 
+        .update({
           stock_quantity: newStock,
           is_in_stock: newStock > 0,
           updated_at: new Date().toISOString()
         })
         .eq('id', productId);
-        
+
       if (error) throw error;
       toast.success('Stock updated successfully');
-      
+
       if (vendor) {
         await loadVendorProducts(vendor.id);
       }
@@ -1091,12 +1212,13 @@ const VendorDashboard = () => {
 
   const refreshData = useCallback(async () => {
     if (!vendor) return;
-    
+
     setRefreshing(true);
     try {
       await Promise.all([
         loadPendingOrders(vendor.id),
         loadConfirmedOrders(vendor.id),
+        loadDeliveredOrders(vendor.id),
         loadAnalytics(vendor.id),
         loadFinancialData(vendor.id),
         loadVendorProducts(vendor.id),
@@ -1111,9 +1233,9 @@ const VendorDashboard = () => {
   useEffect(() => {
     if (!vendor?.id) return;
 
-    const handleDeliveryStatusChange = (payload: any) => {
+    const handleDeliveryStatusChange = async (payload: any) => {
       console.log('Delivery status change:', payload);
-      
+
       const { new: newRecord } = payload;
       if (newRecord.status) {
         // Show notification for status changes
@@ -1123,12 +1245,12 @@ const VendorDashboard = () => {
           'out_for_delivery': 'Order is out for delivery',
           'delivered': 'Order has been delivered successfully!'
         };
-        
+
         const message = statusMessages[newRecord.status as keyof typeof statusMessages];
         if (message) {
           toast.success(message);
-          // Refresh data to get latest status
-          refreshData();
+          // No need to manually update order_items here - DeliveryAPI.markDelivered handles all updates
+          await refreshData();
         }
       }
     };
@@ -1141,22 +1263,36 @@ const VendorDashboard = () => {
         {
           event: 'UPDATE',
           schema: 'public',
-          table: 'delivery_partner_orders',
-          filter: `vendor_id=eq.${vendor.id}`
+          table: 'delivery_partner_orders'
         },
         handleDeliveryStatusChange
       )
       .subscribe();
 
+    // Subscribe to order_items updates to catch delivered statuses
+    const orderItemsSubscription = supabase
+      .channel('order_items')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'order_items' },
+        (payload: any) => {
+          if (payload.new.item_status === 'delivered' && payload.new.vendor_id === vendor.id) {
+            refreshData();
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
       deliverySubscription.unsubscribe();
+      orderItemsSubscription.unsubscribe();
     };
   }, [vendor?.id, refreshData]);
 
   const handleOrderAction = async (orderItemId: string, action: 'accept' | 'reject') => {
     try {
       const newStatus = action === 'accept' ? 'confirmed' : 'cancelled';
-      
+
       const { success, error } = await TryodoAPI.Order.updateOrderItemStatus(
         orderItemId,
         newStatus
@@ -1169,12 +1305,12 @@ const VendorDashboard = () => {
         const orderToConfirm = pendingOrders.find(order => order.order_item_id === orderItemId);
         if (orderToConfirm) {
           console.log('VendorDashboard: Attempting to create delivery assignment for order:', orderToConfirm);
-          
+
           try {
-            const customerPincode = orderToConfirm.delivery_address?.pincode || 
-                                   orderToConfirm.delivery_address?.postal_code ||
-                                   orderToConfirm.delivery_address?.zip_code;
-            
+            const customerPincode = orderToConfirm.delivery_address?.pincode ||
+              orderToConfirm.delivery_address?.postal_code ||
+              orderToConfirm.delivery_address?.zip_code;
+
             if (customerPincode) {
               const deliveryResult = await DeliveryAPI.Assignment.createAssignmentFromOrder(
                 orderItemId,
@@ -1214,7 +1350,7 @@ const VendorDashboard = () => {
       }
 
       await refreshData();
-      
+
     } catch (error) {
       console.error(`Error ${action}ing order:`, error);
       toast.error(`Failed to ${action} order`);
@@ -1223,7 +1359,7 @@ const VendorDashboard = () => {
 
   const handleOrderStatusUpdate = async (orderItemId: string, newStatus: string, pickupBy?: string, notes?: string) => {
     try {
-      const updateData: any = { 
+      const updateData: any = {
         item_status: newStatus,
         updated_at: new Date().toISOString()
       };
@@ -1236,7 +1372,7 @@ const VendorDashboard = () => {
       if (notes) {
         updateData.vendor_notes = notes;
       }
-      
+
       const { error } = await supabase
         .from('order_items')
         .update(updateData)
@@ -1258,7 +1394,7 @@ const VendorDashboard = () => {
       setSelectedOrderItem(null);
       setPickupPersonName('');
       setVendorNotes('');
-      
+
     } catch (error) {
       console.error('Error updating order status:', error);
       toast.error('Failed to update order status');
@@ -1326,14 +1462,14 @@ const VendorDashboard = () => {
     try {
       console.log('🔍 VendorDashboard: Attempting manual delivery assignment for order:', order);
       console.log('🔍 VendorDashboard: Delivery address structure:', order.delivery_address);
-      
-      const customerPincode = order.delivery_address?.pincode || 
-                             order.delivery_address?.postal_code ||
-                             order.delivery_address?.zip_code ||
-                             order.delivery_address?.pin_code;
-                             
+
+      const customerPincode = order.delivery_address?.pincode ||
+        order.delivery_address?.postal_code ||
+        order.delivery_address?.zip_code ||
+        order.delivery_address?.pin_code;
+
       console.log('🔍 VendorDashboard: Extracted pincode:', customerPincode);
-      
+
       if (!customerPincode) {
         console.error('VendorDashboard: No pincode found in delivery address');
         toast.error("Cannot assign delivery: Customer pincode is missing. Please ask the customer to update their delivery address with a valid pincode.");
@@ -1361,7 +1497,7 @@ const VendorDashboard = () => {
 
   const getDeliveryStatusBadge = (order: ConfirmedOrder) => {
     const status = order.current_status || order.item_status;
-    
+
     switch (status) {
       case 'confirmed':
         return (
@@ -1385,7 +1521,7 @@ const VendorDashboard = () => {
           </Badge>
         );
       case 'out_for_delivery':
-         return (
+        return (
           <Badge variant="outline" className="bg-purple-50 text-purple-600 border-purple-200">
             <Package className="mr-1 h-3 w-3" />
             Out for Delivery
@@ -1409,7 +1545,7 @@ const VendorDashboard = () => {
 
   const getDeliveryFlowStep = (order: ConfirmedOrder) => {
     const status = order.current_status || order.item_status;
-    
+
     const steps = [
       { key: 'confirmed', label: 'Order Confirmed', completed: true },
       { key: 'assigned_to_delivery', label: 'Assigned to Delivery', completed: !!order.delivery_partner_id },
@@ -1419,7 +1555,7 @@ const VendorDashboard = () => {
     ];
 
     const currentStepIndex = steps.findIndex(step => step.key === status);
-    
+
     return {
       steps: steps.map((step, index) => ({
         ...step,
@@ -1433,7 +1569,7 @@ const VendorDashboard = () => {
 
   const renderDeliveryProgress = (order: ConfirmedOrder) => {
     const { steps } = getDeliveryFlowStep(order);
-    
+
     return (
       <div className="space-y-3">
         <h6 className="font-medium text-gray-800 flex items-center">
@@ -1443,13 +1579,12 @@ const VendorDashboard = () => {
         <div className="space-y-2">
           {steps.map((step, index) => (
             <div key={step.key} className="flex items-center space-x-3">
-              <div className={`w-4 h-4 rounded-full flex items-center justify-center ${
-                step.completed 
-                  ? 'bg-green-500 text-white' 
-                  : step.active 
-                    ? 'bg-blue-500 text-white' 
-                    : 'bg-gray-200'
-              }`}>
+              <div className={`w-4 h-4 rounded-full flex items-center justify-center ${step.completed
+                ? 'bg-green-500 text-white'
+                : step.active
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-gray-200'
+                }`}>
                 {step.completed ? (
                   <Check className="w-3 h-3" />
                 ) : step.active ? (
@@ -1458,13 +1593,12 @@ const VendorDashboard = () => {
                   <div className="w-2 h-2 bg-gray-400 rounded-full" />
                 )}
               </div>
-              <span className={`text-sm ${
-                step.completed 
-                  ? 'text-green-700 font-medium' 
-                  : step.active 
-                    ? 'text-blue-700 font-medium' 
-                    : 'text-gray-500'
-              }`}>
+              <span className={`text-sm ${step.completed
+                ? 'text-green-700 font-medium'
+                : step.active
+                  ? 'text-blue-700 font-medium'
+                  : 'text-gray-500'
+                }`}>
                 {step.label}
               </span>
               {step.active && (
@@ -1495,12 +1629,12 @@ const VendorDashboard = () => {
 
   const filteredOrders = pendingOrders.filter(order => {
     const matchesSearch = (order.product_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          order.order_number.toLowerCase().includes(searchTerm.toLowerCase());
-    
+      order.order_number.toLowerCase().includes(searchTerm.toLowerCase());
+
     if (statusFilter === 'all') return matchesSearch;
     if (statusFilter === 'urgent') return matchesSearch && order.minutes_remaining <= 5;
     if (statusFilter === 'auto_approve') return matchesSearch && order.should_auto_approve;
-    
+
     return matchesSearch;
   });
 
@@ -1539,9 +1673,9 @@ const VendorDashboard = () => {
         <div className="absolute top-20 right-20 w-72 h-72 bg-blue-100 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob"></div>
         <div className="absolute top-40 left-20 w-96 h-96 bg-purple-100 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob animation-delay-2000"></div>
       </div>
-      
-      <Header cartItems={0} onCartClick={() => {}} />
-      
+
+      <Header cartItems={0} onCartClick={() => { }} />
+
       <main className="relative container mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* Mobile-First Header */}
         <div className="mb-6 sm:mb-8">
@@ -1571,8 +1705,8 @@ const VendorDashboard = () => {
                   )}
                 </Button>
 
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={refreshData}
                   className="flex-1 min-h-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
                   disabled={refreshing}
@@ -1582,11 +1716,22 @@ const VendorDashboard = () => {
                     <span className="text-xs">{refreshing ? 'Updating' : 'Refresh'}</span>
                   </div>
                 </Button>
-                
+
+                <Button
+                  variant="outline"
+                  className="flex-1 min-h-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
+                  onClick={() => navigate('/vendor/analytics')}
+                >
+                  <div className="flex flex-col items-center gap-1">
+                    <BarChart3 className="h-4 w-4" />
+                    <span className="text-xs">Analytics</span>
+                  </div>
+                </Button>
+
                 <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
                   <DialogTrigger asChild>
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       className="flex-1 min-h-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
                     >
                       <div className="flex flex-col items-center gap-1">
@@ -1614,8 +1759,8 @@ const VendorDashboard = () => {
                   </Button>
                 </div>
 
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={refreshData}
                   className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 font-medium"
                   disabled={refreshing}
@@ -1623,11 +1768,20 @@ const VendorDashboard = () => {
                   <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
                   <span>{refreshing ? 'Updating...' : 'Refresh'}</span>
                 </Button>
-                
+
+                {/* Product Management Button */}
+                <Button
+                  className="bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 flex items-center gap-2 min-h-12 px-6 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
+                  onClick={() => navigate('/vendor/product-management')}
+                >
+                  <BarChart3 className="h-4 w-4" />
+                  <span>Product Management</span>
+                </Button>
+
                 <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
                   <DialogTrigger asChild>
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 font-medium"
                     >
                       <Settings className="h-4 w-4" />
@@ -1646,7 +1800,7 @@ const VendorDashboard = () => {
                         </div>
                         <Switch
                           checked={vendorSettings.auto_approve_orders}
-                          onCheckedChange={(checked) => 
+                          onCheckedChange={(checked) =>
                             setVendorSettings(prev => ({ ...prev, auto_approve_orders: checked }))
                           }
                         />
@@ -1659,10 +1813,10 @@ const VendorDashboard = () => {
                           min="5"
                           max="60"
                           value={vendorSettings.order_confirmation_timeout_minutes}
-                          onChange={(e) => 
-                            setVendorSettings(prev => ({ 
-                              ...prev, 
-                              order_confirmation_timeout_minutes: parseInt(e.target.value) || 15 
+                          onChange={(e) =>
+                            setVendorSettings(prev => ({
+                              ...prev,
+                              order_confirmation_timeout_minutes: parseInt(e.target.value) || 15
                             }))
                           }
                           className="rounded-xl border-gray-200 focus:border-blue-300 focus:ring-blue-200 min-h-12"
@@ -1675,10 +1829,10 @@ const VendorDashboard = () => {
                           type="number"
                           placeholder="Leave empty for no limit"
                           value={vendorSettings.auto_approve_under_amount || ''}
-                          onChange={(e) => 
-                            setVendorSettings(prev => ({ 
-                              ...prev, 
-                              auto_approve_under_amount: e.target.value ? parseFloat(e.target.value) : null 
+                          onChange={(e) =>
+                            setVendorSettings(prev => ({
+                              ...prev,
+                              auto_approve_under_amount: e.target.value ? parseFloat(e.target.value) : null
                             }))
                           }
                         />
@@ -1694,7 +1848,7 @@ const VendorDashboard = () => {
                             <Input
                               type="time"
                               value={vendorSettings.business_hours_start}
-                              onChange={(e) => 
+                              onChange={(e) =>
                                 setVendorSettings(prev => ({ ...prev, business_hours_start: e.target.value }))
                               }
                             />
@@ -1704,14 +1858,14 @@ const VendorDashboard = () => {
                             <Input
                               type="time"
                               value={vendorSettings.business_hours_end}
-                              onChange={(e) => 
+                              onChange={(e) =>
                                 setVendorSettings(prev => ({ ...prev, business_hours_end: e.target.value }))
                               }
                             />
                           </div>
                         </div>
-                        
-                        
+
+
                         <div className="flex items-center justify-between">
                           <div className="space-y-0.5">
                             <Label className="text-sm">Auto-approve only during business hours</Label>
@@ -1719,7 +1873,7 @@ const VendorDashboard = () => {
                           </div>
                           <Switch
                             checked={vendorSettings.auto_approve_during_business_hours_only}
-                            onCheckedChange={(checked) => 
+                            onCheckedChange={(checked) =>
                               setVendorSettings(prev => ({ ...prev, auto_approve_during_business_hours_only: checked }))
                             }
                           />
@@ -1741,14 +1895,14 @@ const VendorDashboard = () => {
 
               {/* Mobile Action Buttons */}
               <div className="sm:hidden w-full space-y-3">
-                <Button 
+                <Button
                   className="w-full bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 flex items-center justify-center gap-2 min-h-12 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
                   onClick={() => navigate('/vendor/product-management')}
                 >
                   <BarChart3 className="h-4 w-4" />
                   <span>Advanced Product Management</span>
                 </Button>
-                <Button 
+                <Button
                   className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 flex items-center justify-center gap-2 min-h-12 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
                   onClick={() => navigate('/vendor/add-product')}
                 >
@@ -1759,7 +1913,7 @@ const VendorDashboard = () => {
 
               {/* Advanced Product Management */}
               <div className="hidden sm:block">
-                <Button 
+                <Button
                   className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 flex items-center gap-2 min-h-12 px-6 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
                   onClick={() => navigate('/vendor/product-management')}
                 >
@@ -1768,9 +1922,20 @@ const VendorDashboard = () => {
                 </Button>
               </div>
 
+              {/* Slot Dashboard Button */}
+              <div className="hidden sm:block">
+                <Button
+                  className="bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 flex items-center gap-2 min-h-12 px-6 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
+                  onClick={() => navigate('/vendor/analytics')}
+                >
+                  <BarChart3 className="h-4 w-4" />
+                  <span>Analytics</span>
+                </Button>
+              </div>
+
               {/* Desktop Add Product Button */}
               <div className="hidden sm:block">
-                <Button 
+                <Button
                   className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 flex items-center gap-2 min-h-12 px-6 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
                   onClick={() => navigate('/vendor/add-product')}
                 >
@@ -1786,40 +1951,33 @@ const VendorDashboard = () => {
           {/* Mobile-first tabs with improved layout */}
           <div className="block sm:hidden mb-4">
             <TabsList className="flex flex-wrap gap-1 p-1 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl shadow-soft h-auto">
-              <TabsTrigger 
-                value="pending" 
+              <TabsTrigger
+                value="pending"
+                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  <span>Pending ({analytics.pendingOrders})</span>
+                </div>
+              </TabsTrigger>
+              <TabsTrigger
+                value="confirmed"
                 className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
               >
                 <div className="flex flex-col items-center gap-1">
                   <Package className="h-3 w-3" />
-                  <span>Pending ({analytics.pendingOrders})</span>
+                  <span>Confirmed</span>
+                  {/* ({confirmedOrders.length}) */}
                 </div>
               </TabsTrigger>
-              <TabsTrigger 
-                value="confirmed" 
+              <TabsTrigger
+                value="delivered"
+                onClick={() => refreshData()}
                 className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
               >
                 <div className="flex flex-col items-center gap-1">
                   <CheckCircle className="h-3 w-3" />
-                  <span>Confirmed ({confirmedOrders.length})</span>
-                </div>
-              </TabsTrigger>
-              <TabsTrigger 
-                value="earnings" 
-                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
-              >
-                <div className="flex flex-col items-center gap-1">
-                  <DollarSign className="h-3 w-3" />
-                  <span>Earnings</span>
-                </div>
-              </TabsTrigger>
-              <TabsTrigger 
-                value="analytics" 
-                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
-              >
-                <div className="flex flex-col items-center gap-1">
-                  <BarChart3 className="h-3 w-3" />
-                  <span>Analytics</span>
+                  <span>Delivered </span>
                 </div>
               </TabsTrigger>
             </TabsList>
@@ -1827,19 +1985,15 @@ const VendorDashboard = () => {
 
           {/* Desktop tabs */}
           <div className="hidden sm:block">
-            <TabsList className="grid w-full grid-cols-5 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
+            <TabsList className="grid w-full grid-cols-3 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
               <TabsTrigger value="pending" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Pending ({analytics.pendingOrders})
               </TabsTrigger>
               <TabsTrigger value="confirmed" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Confirmed ({confirmedOrders.length})
               </TabsTrigger>
-              <TabsTrigger value="earnings" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
-                {/* <DollarSign className="h-4 w-4 mr-1" /> */}
-                ₹ Earnings
-              </TabsTrigger>
-              <TabsTrigger value="analytics" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
-                Analytics
+              <TabsTrigger value="delivered" onClick={() => refreshData()} className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                Delivered ({deliveredOrders.length})
               </TabsTrigger>
             </TabsList>
           </div>
@@ -1894,13 +2048,13 @@ const VendorDashboard = () => {
 
               <Card className="bg-gradient-to-br from-purple-50 to-blue-50 border-purple-200 shadow-soft hover:shadow-medium transition-all duration-200">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-semibold text-purple-800">Avg Order Value</CardTitle>
-                  <span className="h-5 w-5 text-purple-600 flex items-center justify-center font-bold text-sm">₹</span>
+                  <CardTitle className="text-sm font-semibold text-purple-800">Delivered Orders</CardTitle>
+                  <CheckCircle className="h-5 w-5 text-purple-600" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl lg:text-3xl font-bold text-purple-700">₹{analytics.averageOrderValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+                  <div className="text-2xl lg:text-3xl font-bold text-purple-700">{analytics.deliveredOrders}</div>
                   <p className="text-xs text-purple-600 font-medium mt-1">
-                    Per order item
+                    Successfully completed
                   </p>
                 </CardContent>
               </Card>
@@ -1985,8 +2139,8 @@ const VendorDashboard = () => {
                     <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
                     <h3 className="text-lg font-medium text-gray-900 mb-2">All caught up!</h3>
                     <p className="text-gray-600">
-                      {pendingOrders.length === 0 
-                        ? "No pending orders at the moment." 
+                      {pendingOrders.length === 0
+                        ? "No pending orders at the moment."
                         : "No orders match your current filters."
                       }
                     </p>
@@ -2052,11 +2206,10 @@ const VendorDashboard = () => {
                             {/* Order Items */}
                             <div className="p-4 space-y-4">
                               {groupedOrder.items.map((item, index) => (
-                                <div key={item.order_item_id} className={`rounded-lg border-2 p-4 transition-all duration-200 ${
-                                  item.minutes_remaining <= 5 
-                                    ? 'border-red-200 bg-red-50' 
-                                    : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
-                                }`}>
+                                <div key={item.order_item_id} className={`rounded-lg border-2 p-4 transition-all duration-200 ${item.minutes_remaining <= 5
+                                  ? 'border-red-200 bg-red-50'
+                                  : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
+                                  }`}>
                                   {/* Product Header */}
                                   <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
                                     <div className="flex-1 min-w-0">
@@ -2154,113 +2307,19 @@ const VendorDashboard = () => {
           </TabsContent>
 
           <TabsContent value="confirmed" className="space-y-6">
-            {/* Delivery Status Overview */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Awaiting Delivery</CardTitle>
-                  <Clock className="h-4 w-4 text-yellow-500" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-yellow-600">
-                    {confirmedOrders.filter(o => o.current_status === 'confirmed').length}
-                  </div>
-                  <p className="text-xs text-muted-foreground">Need assignment</p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Assigned</CardTitle>
-                  <Truck className="h-4 w-4 text-blue-500" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-blue-600">
-                    {confirmedOrders.filter(o => o.current_status === 'assigned_to_delivery').length}
-                  </div>
-                  <p className="text-xs text-muted-foreground">Ready for pickup</p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Out for Delivery</CardTitle>
-                  <Package className="h-4 w-4 text-purple-500" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-purple-600">
-                    {confirmedOrders.filter(o => ['picked_up', 'out_for_delivery'].includes(o.current_status)).length}
-                  </div>
-                  <p className="text-xs text-muted-foreground">In transit</p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Delivered</CardTitle>
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-green-600">
-                    {confirmedOrders.filter(o => o.current_status === 'delivered').length}
-                  </div>
-                  <p className="text-xs text-muted-foreground">Successfully completed</p>
-                </CardContent>
-              </Card>
-            </div>
 
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <CheckCircle className="h-5 w-5 text-green-600" />
-                  Confirmed Orders - Order Fulfillment
+                  <Package className="h-5 w-5 text-blue-600" />
+                  Confirmed Orders - In Progress
                 </CardTitle>
                 <CardDescription>
-                  Manage order processing, packaging, and delivery handoff
+                  Orders being processed and awaiting delivery
                 </CardDescription>
-                {/* Data Consistency Diagnostic Notice */}
-                {confirmedOrders.length > 0 && (
-                  (() => {
-                    const orphanedCount = confirmedOrders.filter(o => o._debug?.isOrphaned).length;
-                    const withCustomerData = confirmedOrders.filter(o => o._debug?.hasCustomerData).length;
-                    
-                    if (orphanedCount > 0) {
-                      return (
-                        <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-                          <div className="flex items-center">
-                            <AlertTriangle className="h-4 w-4 text-yellow-600 mr-2" />
-                            <span className="text-sm font-medium text-yellow-800">
-                              Data Inconsistency Detected
-                            </span>
-                          </div>
-                          <p className="text-xs text-yellow-700 mt-1">
-                            {orphanedCount} of {confirmedOrders.length} order items reference missing order records. 
-                            {withCustomerData} orders have complete customer information.
-                            Check console for orphaned order IDs that need database cleanup.
-                          </p>
-                        </div>
-                      );
-                    } else if (withCustomerData < confirmedOrders.length) {
-                      return (
-                        <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                          <div className="flex items-center">
-                            <AlertTriangle className="h-4 w-4 text-blue-600 mr-2" />
-                            <span className="text-sm font-medium text-blue-800">
-                              Partial Customer Data
-                            </span>
-                          </div>
-                          <p className="text-xs text-blue-700 mt-1">
-                            {withCustomerData} of {confirmedOrders.length} orders have complete customer information.
-                          </p>
-                        </div>
-                      );
-                    }
-                    return null;
-                  })()
-                )}
               </CardHeader>
               <CardContent>
-                {confirmedOrders.length === 0 ? (
+                {confirmedOrders.filter(o => o.current_status !== 'delivered').length === 0 ? (
                   <div className="text-center py-8">
                     <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                     <h3 className="text-lg font-semibold text-gray-900 mb-2">No confirmed orders</h3>
@@ -2268,87 +2327,253 @@ const VendorDashboard = () => {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {confirmedOrders.map((order) => (
+                    {(() => {
+                      // Group confirmed orders by creation date (delivery date)
+                      const groupedOrders = confirmedOrders
+                        .filter(order => order.current_status !== 'delivered')
+                        .reduce((acc, order) => {
+                          const orderDate = new Date(order.created_at).toDateString();
+                          if (!acc[orderDate]) {
+                            acc[orderDate] = {
+                              date: orderDate,
+                              orders: [],
+                              total_revenue: 0,
+                              total_items: 0,
+                              status: order.current_status === 'confirmed' ? 'preparation' :
+                                order.current_status === 'assigned_to_delivery' ? 'ready' :
+                                  'out_for_delivery',
+                              priority_level: 'medium' as const
+                            };
+                          }
+                          acc[orderDate].orders.push(order);
+                          acc[orderDate].total_revenue += order.line_total;
+                          acc[orderDate].total_items += order.quantity;
+                          return acc;
+                        }, {} as Record<string, {
+                          date: string;
+                          orders: ConfirmedOrder[];
+                          total_revenue: number;
+                          total_items: number;
+                          status: string;
+                          priority_level: 'high' | 'medium' | 'low';
+                        }>);
+
+                      const groupedOrdersArray = Object.values(groupedOrders);
+
+                      return groupedOrdersArray.map((group) => (
+                        <Card
+                          key={group.date}
+                          className="border-2 transition-all duration-200 hover:shadow-lg border-blue-200"
+                        >
+                          {/* Mobile-First Header */}
+                          <CardHeader className="pb-4">
+                            <div className="space-y-3">
+                              {/* Date and Status */}
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                                <div>
+                                  <CardTitle className="text-lg">
+                                    {new Date(group.date).toLocaleDateString('en-US', {
+                                      weekday: 'short',
+                                      month: 'short',
+                                      day: 'numeric'
+                                    })}
+                                  </CardTitle>
+                                  <p className="text-sm text-gray-600">
+                                    {group.orders.length} orders • {group.total_items} items
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Badge className={
+                                    group.status === 'preparation' ? 'bg-orange-500 text-white' :
+                                      group.status === 'ready' ? 'bg-green-500 text-white' :
+                                        'bg-blue-500 text-white'
+                                  }>
+                                    {group.status === 'preparation' && '👨‍🍳 To Prepare'}
+                                    {group.status === 'ready' && '✅ Ready'}
+                                    {group.status === 'out_for_delivery' && '🚚 Out for Delivery'}
+                                  </Badge>
+                                  <div className="text-right">
+                                    <div className="text-lg font-bold text-green-600">₹{group.total_revenue.toLocaleString()}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </CardHeader>
+
+                          {/* Products to Prepare Summary - Prominent Display */}
+                          <CardContent className="pt-0 space-y-4">
+                            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                              <h4 className="text-base font-semibold text-orange-800 mb-3 flex items-center">
+                                <ChefHat className="h-5 w-5 mr-2" />
+                                Items to Prepare
+                              </h4>
+                              <div className="grid grid-cols-1 gap-3">
+                                {Object.entries(group.orders.reduce((acc: Record<string, number>, item) => {
+                                  acc[item.product_name || 'Unknown'] = (acc[item.product_name || 'Unknown'] || 0) + item.quantity;
+                                  return acc;
+                                }, {} as Record<string, number>)).map(([name, qty]) => (
+                                  <div key={name} className="bg-white rounded-lg p-3 shadow-sm border border-orange-100">
+                                    <div className="flex justify-between items-center">
+                                      <span className="font-medium text-gray-900 text-sm">{name}</span>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs text-gray-600">Qty:</span>
+                                        <Badge variant="outline" className="bg-orange-100 text-orange-800 border-orange-300 font-bold">
+                                          {qty}
+                                        </Badge>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Order Details - Simplified Mobile View */}
+                            <div className="space-y-3">
+                              <h5 className="text-sm font-semibold text-gray-700 flex items-center">
+                                <Package className="h-4 w-4 mr-2" />
+                                Order Details
+                              </h5>
+                              {group.orders.map((order) => (
+                                <div
+                                  key={order.order_item_id}
+                                  className="bg-gray-50 rounded-lg p-3 border border-gray-200"
+                                >
+                                  <div className="space-y-2">
+                                    {/* Order Header */}
+                                    <div className="flex justify-between items-start">
+                                      <div>
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-medium text-sm">#{order.order_number}</span>
+                                          {getDeliveryStatusBadge(order)}
+                                        </div>
+                                        <p className="text-xs text-gray-600 mt-1">
+                                          {order.product_name} × {order.quantity}
+                                        </p>
+                                      </div>
+                                      <div className="text-right">
+                                        <div className="font-bold text-green-600">₹{order.line_total.toLocaleString()}</div>
+                                        <div className="text-xs text-gray-500">
+                                          {formatTimeAgo(order.created_at)}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Customer Info - Compact */}
+                                    <div className="flex items-center gap-4 text-xs text-gray-600 bg-white rounded p-2">
+                                      <div className="flex items-center gap-1">
+                                        <User className="h-3 w-3" />
+                                        <span>{order.customer_name || 'N/A'}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <Phone className="h-3 w-3" />
+                                        <span>{order.customer_phone || 'N/A'}</span>
+                                      </div>
+                                    </div>
+
+                                    {/* Action Buttons - Simplified */}
+                                    <div className="flex gap-2 pt-2">
+                                      {!order.delivery_partner_id && order.current_status === 'confirmed' && (
+                                        <Button
+                                          size="sm"
+                                          onClick={() => handleAssignToDelivery(order)}
+                                          className="flex-1 bg-blue-600 hover:bg-blue-700 text-xs"
+                                        >
+                                          <Truck className="h-3 w-3 mr-1" />
+                                          Assign Delivery
+                                        </Button>
+                                      )}
+                                      {order.delivery_partner_id && (
+                                        <div className="flex-1 bg-green-100 text-green-800 rounded px-3 py-2 text-xs font-medium flex items-center justify-center">
+                                          <CheckCircle className="h-3 w-3 mr-1" />
+                                          Delivery Assigned
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ));
+                    })()}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="delivered" className="space-y-6">
+            {/* Delivered Orders */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Delivered Orders</CardTitle>
+                <CardDescription>Orders that have been successfully delivered</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {deliveredOrders.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">No delivered orders yet</h3>
+                    <p className="text-gray-600">Delivered orders will appear here for review.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {deliveredOrders.map((order) => (
                       <Card key={order.order_item_id} className="overflow-hidden">
-                        <div className={`p-4 ${!order.delivery_partner_id ? 'bg-yellow-50' : 'bg-green-50'}`}>
+                        <div className="p-4">
                           <div className="flex justify-between items-start">
                             <div>
                               <h4 className="font-semibold text-lg">{order.product_name}</h4>
                               <p className="text-sm text-gray-500">Order #{order.order_number}</p>
                               <p className="text-sm text-gray-500">
-                                Confirmed: {formatTimeAgo(order.created_at)}
+                                Delivered: {formatTimeAgo(order.created_at)}
                               </p>
                             </div>
                             <div className="text-right">
-                              {getDeliveryStatusBadge(order)}
                               <p className="font-bold text-xl mt-1">₹{order.line_total.toLocaleString()}</p>
                             </div>
                           </div>
                         </div>
                         <div className="border-t p-4 space-y-4">
-                          {/* Delivery Progress Bar */}
-                          <div className="bg-blue-50 rounded-lg p-4">
-                            {renderDeliveryProgress(order)}
+                          {/* Delivered Status */}
+                          <div className="bg-green-50 rounded-lg p-4">
+                            <div className="flex items-center justify-center">
+                              <div className="flex items-center gap-2 text-green-700">
+                                <CheckCircle className="h-5 w-5" />
+                                <span className="font-semibold">Order Successfully Delivered!</span>
+                              </div>
+                            </div>
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
+                            {/* <div>
                               <h5 className="font-semibold text-gray-800 mb-2 flex items-center"><User className="w-4 h-4 mr-2" /> Customer Details</h5>
                               <div className="space-y-1 text-sm">
                                 <p><span className="font-medium">Name:</span> {order.customer_name || 'N/A'}</p>
                                 <p><span className="font-medium">Phone:</span> {order.customer_phone || 'N/A'}</p>
                                 <p><span className="font-medium">Address:</span> {
-                                  order.delivery_address 
+                                  order.delivery_address
                                     ? `${order.delivery_address.street_address || ''}, ${order.delivery_address.city || ''}, ${order.delivery_address.state || ''} - ${order.delivery_address.pincode || ''}`
                                     : 'Address not available'
                                 }</p>
                               </div>
-                            </div>
+                            </div> */}
 
-                            {order.delivery_partner_id ? (
-                              <div>
-                                <h5 className="font-semibold text-gray-800 mb-2 flex items-center"><Truck className="w-4 h-4 mr-2" /> Delivery Partner</h5>
-                                <div className="space-y-2">
-                                  <div className="text-sm space-y-1">
-                                    <p><span className="font-medium">Name:</span> {order.delivery_partner_name || 'N/A'}</p>
-                                    <p><span className="font-medium">Phone:</span> {order.delivery_partner_phone || 'N/A'}</p>
-                                    {order.delivery_assigned_at && (
-                                      <p><span className="font-medium">Assigned:</span> {formatTimeAgo(order.delivery_assigned_at)}</p>
-                                    )}
-                                  </div>
-                                  {order.pickup_otp && !order.picked_up_at && (
-                                    <div className="mt-2">
-                                      <Button 
-                                        size="sm" 
-                                        variant="outline" 
-                                        className="flex items-center gap-2 text-xs"
-                                        onClick={() => {
-                                          navigator.clipboard.writeText(order.pickup_otp!);
-                                          toast.success('Pickup OTP copied to clipboard!');
-                                        }}
-                                      >
-                                        <Copy className="h-3 w-3" />
-                                        Pickup OTP: {order.pickup_otp}
-                                      </Button>
-                                    </div>
+                            <div>
+                              <h5 className="font-semibold text-gray-800 mb-2 flex items-center"><Truck className="w-4 h-4 mr-2" /> Delivery Details</h5>
+                              <div className="space-y-2">
+                                <div className="text-sm space-y-1">
+                                  <p><span className="font-medium">Status:</span> <span className="text-green-600 font-semibold">Delivered</span></p>
+                                  {order.delivery_partner_name && (
+                                    <p><span className="font-medium">Delivered by:</span> {order.delivery_partner_name}</p>
+                                  )}
+                                  {order.delivered_at && (
+                                    <p><span className="font-medium">Delivered on:</span> {new Date(order.delivered_at).toLocaleString()}</p>
                                   )}
                                 </div>
                               </div>
-                            ) : (
-                              <div className="flex flex-col items-start justify-center p-4 bg-gray-50 rounded-lg">
-                                 <h5 className="font-semibold text-gray-800 mb-2 flex items-center"><AlertTriangle className="w-4 h-4 mr-2 text-yellow-500" /> No Delivery Partner Assigned</h5>
-                                 <p className="text-sm text-gray-600 mb-3">This order is waiting for a delivery partner to be assigned.</p>
-                                 <Button 
-                                   size="mobile-sm" 
-                                   variant="primary-mobile"
-                                   onClick={() => handleAssignToDelivery(order)}
-                                   enableHaptics={true}
-                                   hapticIntensity="medium"
-                                 >
-                                   <RefreshCw className="mr-2 h-4 w-4" /> Try to Assign Now
-                                 </Button>
-                              </div>
-                            )}
+                            </div>
 
                             {/* Order Timeline */}
                             <div>
@@ -2387,49 +2612,36 @@ const VendorDashboard = () => {
                           </div>
 
                           <Separator />
-                          
+
                           <div className="flex justify-between items-center">
                             <div className="flex space-x-2">
-                              <Button 
-                                size="mobile-sm" 
-                                variant="outline-mobile" 
+                              <Button
+                                size="sm"
+                                variant="outline"
                                 onClick={() => { setSelectedOrderItem(order.order_item_id); setVendorNotes(order.vendor_notes || ''); }}
-                                enableHaptics={true}
-                                hapticIntensity="light"
                               >
-                                <Edit className="mr-2 h-4"/> Add/Edit Notes
+                                <Edit className="mr-2 h-4" /> View/Edit Notes
                               </Button>
-                              {order.delivery_partner_id && order.delivery_partner_phone && (
-                                <Button 
-                                  size="mobile-sm" 
-                                  variant="outline-mobile" 
-                                  onClick={() => window.open(`tel:${order.delivery_partner_phone}`)}
-                                  enableHaptics={true}
-                                  hapticIntensity="light"
-                                >
-                                  <Phone className="mr-2 h-4 w-4"/> Call Delivery Partner
-                                </Button>
-                              )}
                             </div>
-                            <p className="text-xs text-gray-500">Last updated: {formatTimeAgo(order.updated_at)}</p>
+                            <p className="text-xs text-gray-500">Delivered on: {order.delivered_at ? new Date(order.delivered_at).toLocaleDateString() : 'N/A'}</p>
                           </div>
 
                         </div>
 
                         {selectedOrderItem === order.order_item_id && (
-                           <div className="p-4 border-t bg-gray-50">
-                              <Label htmlFor="vendor-notes">Vendor Notes</Label>
-                              <Textarea
-                                id="vendor-notes"
-                                value={vendorNotes}
-                                onChange={(e) => setVendorNotes(e.target.value)}
-                                placeholder="Add internal notes for this order..."
-                                className="mb-2"
-                              />
-                              <Button size="sm" onClick={() => handleOrderStatusUpdate(order.order_item_id, order.item_status, undefined, vendorNotes)}>
-                                Save Notes
-                              </Button>
-                           </div>
+                          <div className="p-4 border-t bg-gray-50">
+                            <Label htmlFor="vendor-notes">Vendor Notes</Label>
+                            <Textarea
+                              id="vendor-notes"
+                              value={vendorNotes}
+                              onChange={(e) => setVendorNotes(e.target.value)}
+                              placeholder="Add internal notes for this order..."
+                              className="mb-2"
+                            />
+                            <Button size="sm" onClick={() => handleOrderStatusUpdate(order.order_item_id, order.item_status, undefined, vendorNotes)}>
+                              Save Notes
+                            </Button>
+                          </div>
                         )}
 
                       </Card>
@@ -2439,591 +2651,6 @@ const VendorDashboard = () => {
               </CardContent>
             </Card>
           </TabsContent>
-
-          <TabsContent value="earnings" className="space-y-6">
-            {/* Wallet Overview */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              <Card className="bg-gradient-to-br from-green-50 to-emerald-100 border-green-200">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium text-green-800">Available Balance</CardTitle>
-                  <DollarSign className="h-4 w-4 text-green-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-green-700">
-                    ₹{wallet?.available_balance?.toLocaleString('en-IN') || '0'}
-                  </div>
-                  <p className="text-xs text-green-600 mt-1">Ready for payout</p>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-gradient-to-br from-blue-50 to-cyan-100 border-blue-200">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium text-blue-800">Pending Balance</CardTitle>
-                  <Clock className="h-4 w-4 text-blue-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-blue-700">
-                    ₹{wallet?.pending_balance?.toLocaleString('en-IN') || '0'}
-                  </div>
-                  <p className="text-xs text-blue-600 mt-1">Processing orders</p>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-gradient-to-br from-purple-50 to-violet-100 border-purple-200">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium text-purple-800">Total Earned</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-purple-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-purple-700">
-                    ₹{wallet?.total_earned?.toLocaleString('en-IN') || '0'}
-                  </div>
-                  <p className="text-xs text-purple-600 mt-1">All time earnings</p>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-gradient-to-br from-orange-50 to-red-100 border-orange-200">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium text-orange-800">Commission Paid</CardTitle>
-                  <AlertTriangle className="h-4 w-4 text-orange-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-orange-700">
-                    ₹{wallet?.total_commission_paid?.toLocaleString('en-IN') || '0'}
-                  </div>
-                  <p className="text-xs text-orange-600 mt-1">
-                    Avg: {wallet?.average_commission_rate?.toFixed(1) || '0'}%
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Earnings Summary */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Earnings Breakdown</CardTitle>
-                  <CardDescription>Today's financial summary</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium">Today's Earnings</span>
-                      <span className="font-bold text-green-600">
-                        ₹{wallet?.today_earnings?.toLocaleString('en-IN') || '0'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium">This Week</span>
-                      <span className="font-bold text-blue-600">
-                        ₹{wallet?.week_earnings?.toLocaleString('en-IN') || '0'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium">This Month</span>
-                      <span className="font-bold text-purple-600">
-                        ₹{wallet?.month_earnings?.toLocaleString('en-IN') || '0'}
-                      </span>
-                    </div>
-                    <Separator />
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium">Net Earnings</span>
-                      <span className="text-lg font-bold text-green-700">
-                        ₹{((wallet?.total_earned || 0) - (wallet?.total_commission_paid || 0)).toLocaleString('en-IN')}
-                      </span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Recent Transactions</CardTitle>
-                  <CardDescription>Latest financial activities</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {loadingFinancials ? (
-                    <div className="flex items-center justify-center py-8">
-                      <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
-                    </div>
-                  ) : transactions.length > 0 ? (
-                    <div className="space-y-3">
-                      {transactions.slice(0, 5).map((transaction: any) => (
-                        <div key={transaction.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                          <div>
-                            <p className="text-sm font-medium">{transaction.description}</p>
-                            <p className="text-xs text-gray-500">
-                              {new Date(transaction.transaction_date).toLocaleDateString()}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className={`font-medium ${
-                              transaction.transaction_type === 'vendor_earning' ? 'text-green-600' : 
-                              transaction.transaction_type === 'commission_deduction' ? 'text-red-600' : 
-                              'text-gray-600'
-                            }`}>
-                              {transaction.transaction_type === 'commission_deduction' ? '-' : '+'}
-                              ₹{transaction.net_amount?.toLocaleString('en-IN')}
-                            </p>
-                            <p className="text-xs text-gray-500 capitalize">
-                              {transaction.transaction_type.replace('_', ' ')}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      <DollarSign className="h-12 w-12 mx-auto mb-2 text-gray-300" />
-                      <p>No transactions yet</p>
-                      <p className="text-xs">Transactions will appear when you complete orders</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Payout Information */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Payout Information</CardTitle>
-                <CardDescription>Manage your payout preferences and history</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <h4 className="font-medium mb-3">Payout Settings</h4>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span>Minimum Payout:</span>
-                        <span className="font-medium">₹{wallet?.minimum_payout_amount?.toLocaleString('en-IN') || '1,000'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Payout Frequency:</span>
-                        <span className="font-medium capitalize">{wallet?.payout_frequency || 'Weekly'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Auto Payout:</span>
-                        <Badge variant={wallet?.auto_payout_enabled ? "default" : "secondary"}>
-                          {wallet?.auto_payout_enabled ? "Enabled" : "Disabled"}
-                        </Badge>
-                      </div>
-                    </div>
-                  </div>
-                  <div>
-                    <h4 className="font-medium mb-3">Next Payout</h4>
-                    <div className="text-sm text-gray-600">
-                      <p>Available balance will be processed in the next payout cycle.</p>
-                      <p className="mt-2 text-xs">
-                        Last payout: {wallet?.last_payout_date ? 
-                          new Date(wallet.last_payout_date).toLocaleDateString() : 
-                          'No payouts yet'
-                        }
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="analytics" className="space-y-6">
-            {/* Smart Tips Component */}
-            {/* VendorSmartTips component removed as part of cleanup */}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Products</CardTitle>
-                  <Package className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{analytics.totalProducts}</div>
-                  <p className="text-xs text-muted-foreground">
-                    Active listings
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-                  <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{analytics.totalOrders}</div>
-                  <p className="text-xs text-muted-foreground">
-                    All time
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Confirmed Orders</CardTitle>
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-green-600">{analytics.confirmedOrders}</div>
-                  <p className="text-xs text-muted-foreground">
-                    Successfully processed
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">₹{analytics.totalRevenue.toLocaleString('en-IN')}</div>
-                  <p className="text-xs text-muted-foreground">
-                    From confirmed orders
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Performance Metrics */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Performance Metrics</CardTitle>
-                <CardDescription>Your business performance overview</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-6">
-                  <div>
-                    <div className="flex justify-between text-sm mb-2">
-                      <span>Order Response Rate</span>
-                      <span className="font-medium">{analytics.responseRate.toFixed(1)}%</span>
-                    </div>
-                    <Progress value={analytics.responseRate} className="h-2" />
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between text-sm mb-2">
-                      <span>Auto-Approval Rate</span>
-                      <span className="font-medium">{analytics.autoApprovalRate.toFixed(1)}%</span>
-                    </div>
-                    <Progress value={analytics.autoApprovalRate} className="h-2" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Charts Section */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Monthly Earnings Chart */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Monthly Earnings Trend</CardTitle>
-                  <CardDescription>Your earnings over the last 12 months</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {loadingChartData ? (
-                    <div className="h-64 flex items-center justify-center">
-                      <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
-                    </div>
-                  ) : monthlyEarnings.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={250}>
-                      <LineChart data={monthlyEarnings}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis 
-                          dataKey="month" 
-                          tick={{ fontSize: 12 }}
-                          tickFormatter={(value) => {
-                            const [year, month] = value.split('-');
-                            return `${month}/${year.slice(2)}`;
-                          }}
-                        />
-                        <YAxis tick={{ fontSize: 12 }} />
-                        <Tooltip 
-                          formatter={(value: any) => [`₹${value.toLocaleString('en-IN')}`, 'Earnings']}
-                          labelFormatter={(label) => {
-                            const [year, month] = label.split('-');
-                            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                            return `${monthNames[parseInt(month) - 1]} ${year}`;
-                          }}
-                        />
-                        <Line 
-                          type="monotone" 
-                          dataKey="earnings" 
-                          stroke="#3b82f6" 
-                          strokeWidth={2}
-                          dot={{ fill: '#3b82f6', strokeWidth: 2, r: 4 }}
-                          activeDot={{ r: 6, stroke: '#3b82f6', strokeWidth: 2, fill: '#fff' }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-64 flex items-center justify-center text-gray-500">
-                      <div className="text-center">
-                        <BarChart3 className="h-12 w-12 mx-auto mb-2 text-gray-300" />
-                        <p>No earnings data available</p>
-                        <p className="text-xs">Complete some orders to see your earnings trend</p>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Category Breakdown Chart */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Sales by Category</CardTitle>
-                  <CardDescription>Breakdown of sales by product categories</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {loadingChartData ? (
-                    <div className="h-64 flex items-center justify-center">
-                      <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
-                    </div>
-                  ) : categoryBreakdown.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={250}>
-                      <PieChart>
-                        <Pie
-                          data={categoryBreakdown}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                          outerRadius={80}
-                          fill="#8884d8"
-                          dataKey="value"
-                        >
-                          {categoryBreakdown.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip formatter={(value: any) => [`₹${value.toLocaleString('en-IN')}`, 'Sales']} />
-                        <Legend />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-64 flex items-center justify-center text-gray-500">
-                      <div className="text-center">
-                        <TrendingUp className="h-12 w-12 mx-auto mb-2 text-gray-300" />
-                        <p>No category data available</p>
-                        <p className="text-xs">Add products and complete orders to see category breakdown</p>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          {/*
-          <TabsContent value="products" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>My Products ({vendorProducts.length})</CardTitle>
-                    <CardDescription>Manage your listed products and inventory</CardDescription>
-                  </div>
-                  <Button 
-                    variant="outline"
-                    className="bg-gradient-to-r from-purple-500 to-blue-600 text-white border-0 hover:from-purple-600 hover:to-blue-700"
-                    onClick={() => navigate('/vendor/product-management')}
-                  >
-                    <BarChart3 className="h-4 w-4 mr-2" />
-                    Advanced Management
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-col sm:flex-row items-center justify-between mb-6 gap-4">
-                  <div className="relative flex-1 w-full">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input
-                      placeholder="Search products..."
-                      className="pl-10"
-                      value={productSearchTerm}
-                      onChange={(e) => setProductSearchTerm(e.target.value)}
-                    />
-                  </div>
-                  <div className="flex gap-2 w-full sm:w-auto">
-                    <Select value={productFilter} onValueChange={setProductFilter}>
-                      <SelectTrigger className="w-full sm:w-[180px]">
-                        <SelectValue placeholder="Filter products" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Products</SelectItem>
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="inactive">Inactive</SelectItem>
-                        <SelectItem value="out_of_stock">Out of Stock</SelectItem>
-                        <SelectItem value="low_stock">Low Stock (≤5)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Button 
-                      className="bg-blue-600 hover:bg-blue-700 flex items-center gap-2"
-                      onClick={() => navigate('/vendor/add-product')}
-                    >
-                      <Plus className="h-4 w-4" />
-                      Add Product
-                    </Button>
-                  </div>
-                </div>
-
-                {loadingProducts ? (
-                  <div className="min-h-[200px] flex items-center justify-center">
-                    <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
-                  </div>
-                ) : vendorProducts.length === 0 ? (
-                  <div className="min-h-[200px] flex items-center justify-center text-gray-500 border border-dashed rounded-lg">
-                    <div className="text-center">
-                      <Package className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                      <h3 className="text-lg font-semibold text-gray-900 mb-2">No products listed</h3>
-                      <p className="text-gray-600 mb-4">Start by adding your first product to begin selling</p>
-                      <Button onClick={() => navigate('/vendor/add-product')}>
-                        <Plus className="h-4 w-4 mr-2" />
-                        Add Your First Product
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {vendorProducts
-                      .filter(product => {
-                        const matchesSearch = product.model?.model_name
-                          ?.toLowerCase()
-                          .includes(productSearchTerm.toLowerCase()) ||
-                          product.generic_product?.name
-                          ?.toLowerCase()
-                          .includes(productSearchTerm.toLowerCase());
-                        
-                        if (productFilter === 'all') return matchesSearch;
-                        if (productFilter === 'active') return matchesSearch && product.is_active;
-                        if (productFilter === 'inactive') return matchesSearch && !product.is_active;
-                        if (productFilter === 'out_of_stock') return matchesSearch && !product.is_in_stock;
-                        if (productFilter === 'low_stock') return matchesSearch && product.stock_quantity <= 5 && product.stock_quantity > 0;
-                        
-                        return matchesSearch;
-                      })
-                      .map((product) => (
-                        <Card key={product.id} className="overflow-hidden">
-                          <div className="p-4">
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-3 mb-2">
-                                  <h3 className="font-semibold text-lg">
-                                    {product.model?.model_name || product.generic_product?.name}
-                                  </h3>
-                                  <Badge variant={product.is_active ? "default" : "secondary"}>
-                                    {product.is_active ? "Active" : "Inactive"}
-                                  </Badge>
-                                  {!product.is_in_stock && (
-                                    <Badge variant="destructive">Out of Stock</Badge>
-                                  )}
-                                  {product.stock_quantity <= 5 && product.stock_quantity > 0 && (
-                                    <Badge variant="outline" className="text-orange-600 border-orange-600">
-                                      Low Stock
-                                    </Badge>
-                                  )}
-                                </div>
-                                
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600 mb-3">
-                                  <div>
-                                    <span className="font-medium">Price:</span> ₹{product.price.toLocaleString('en-IN')}
-                                    {product.original_price && product.original_price > product.price && (
-                                      <span className="ml-1 text-gray-400 line-through">
-                                        ₹{product.original_price.toLocaleString('en-IN')}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <span className="font-medium">Stock:</span> {product.stock_quantity}
-                                  </div>
-                                  <div>
-                                    <span className="font-medium">Category:</span> {product.category?.name || 'N/A'}
-                                  </div>
-                                  <div>
-                                    <span className="font-medium">Quality:</span> {product.quality_type?.name || 'N/A'}
-                                  </div>
-                                </div>
-                                
-                                {product.model?.brand && (
-                                  <p className="text-sm text-gray-500 mb-2">
-                                    Brand: {product.model.brand.name}
-                                  </p>
-                                )}
-                                
-                                <div className="flex items-center gap-2 text-xs text-gray-500">
-                                  <span>Warranty: {product.warranty_months} months</span>
-                                  <span>•</span>
-                                  <span>Delivery: {product.delivery_time_days} days</span>
-                                  <span>•</span>
-                                  <span>Added: {new Date(product.created_at).toLocaleDateString()}</span>
-                                </div>
-                              </div>
-                              
-                              <div className="flex flex-col gap-2 ml-4">
-                                <div className="flex gap-1">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleProductAction(product.id, product.is_active ? 'deactivate' : 'activate')}
-                                  >
-                                    {product.is_active ? (
-                                      <>
-                                        <PauseCircle className="h-4 w-4 mr-1" />
-                                        Deactivate
-                                      </>
-                                    ) : (
-                                      <>
-                                        <PlayCircle className="h-4 w-4 mr-1" />
-                                        Activate
-                                      </>
-                                    )}
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                  >
-                                    <Edit className="h-4 w-4 mr-1" />
-                                    Edit
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="destructive"
-                                    onClick={() => {
-                                      if (window.confirm('Are you sure you want to delete this product?')) {
-                                        handleProductAction(product.id, 'delete');
-                                      }
-                                    }}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                                
-                                <div className="flex items-center gap-2">
-                                  <Input
-                                    type="number"
-                                    min="0"
-                                    value={product.stock_quantity}
-                                    onChange={(e) => {
-                                      const newStock = parseInt(e.target.value) || 0;
-                                      if (newStock !== product.stock_quantity) {
-                                        handleStockUpdate(product.id, newStock);
-                                      }
-                                    }}
-                                    className="w-20 h-8 text-center"
-                                  />
-                                  <span className="text-xs text-gray-500">Stock</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </Card>
-                      ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-          */}
         </Tabs>
       </main>
     </div>

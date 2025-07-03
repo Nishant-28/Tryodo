@@ -379,21 +379,20 @@ const AdminDashboard = () => {
   useEffect(() => {
     setQuickActions([
       {
-        id: 'delivery',
-        title: 'Delivery Partners',
-        description: 'Manage delivery partners and zones',
-        icon: <Truck className="h-6 w-6" />,
-        action: () => navigate('/admin/delivery-partners'),
-        count: 0,
-        urgent: true
-      },
-      {
         id: 'vendors',
         title: 'Vendor Management',
         description: 'Manage vendors, applications and approvals',
         icon: <Store className="h-6 w-6" />,
         action: () => navigate('/admin/vendor-management'),
         count: stats.totalVendors
+      },
+      {
+        id: 'delivery',
+        title: 'Delivery Partners',
+        description: 'Manage delivery partners and zones',
+        icon: <Truck className="h-6 w-6" />,
+        action: () => navigate('/admin/delivery-partners'),
+        count: 0
       },
       {
         id: 'categories',

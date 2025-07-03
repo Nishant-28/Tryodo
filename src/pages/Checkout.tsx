@@ -127,6 +127,14 @@ const Checkout = () => {
     }
   }, [cart, navigate, user, profile]);
 
+  // Reload addresses once we have the customerId
+  useEffect(() => {
+    if (user && profile && customerId) {
+      loadAddresses();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerId]);
+
   useEffect(() => {
     const getCustomerId = async () => {
       if (!user || !profile) return;
@@ -389,7 +397,12 @@ const Checkout = () => {
           description: `Your order #${result.data.order_number} has been placed.`,
         });
         clearCart();
-        navigate(`/order-success?orderId=${result.data.id}`);
+        navigate(`/order-success?orderId=${result.data.id}`, {
+          state: {
+            orderId: result.data.id,
+            orderDetails: result.data,
+          },
+        });
       } else {
         throw new Error(result.error || "Failed to place order.");
       }
@@ -671,102 +684,56 @@ const Checkout = () => {
                       htmlFor={method.id}
                       className={
                         `relative flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 ` +
-                        `hover:bg-accent hover:text-accent-foreground cursor-pointer ` +
-                        (selectedPayment === method.id ? "border-primary" : "")
+                        (selectedPayment === method.id ? "border-purple-500" : "")
                       }
                     >
-                      {selectedPayment === method.id && (
-                        <ShineBorder
-                          className="absolute inset-0 z-0"
-                          shineColor={["#8b5cf6", "#a855f7", "#c084fc"]}
-                          borderWidth={2}
-                          duration={3}
-                        />
-                      )}
-                      <RadioGroupItem id={method.id} value={method.id} className="sr-only" />
-                      <div className="relative z-10 flex items-center space-x-3 w-full">
-                        {method.icon}
-                        <div className="flex flex-col">
-                          <span className="font-medium">{method.name}</span>
-                          <span className="text-sm text-muted-foreground">{method.description}</span>
+                      <RadioGroupItem value={method.id} id={method.id} className="sr-only" />
+                      <div className="flex items-center justify-between w-full">
+                        <div className="flex items-center gap-2">
+                          {method.icon}
+                          <span className="font-medium text-gray-900">{method.name}</span>
                         </div>
+                        <span className="text-sm text-gray-500">{method.description}</span>
                       </div>
                     </Label>
                   ))}
                 </RadioGroup>
               </CardContent>
             </Card>
-
+          </div>
+          <div className="lg:col-span-1 space-y-8">
             <Card className="bg-white rounded-2xl shadow-lg">
               <CardHeader>
                 <CardTitle className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                  <Shield className="h-6 w-6 text-blue-600" />
-                  Special Instructions
+                  <Shield className="h-6 w-6 text-green-600" />
+                  Order Summary
                 </CardTitle>
-                <CardDescription>Add any specific instructions for your order.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Textarea
-                  placeholder="e.g., Leave at the gate, Call me upon arrival, etc."
-                  value={specialInstructions}
-                  onChange={(e) => setSpecialInstructions(e.target.value)}
-                  rows={3}
-                />
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="lg:col-span-1 space-y-8">
-            <Card className="bg-white rounded-2xl shadow-lg sticky top-4">
-              <CardHeader>
-                <CardTitle className="text-2xl font-bold text-gray-900">Order Summary</CardTitle>
+                <CardDescription>
+                  Summary of your order
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  {cart.items.map((item) => (
-                    <div key={item.id} className="flex justify-between items-start">
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-gray-900">
-                          {item.brandName} {item.modelName}
-                        </span>
-                        <span className="text-sm text-gray-600">
-                          <span className="font-medium">🏪 {item.vendor}</span>
-                          {item.qualityName && <span className="ml-2 px-2 py-0.5 bg-gray-100 rounded-full text-xs text-gray-500">{item.qualityName}</span>}
-                        </span>
-                        <span className="text-sm text-gray-600">Qty: {item.quantity}</span>
-                      </div>
-                      <span className="font-semibold text-gray-900">₹{item.price * item.quantity}</span>
-                    </div>
-                  ))}
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-900">Subtotal</span>
+                  <span className="text-sm font-medium text-gray-900">₹{subtotal.toFixed(2)}</span>
                 </div>
-                <Separator />
-                <div className="flex justify-between font-semibold text-gray-800">
-                  <span>Subtotal</span>
-                  <span>₹{subtotal.toFixed(2)}</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-900">Shipping Charges</span>
+                  <span className="text-sm font-medium text-gray-900">₹{shippingCharges.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between font-semibold text-gray-800">
-                  <span>Shipping Charges</span>
-                  <span>₹{shippingCharges.toFixed(2)}</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-900">Tax Amount</span>
+                  <span className="text-sm font-medium text-gray-900">₹{taxAmount.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between font-semibold text-gray-800">
-                  <span>Tax Amount</span>
-                  <span>₹{taxAmount.toFixed(2)}</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-900">Total</span>
+                  <span className="text-sm font-medium text-gray-900">₹{total.toFixed(2)}</span>
                 </div>
-                <Separator />
-                <div className="flex justify-between font-bold text-xl text-green-600">
-                  <span>Total</span>
-                  <span>₹{total.toFixed(2)}</span>
-                </div>
-                <PulsatingButton
-                  onClick={handlePlaceOrder}
-                  disabled={isPlacingOrder || addresses.length === 0 || !selectedAddress || !selectedPayment || !selectedSlot}
-                  className="w-full py-3 mt-6 rounded-lg text-lg font-semibold transition-colors duration-300 bg-green-500 text-white hover:bg-green-600"
-                  pulseColor="#22C55E"
-                >
-                  {isPlacingOrder ? 'Placing Order...' : `Place Order - ₹${total.toFixed(2)}`}
-                </PulsatingButton>
               </CardContent>
             </Card>
+            <Button onClick={handlePlaceOrder} disabled={isPlacingOrder}>
+              {isPlacingOrder ? "Placing Order..." : "Place Order"}
+            </Button>
           </div>
         </div>
       </main>

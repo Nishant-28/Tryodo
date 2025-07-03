@@ -21,6 +21,7 @@ import VendorDashboard from "./pages/VendorDashboard";
 import VendorProfile from "./pages/VendorProfile";
 import AddProduct from "./pages/AddProduct";
 import VendorProductManagement from "./pages/VendorProductManagement";
+import VendorAnalytics from "./pages/VendorAnalytics";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminModelsManagement from "./pages/AdminModelsManagement";
 import AdminCategoriesManagement from "./pages/AdminCategoriesManagement";
@@ -44,6 +45,7 @@ import MyOrders from "./pages/MyOrders";
 import DeliveryPartnerDashboard from "./pages/DeliveryPartnerDashboard";
 import NetworkStatusIndicator from "@/components/NetworkStatusIndicator";
 import { Cart } from "@/components/customer/Cart";
+import DeliverySlotDashboard from "./pages/DeliverySlotDashboard";
 
 const queryClient = new QueryClient();
 
@@ -163,6 +165,7 @@ const App = () => (
                 {/* Vendor-only routes */}
                 <Route path="/vendor-dashboard" element={<ProtectedRoute allowedRoles={['vendor']}><VendorDashboard /></ProtectedRoute>} />
                 <Route path="/vendor-profile" element={<ProtectedRoute allowedRoles={['vendor']}><VendorProfile /></ProtectedRoute>} />
+                <Route path="/vendor/analytics" element={<ProtectedRoute allowedRoles={['vendor']}><VendorAnalytics /></ProtectedRoute>} />
                 <Route path="/vendor/add-product" element={<ProtectedRoute allowedRoles={['vendor']}><AddProduct /></ProtectedRoute>} />
                 <Route path="/vendor/product-management" element={<ProtectedRoute allowedRoles={['vendor']}><VendorProductManagement /></ProtectedRoute>} />
 
@@ -182,6 +185,7 @@ const App = () => (
 
                 {/* Delivery Partner routes */}
                 <Route path="/delivery-partner-dashboard" element={<ProtectedRoute allowedRoles={['delivery_partner']}><DeliveryPartnerDashboard /></ProtectedRoute>} />
+                <Route path="/delivery-slot-dashboard" element={<ProtectedRoute allowedRoles={['delivery_partner']}><DeliverySlotDashboard /></ProtectedRoute>} />
 
                 {/* Catch-all route */}
                 <Route path="*" element={<NotFound />} />

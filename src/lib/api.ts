@@ -604,6 +604,30 @@ export class AnalyticsAPI {
       };
     }
   }
+
+  /**
+   * Get vendor financial summary
+   */
+  static async getVendorFinancialSummary(vendorId: string): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase.rpc('get_vendor_financial_summary', {
+        p_vendor_id: vendorId,
+      });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data[0],
+        message: 'Vendor financial summary retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch vendor financial summary'
+      };
+    }
+  }
 }
 
 // Order API
@@ -670,7 +694,7 @@ export class OrderAPI {
         .from('order_items')
         .select(`
           *,
-          vendor:vendors ( id, business_name, contact_phone, business_city, business_state )
+          vendor:vendors ( id, business_name )
         `)
         .in('order_id', orderIds);
       if (orderItemsError) throw orderItemsError;
@@ -702,7 +726,7 @@ export class OrderAPI {
         if (profileIds.length > 0) {
           const { data: profiles, error: profilesError } = await supabase
             .from('profiles')
-            .select('id, full_name, phone')
+            .select('id, full_name')
             .in('id', profileIds);
           if (profilesError) throw profilesError;
 
@@ -926,7 +950,7 @@ export class OrderAPI {
         .from('order_items')
         .select(`
           *,
-          vendor:vendors ( id, business_name, contact_phone, business_city, business_state )
+          vendor:vendors ( id, business_name )
         `)
         .eq('order_id', orderId);
       if (orderItemsError) throw orderItemsError;
@@ -1000,7 +1024,7 @@ export class OrderAPI {
             if (partnerEntity?.profile_id) {
               const { data: dpProfile, error: dpProfileError } = await supabase
                 .from('profiles')
-                .select('full_name, phone')
+                .select('full_name')
                 .eq('id', partnerEntity.profile_id)
                 .single();
               if (dpProfileError) throw dpProfileError;
@@ -1766,7 +1790,7 @@ export interface CommissionRule {
   quality_id: string | null;
   smartphone_model_id: string | null;
   category?: { id: string; name: string };
-  quality?: { id: string; name: string };
+  quality?: { id: string; quality_name: string };
   model?: { id: string; model_name: string };
   created_by_profile?: { full_name: string };
 }
@@ -1789,7 +1813,7 @@ export interface VendorCommissionOverride {
   smartphone_model_id: string | null;
   vendor?: { business_name: string };
   category?: { name: string };
-  quality?: { name: string };
+  quality?: { quality_name: string };
   model?: { model_name: string };
   created_by_profile?: { full_name: string };
 }
@@ -1805,7 +1829,6 @@ export class CommissionAPI {
         .select(`
           *,
           category:categories(name, id),
-          quality:quality_categories(name, id),
           model:smartphone_models(model_name, id),
           created_by_profile:profiles(full_name)
         `)
@@ -1813,6 +1836,31 @@ export class CommissionAPI {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
+
+      // Manually fetch quality data for records that have quality_id
+      if (data && data.length > 0) {
+        const qualityIds = data.filter(item => item.quality_id).map(item => item.quality_id);
+        
+        if (qualityIds.length > 0) {
+          const { data: qualityData } = await supabase
+            .from('category_qualities')
+            .select('id, quality_name')
+            .in('id', qualityIds);
+          
+          // Map quality data to each record
+          data.forEach(item => {
+            if (item.quality_id && qualityData) {
+              const quality = qualityData.find(q => q.id === item.quality_id);
+              if (quality) {
+                item.quality = {
+                  id: quality.id,
+                  quality_name: quality.quality_name
+                };
+              }
+            }
+          });
+        }
+      }
 
       return {
         success: true,
@@ -1844,7 +1892,11 @@ export class CommissionAPI {
     smartphoneModelId?: string;
   }): Promise<ApiResponse<CommissionRule>> {
     try {
-      const { data, error } = await supabase
+      // Use service role client when available
+      const { supabaseServiceRole } = await import('./supabase');
+      const client = supabaseServiceRole && supabaseServiceRole !== supabase ? supabaseServiceRole : supabase;
+
+      const { data, error } = await client
         .from('commission_rules')
         .upsert([{
           id: ruleData.id,
@@ -1877,18 +1929,26 @@ export class CommissionAPI {
     }
   }
 
+  static async getVendorDashboardMetrics(vendorId: string) {
+    return supabase.rpc('get_vendor_dashboard_metrics', { v_vendor_id: vendorId });
+  }
   /**
    * Get vendor commission overrides
    */
   static async getVendorCommissionOverrides(vendorId?: string): Promise<ApiResponse<VendorCommissionOverride[]>> {
     try {
-      let query = supabase
+      // Import service role client for admin operations
+      const { supabaseServiceRole } = await import('./supabase');
+      
+      // Use service role if available, fallback to regular client
+      const client = supabaseServiceRole && supabaseServiceRole !== supabase ? supabaseServiceRole : supabase;
+      
+      let query = client
         .from('vendor_commission_overrides')
         .select(`
           *,
-          vendor:vendors(business_name),
+          vendor:vendors ( business_name ),
           category:categories(name),
-          quality:quality_categories(name, id),
           model:smartphone_models(model_name, id),
           created_by_profile:profiles(full_name)
         `)
@@ -1903,12 +1963,38 @@ export class CommissionAPI {
 
       if (error) throw error;
 
+      // Manually fetch quality data for records that have quality_id
+      if (data && data.length > 0) {
+        const qualityIds = data.filter(item => item.quality_id).map(item => item.quality_id);
+        
+        if (qualityIds.length > 0) {
+          const { data: qualityData } = await client
+            .from('category_qualities')
+            .select('id, quality_name')
+            .in('id', qualityIds);
+          
+          // Map quality data to each record
+          data.forEach(item => {
+            if (item.quality_id && qualityData) {
+              const quality = qualityData.find(q => q.id === item.quality_id);
+              if (quality) {
+                item.quality = {
+                  id: quality.id,
+                  quality_name: quality.quality_name
+                };
+              }
+            }
+          });
+        }
+      }
+
       return {
         success: true,
         data: data || [],
         message: `Retrieved ${data?.length || 0} vendor commission overrides`
       };
     } catch (error: any) {
+      console.error('Error fetching vendor commission overrides:', error);
       return {
         success: false,
         error: error.message || 'Failed to fetch vendor commission overrides'
@@ -1933,7 +2019,13 @@ export class CommissionAPI {
     smartphoneModelId?: string;
   }): Promise<ApiResponse<VendorCommissionOverride>> {
     try {
-      const { data, error } = await supabase
+      // Import service role client for admin operations
+      const { supabaseServiceRole } = await import('./supabase');
+      
+      // Use service role if available, fallback to regular client
+      const client = supabaseServiceRole && supabaseServiceRole !== supabase ? supabaseServiceRole : supabase;
+      
+      const { data, error } = await client
         .from('vendor_commission_overrides')
         .insert([{
           vendor_id: overrideData.vendorId,
@@ -1959,6 +2051,7 @@ export class CommissionAPI {
         message: 'Vendor commission override created successfully'
       };
     } catch (error: any) {
+      console.error('Error creating vendor commission override:', error);
       return {
         success: false,
         error: error.message || 'Failed to create vendor commission override'
@@ -2081,7 +2174,7 @@ export class WalletAPI {
         .from('vendor_wallets')
         .select(`
           *,
-          vendor:vendors(business_name, contact_phone)
+          vendor:vendors ( business_name )
         `)
         .eq('vendor_id', vendorId)
         .single();
@@ -2095,7 +2188,7 @@ export class WalletAPI {
           .insert([{ vendor_id: vendorId }])
           .select(`
             *,
-            vendor:vendors(business_name, contact_phone)
+            vendor:vendors ( business_name )
           `)
           .single();
 
@@ -2130,8 +2223,8 @@ export class WalletAPI {
         .from('delivery_partner_wallets')
         .select(`
           *,
-          delivery_partner:delivery_partners(
-            profiles(full_name, phone)
+          delivery_partner:delivery_partners (
+            profiles(full_name)
           )
         `)
         .eq('delivery_partner_id', deliveryPartnerId)
@@ -2146,8 +2239,8 @@ export class WalletAPI {
           .insert([{ delivery_partner_id: deliveryPartnerId }])
           .select(`
             *,
-            delivery_partner:delivery_partners(
-              profiles(full_name, phone)
+            delivery_partner:delivery_partners (
+              profiles(full_name)
             )
           `)
           .single();

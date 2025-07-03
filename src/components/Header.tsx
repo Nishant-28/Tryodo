@@ -1,10 +1,9 @@
 import React from 'react';
-import { Search, ShoppingCart, User, Menu, LogOut, Settings, Shield, Store, Building, UserCircle, Bug, Package } from 'lucide-react';
+import { Search, ShoppingCart, User, Menu, LogOut, Settings, Shield, Store, Building, UserCircle, Bug, Package, BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import { forceAuthReset } from '@/lib/supabase';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -143,8 +142,14 @@ const Header = ({ cartItems = 0, onCartClick, hideCartOnMobile = true }: HeaderP
                 <Link to="/vendor-dashboard" className="text-green-600 hover:text-green-700 transition-colors font-medium py-2">
                   Dashboard
                 </Link>
+                <Link to="/vendor/analytics" className="text-green-600 hover:text-green-700 transition-colors font-medium py-2">
+                  Analytics
+                </Link>
                 <Link to="/vendor-profile" className="text-green-600 hover:text-green-700 transition-colors font-medium py-2">
                   Profile
+                </Link>
+                <Link to="/vendor/add-product" className="text-green-600 hover:text-green-700 transition-colors font-medium py-2">
+                  Add Product
                 </Link>
               </>
             )}
@@ -163,6 +168,9 @@ const Header = ({ cartItems = 0, onCartClick, hideCartOnMobile = true }: HeaderP
               <>
                 <Link to="/delivery-partner-dashboard" className="text-orange-600 hover:text-orange-700 transition-colors font-medium py-2">
                   Dashboard
+                </Link>
+                <Link to="/delivery-slot-dashboard" className="text-orange-600 hover:text-orange-700 transition-colors font-medium py-2">
+                  Slot Dashboard
                 </Link>
               </>
             )}
@@ -242,6 +250,12 @@ const Header = ({ cartItems = 0, onCartClick, hideCartOnMobile = true }: HeaderP
                         <Link to="/vendor-dashboard" className="flex items-center cursor-pointer">
                           <Store className="mr-2 h-4 w-4" />
                           Dashboard
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link to="/vendor/analytics" className="flex items-center cursor-pointer">
+                          <BarChart3 className="mr-2 h-4 w-4" />
+                          Analytics
                         </Link>
                       </DropdownMenuItem>
                       <DropdownMenuItem asChild>
