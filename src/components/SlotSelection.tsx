@@ -51,7 +51,7 @@ const SlotSelection: React.FC<SlotSelectionProps> = ({
       // Get available slots for the sector and date
       const slots = await deliverySlotAPI.getAvailableSlots(userSector.id, selectedDate);
       
-      // Smart time filtering - show all slots if it's early morning (before 6 AM) to allow pre-ordering
+      // FIXED: More lenient time filtering - give customers more flexibility
       const currentTime = new Date();
       const currentHour = currentTime.getHours();
       const isToday = selectedDate === new Date().toISOString().split('T')[0];
@@ -62,12 +62,13 @@ const SlotSelection: React.FC<SlotSelectionProps> = ({
         console.log(`🌙 Early morning detected (${currentHour}:xx) - showing all ${slots.length} slots for pre-ordering`);
         availableSlots = slots;
       } else if (isToday) {
-        // Regular hours today: Filter based on cutoff time
+        // Regular hours today: Filter based on cutoff time with 30-minute buffer
         availableSlots = slots.filter(slot => {
           const cutoffTime = new Date(`${selectedDate}T${slot.cutoff_time}`);
-          return cutoffTime > currentTime;
+          const cutoffWithBuffer = new Date(cutoffTime.getTime() + 30 * 60000); // Add 30 minutes buffer
+          return cutoffWithBuffer > currentTime;
         });
-        console.log(`⏰ Regular hours (${currentHour}:xx) - filtered to ${availableSlots.length} slots out of ${slots.length} based on cutoff time`);
+        console.log(`⏰ Regular hours (${currentHour}:xx) - filtered to ${availableSlots.length} slots out of ${slots.length} based on cutoff time (with 30min buffer)`);
       } else {
         // Future dates: Show all slots
         console.log(`📅 Future date - showing all ${slots.length} slots`);

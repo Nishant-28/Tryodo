@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Users, 
-  Search, 
-  Filter, 
-  MoreVertical, 
-  CheckCircle, 
-  XCircle, 
-  DollarSign, 
-  TrendingUp, 
+import {
+  Users,
+  Search,
+  Filter,
+  MoreVertical,
+  CheckCircle,
+  XCircle,
+  DollarSign,
+  TrendingUp,
   Eye,
   Edit,
   Wallet,
@@ -91,7 +91,7 @@ const AdminVendorManagement: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user: currentUser, profile: currentProfile } = useAuth();
-  
+
   // State management
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -118,17 +118,17 @@ const AdminVendorManagement: React.FC = () => {
   });
 
   const filteredVendors = vendors.filter(vendor => {
-    const matchesSearch = searchTerm === '' || 
+    const matchesSearch = searchTerm === '' ||
       (vendor.business_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (vendor.business_email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (vendor.profile?.full_name || '').toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesStatus = filterStatus === 'all' || 
+
+    const matchesStatus = filterStatus === 'all' ||
       (filterStatus === 'verified' && vendor.is_verified) ||
       (filterStatus === 'unverified' && !vendor.is_verified) ||
       (filterStatus === 'active' && vendor.is_active) ||
       (filterStatus === 'inactive' && !vendor.is_active);
-    
+
     return matchesSearch && matchesStatus;
   });
 
@@ -143,11 +143,11 @@ const AdminVendorManagement: React.FC = () => {
   const loadVendors = async () => {
     try {
       console.log('Loading vendors...');
-      
+
       // Check if service role client is available
       if (!supabaseServiceRole || supabaseServiceRole === supabase) {
         console.warn('Service role client not available! Falling back to regular client with limited access.');
-        
+
         // Fallback to regular client for basic vendor information
         const { data, error } = await supabase
           .from('vendors')
@@ -182,7 +182,7 @@ const AdminVendorManagement: React.FC = () => {
         console.log(`Loaded ${vendorsWithEmptyWallets.length} vendors in fallback mode`);
         return;
       }
-      
+
       // Use service role for admin operations to bypass RLS
       const { data, error } = await supabaseServiceRole
         .from('vendors')
@@ -222,7 +222,7 @@ const AdminVendorManagement: React.FC = () => {
                   total_commission_paid: 0,
                   average_commission_rate: 0
                 });
-              
+
               if (walletError) {
                 console.error('Error creating wallet:', walletError);
               }
@@ -242,7 +242,7 @@ const AdminVendorManagement: React.FC = () => {
         description: `Failed to load vendors: ${error.message}`,
         variant: "destructive",
       });
-      
+
       // Set empty vendors array to prevent blank page
       setVendors([]);
     } finally {
@@ -310,13 +310,13 @@ const AdminVendorManagement: React.FC = () => {
         console.error('Error loading quality categories:', error);
         throw error;
       }
-      
+
       // Map quality_name to name for component compatibility
       const mappedData = data?.map(item => ({
         id: item.id,
         name: item.quality_name
       })) || [];
-      
+
       console.log(`Loaded ${mappedData.length} quality categories:`, mappedData);
       setQualityCategories(mappedData);
     } catch (error) {
@@ -343,7 +343,7 @@ const AdminVendorManagement: React.FC = () => {
   const handleVendorAction = async (vendorId: string, action: 'approve' | 'reject' | 'activate' | 'deactivate') => {
     try {
       console.log(`🔄 Attempting to ${action} vendor:`, vendorId);
-      
+
       // Check if service role is available for vendor actions
       if (!supabaseServiceRole || supabaseServiceRole === supabase) {
         toast({
@@ -358,8 +358,8 @@ const AdminVendorManagement: React.FC = () => {
 
       switch (action) {
         case 'approve':
-          updateData = { 
-            is_verified: true, 
+          updateData = {
+            is_verified: true,
             is_active: true,
             verification_notes: `Approved by admin on ${new Date().toISOString()}`,
             rejection_reason: null
@@ -368,8 +368,8 @@ const AdminVendorManagement: React.FC = () => {
         case 'reject':
           const reason = prompt('Please enter rejection reason:');
           if (!reason) return;
-          updateData = { 
-            is_verified: false, 
+          updateData = {
+            is_verified: false,
             is_active: false,
             rejection_reason: reason,
             verification_notes: `Rejected by admin on ${new Date().toISOString()}: ${reason}`
@@ -572,10 +572,10 @@ const AdminVendorManagement: React.FC = () => {
       loadVendorCommissions(selectedVendor.id);
     } catch (error: any) {
       console.error('Failed to create commission override:', error);
-      
+
       // Provide more specific error messages
       let errorMessage = error.message || "Failed to create commission override";
-      
+
       if (error.message?.includes('duplicate key')) {
         errorMessage = "A commission override already exists for this vendor and category combination.";
       } else if (error.message?.includes('permission denied')) {
@@ -583,7 +583,7 @@ const AdminVendorManagement: React.FC = () => {
       } else if (error.message?.includes('foreign key')) {
         errorMessage = "Invalid vendor, category, or other reference data.";
       }
-      
+
       toast({
         title: "Error",
         description: errorMessage,
@@ -594,7 +594,7 @@ const AdminVendorManagement: React.FC = () => {
 
   const handleDeleteOverride = async (overrideId: string) => {
     if (!selectedVendor) return;
-    
+
     // Check if service role is available
     if (!supabaseServiceRole || supabaseServiceRole === supabase) {
       toast({
@@ -604,7 +604,7 @@ const AdminVendorManagement: React.FC = () => {
       });
       return;
     }
-    
+
     if (window.confirm("Are you sure you want to delete this commission override?")) {
       try {
         const { error } = await supabaseServiceRole
@@ -639,7 +639,7 @@ const AdminVendorManagement: React.FC = () => {
   // Test function for debugging commission overrides
   const testCommissionOverrides = async () => {
     console.log('🧪 Testing Commission Override Functionality...');
-    
+
     try {
       // Test 1: Check service role availability
       console.log('1. Service Role Check:', {
@@ -648,32 +648,32 @@ const AdminVendorManagement: React.FC = () => {
         currentProfile: currentProfile?.id,
         currentRole: currentProfile?.role
       });
-      
+
       // Test 2: Check table access
       if (supabaseServiceRole && supabaseServiceRole !== supabase) {
         const { data: testData, error: testError } = await supabaseServiceRole
           .from('vendor_commission_overrides')
           .select('id')
           .limit(1);
-        
+
         console.log('2. Table Access Test:', {
           error: testError?.message,
           hasData: !!testData,
           dataLength: testData?.length
         });
-        
+
         // Test 3: Check categories
         const { data: categoriesData, error: categoriesError } = await supabase
           .from('categories')
           .select('id, name')
           .limit(5);
-        
+
         console.log('3. Categories Test:', {
           error: categoriesError?.message,
           count: categoriesData?.length,
           categories: categoriesData?.map(c => c.name)
         });
-        
+
         // Test 4: Test API function
         const apiResponse = await CommissionAPI.getVendorCommissionOverrides();
         console.log('4. API Test:', {
@@ -681,7 +681,7 @@ const AdminVendorManagement: React.FC = () => {
           error: apiResponse.error,
           dataCount: apiResponse.data?.length
         });
-        
+
         // Test 5: Check form data
         console.log('5. Form Data Check:', {
           categoriesLoaded: categories.length,
@@ -689,9 +689,9 @@ const AdminVendorManagement: React.FC = () => {
           smartphoneModelsLoaded: smartphoneModels.length,
           commissionRulesLoaded: commissionRules.length
         });
-        
+
         const allTestsPassed = !testError && !categoriesError && apiResponse.success;
-        
+
         toast({
           title: allTestsPassed ? "✅ Debug Complete - All Tests Passed!" : "⚠️ Debug Complete - Some Issues Found",
           description: `Check console for detailed test results. ${allTestsPassed ? 'Commission overrides should work correctly.' : 'There may be configuration issues.'}`,
@@ -732,7 +732,7 @@ const AdminVendorManagement: React.FC = () => {
         </div>
         <div className="flex gap-2">
           {process.env.NODE_ENV === 'development' && (
-            <Button 
+            <Button
               onClick={testCommissionOverrides}
               variant="outline"
               className="bg-yellow-50 border-yellow-200 text-yellow-800 hover:bg-yellow-100"
@@ -740,7 +740,7 @@ const AdminVendorManagement: React.FC = () => {
               🧪 Debug Commission
             </Button>
           )}
-          <Button onClick={() => navigate('/admin')} variant="outline">
+          <Button onClick={() => navigate('/admin-dashboard')} variant="outline">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Dashboard
           </Button>
@@ -797,7 +797,7 @@ const AdminVendorManagement: React.FC = () => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {vendors.length > 0 
+              {vendors.length > 0
                 ? (vendors.reduce((sum, v) => sum + (v.rating || 0), 0) / vendors.length).toFixed(1)
                 : '0.0'
               }
@@ -873,7 +873,7 @@ const AdminVendorManagement: React.FC = () => {
                       </Badge>
                     </div>
                   </div>
-                  
+
                   <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
                       <span className="text-gray-500">Total Sales:</span>
@@ -897,7 +897,7 @@ const AdminVendorManagement: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                
+
                 <div className="flex items-center space-x-2">
                   <Button
                     variant="outline"
@@ -907,7 +907,7 @@ const AdminVendorManagement: React.FC = () => {
                     <Eye className="h-4 w-4 mr-1" />
                     View
                   </Button>
-                  
+
                   {!vendor.is_verified && (
                     <Button
                       variant="default"
@@ -918,7 +918,7 @@ const AdminVendorManagement: React.FC = () => {
                       Approve
                     </Button>
                   )}
-                  
+
                   {!vendor.is_verified && (
                     <Button
                       variant="destructive"
@@ -929,7 +929,7 @@ const AdminVendorManagement: React.FC = () => {
                       Reject
                     </Button>
                   )}
-                  
+
                   {vendor.is_verified && (
                     <Button
                       variant={vendor.is_active ? "destructive" : "default"}
@@ -984,7 +984,7 @@ const AdminVendorManagement: React.FC = () => {
                     <div className="font-medium">{selectedVendor.profile?.full_name || 'Not provided'}</div>
                   </div>
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Email</Label>
@@ -1088,10 +1088,10 @@ const AdminVendorManagement: React.FC = () => {
                     </AlertDescription>
                   </Alert>
                 )}
-                
+
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-semibold">Commission Overrides</h3>
-                  <Button 
+                  <Button
                     onClick={() => setShowCommissionDialog(true)}
                     disabled={!supabaseServiceRole || supabaseServiceRole === supabase}
                   >
@@ -1112,7 +1112,7 @@ const AdminVendorManagement: React.FC = () => {
                         <p className="text-xs text-gray-500">Min: ₹{override.minimum_commission} {override.maximum_commission ? `Max: ₹${override.maximum_commission}` : ''}</p>
                         {override.reason && <p className="text-xs text-gray-500">Reason: {override.reason}</p>}
                       </div>
-                      <Button 
+                      <Button
                         variant="destructive"
                         size="sm"
                         onClick={() => handleDeleteOverride(override.id)}
@@ -1124,7 +1124,7 @@ const AdminVendorManagement: React.FC = () => {
                   ))}
                   {vendorOverrides.length === 0 && (
                     <div className="text-center py-4 text-gray-500">
-                      {(!supabaseServiceRole || supabaseServiceRole === supabase) 
+                      {(!supabaseServiceRole || supabaseServiceRole === supabase)
                         ? 'Commission overrides require admin privileges'
                         : 'No commission overrides set'
                       }

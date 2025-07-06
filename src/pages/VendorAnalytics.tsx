@@ -14,7 +14,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import { TryodoAPI, TransactionAPI, WalletAPI, AnalyticsAPI } from '@/lib/api';
+import { TryodoAPI, TransactionAPI, AnalyticsAPI } from '@/lib/api';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts';
 
 interface Analytics {
@@ -103,14 +103,11 @@ const VendorAnalytics = () => {
   const loadFinancialData = async (vendorId: string) => {
     setLoadingFinancials(true);
     try {
-      const [walletResponse, transactionsResponse] = await Promise.all([
-        WalletAPI.getVendorWallet(vendorId),
-        TransactionAPI.getTransactions({ vendorId })
-      ]);
+          const [transactionsResponse] = await Promise.all([
+      TransactionAPI.getTransactions({ vendorId })
+    ]);
 
-      if (walletResponse.success) {
-        setWallet(walletResponse.data);
-      }
+    // Wallet functionality removed
 
       if (transactionsResponse.success) {
         setTransactions(transactionsResponse.data || []);
@@ -125,16 +122,19 @@ const VendorAnalytics = () => {
   const loadEnhancedAnalytics = async (vendorId: string) => {
     setLoadingChartData(true);
     try {
-      const [transactionsResponse] = await Promise.all([
-        TransactionAPI.getTransactions({ vendorId })
-      ]);
-
-      if (transactionsResponse.success) {
-        const transactions = transactionsResponse.data || [];
-        const monthlyData = processMonthlyEarnings(transactions);
-        setMonthlyEarnings(monthlyData);
+      // Re-use transactions already loaded via loadFinancialData to avoid extra network call
+      let tx = transactions;
+      if (!tx.length) {
+        const transactionsResponse = await TransactionAPI.getTransactions({ vendorId });
+        if (transactionsResponse.success) {
+          tx = transactionsResponse.data || [];
+          setTransactions(tx); // keep global state in sync
+        }
       }
 
+      const monthlyData = processMonthlyEarnings(tx);
+      setMonthlyEarnings(monthlyData);
+      
       // Load order items with category information for breakdown
       const { data: orderItems } = await supabase
         .from('order_items')
@@ -332,7 +332,7 @@ const VendorAnalytics = () => {
           </TabsList>
 
           <TabsContent value="earnings" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <Card className="bg-gradient-to-br from-green-50 to-emerald-100 border-green-200">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium text-green-800">Available Balance</CardTitle>
@@ -371,21 +371,6 @@ const VendorAnalytics = () => {
                   <p className="text-xs text-purple-600 mt-1">All time earnings</p>
                 </CardContent>
               </Card>
-
-              <Card className="bg-gradient-to-br from-orange-50 to-red-100 border-orange-200">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium text-orange-800">Commission Paid</CardTitle>
-                  <AlertTriangle className="h-4 w-4 text-orange-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-orange-700">
-                    ₹{wallet?.total_commission_paid?.toLocaleString('en-IN') || '0'}
-                  </div>
-                  <p className="text-xs text-orange-600 mt-1">
-                    Avg: {wallet?.average_commission_rate?.toFixed(1) || '0'}%
-                  </p>
-                </CardContent>
-              </Card>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -418,7 +403,7 @@ const VendorAnalytics = () => {
                     <div className="flex justify-between items-center">
                       <span className="text-sm font-medium">Net Earnings</span>
                       <span className="text-lg font-bold text-green-700">
-                        ₹{((wallet?.total_earned || 0) - (wallet?.total_commission_paid || 0)).toLocaleString('en-IN')}
+                        ₹{(wallet?.total_earned || 0).toLocaleString('en-IN')}
                       </span>
                     </div>
                   </div>
@@ -448,10 +433,9 @@ const VendorAnalytics = () => {
                           <div className="text-right">
                             <p className={`font-medium ${
                               transaction.transaction_type === 'vendor_earning' ? 'text-green-600' : 
-                              transaction.transaction_type === 'commission_deduction' ? 'text-red-600' : 
                               'text-gray-600'
                             }`}>
-                              {transaction.transaction_type === 'commission_deduction' ? '-' : '+'}
+                              {transaction.transaction_type === 'vendor_earning' ? '+' : '-'}
                               ₹{transaction.net_amount?.toLocaleString('en-IN')}
                             </p>
                             <p className="text-xs text-gray-500 capitalize">
@@ -534,7 +518,7 @@ const VendorAnalytics = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">₹{analytics?.net_earnings.toLocaleString()}</div>
-                  <p className="text-xs text-muted-foreground">After {analytics?.total_commission.toLocaleString()} commission</p>
+                  <p className="text-xs text-muted-foreground">Overall profit</p>
                 </CardContent>
               </Card>
               <Card>

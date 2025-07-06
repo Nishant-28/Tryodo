@@ -13,6 +13,7 @@ import Header from '@/components/Header';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { useCart } from '@/contexts/CartContext';
+import { useLocation } from 'react-router-dom';
 
 // Types
 interface Category {
@@ -405,7 +406,7 @@ const Order = () => {
   const [sortBy, setSortBy] = useState<'price' | 'rating' | 'reviews'>('price');
   const [filterStock, setFilterStock] = useState<'all' | 'in-stock'>('all');
   
-
+  const location = useLocation();
 
   // Reset search term on step change to avoid filtering issues between steps
   useEffect(() => {
@@ -414,8 +415,63 @@ const Order = () => {
 
   // Load initial data
   useEffect(() => {
-    loadCategories();
-  }, []);
+    const queryParams = new URLSearchParams(location.search);
+    const initialCategoryName = queryParams.get('category');
+    const scrollToSection = queryParams.get('scrollTo');
+    console.log("URL Params - Category:", initialCategoryName, "ScrollTo:", scrollToSection);
+    
+    const initializeData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const fetchedCategories = await fetchCategories();
+        setCategories(fetchedCategories);
+        console.log("Fetched Categories:", fetchedCategories);
+
+        if (initialCategoryName) {
+          const foundCategory = fetchedCategories.find(
+            (cat) => cat.name.toLowerCase() === initialCategoryName.toLowerCase()
+          );
+          console.log("Found Category based on URL:", foundCategory);
+          if (foundCategory) {
+            setSelectedCategory(foundCategory);
+            console.log("Calling loadBrands with category ID:", foundCategory.id);
+            await loadBrands(foundCategory.id);
+          } else {
+            console.warn('Category not found from URL:', initialCategoryName);
+          }
+        }
+      } catch (err) {
+        setError('Failed to load initial data. Please try again.');
+        console.error('Error loading initial data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initializeData();
+  }, [location.search]);
+
+  // Scroll to brands section if navigated directly
+  useEffect(() => {
+    const queryParams = new URLSearchParams(location.search);
+    const scrollToSection = queryParams.get('scrollTo');
+    console.log("Scroll Effect - Step:", step, "ScrollTo:", scrollToSection);
+
+    if (step === 'brands' && scrollToSection === 'brands') {
+      // Use a timeout to ensure the element is rendered before scrolling
+      const timer = setTimeout(() => {
+        const element = document.getElementById('brands-section');
+        console.log("Attempting to scroll to element:", element);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+          console.warn("Element #brands-section not found for scrolling.");
+        }
+      }, 500); // Increased timeout to 500ms for more stability
+      return () => clearTimeout(timer);
+    }
+  }, [step, location.search]);
 
   const loadCategories = async () => {
     setLoading(true);
@@ -1130,7 +1186,9 @@ const Order = () => {
         {renderSearchAndFilters()}
 
         {/* Main Content */}
-        {renderStepContent()}
+        <div id="brands-section">
+          {renderStepContent()}
+        </div>
       </main>
 
       {/* <Footer /> */} {/* Commented out Footer component */}

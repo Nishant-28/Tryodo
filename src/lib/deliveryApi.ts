@@ -168,10 +168,7 @@ export interface DeliveryStats {
   stats_date?: string;
   created_at?: string;
   updated_at?: string;
-  // Wallet balance fields from delivery_partner_wallets table
-  available_balance?: number;
-  pending_balance?: number;
-  total_paid_out?: number;
+  // Wallet functionality removed
 }
 
 export interface VendorPickupInfo {
@@ -264,11 +261,17 @@ export interface OrderDelivery {
   updated_at: string;
 }
 
-export interface DeliveryZone {
+export interface DeliveryPartnerSectorAssignment {
   id: string;
-  name: string;
-  pincodes: string[];
+  delivery_partner_id: string;
+  sector_id: string;
+  slot_id: string;
+  assigned_date: string;
   is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  sector?: Sector;
+  delivery_slot?: DeliverySlot;
 }
 
 export interface DeliveryPartnerDocument {
@@ -357,9 +360,9 @@ export class DeliveryAPI {
       // Fetch full vendor addresses
       const { data: vendorAddresses, error: vendorAddressError } = await supabase
         .from('vendor_addresses')
-        .select('*')
+        .select('id,vendor_id,company_name,pincode,address_box,phone_number1,phone_number2,phone_number3,phone_number4,phone_number5')
         .in('vendor_id', vendorIds);
-      
+
       if (vendorAddressError) throw vendorAddressError;
 
       const customerAddressMap = new Map(customerAddresses?.map(addr => [addr.id, addr]));
@@ -481,9 +484,9 @@ export class DeliveryAPI {
       // Fetch full vendor addresses
       const { data: vendorAddresses, error: vendorAddressError } = await supabase
         .from('vendor_addresses')
-        .select('*')
+        .select('id,vendor_id,company_name,pincode,address_box,phone_number1,phone_number2,phone_number3,phone_number4,phone_number5')
         .in('vendor_id', vendorIds);
-      
+
       if (vendorAddressError) throw vendorAddressError;
 
       const customerAddressMap = new Map(customerAddresses?.map(addr => [addr.id, addr]));
@@ -606,7 +609,7 @@ export class DeliveryAPI {
       if (vendorIds.length > 0) {
         const { data: vendorAddrData, error: vendorAddrError } = await supabase
           .from('vendor_addresses')
-          .select('*')
+          .select('id,vendor_id,company_name,pincode,address_box,phone_number1,phone_number2,phone_number3,phone_number4,phone_number5')
           .in('vendor_id', vendorIds);
         if (vendorAddrError) console.error('Error fetching vendor addresses:', vendorAddrError.message);
         vendorFullAddresses = vendorAddrData || [];
@@ -712,6 +715,15 @@ export class DeliveryAPI {
 
       if (updateOrderError) throw updateOrderError;
 
+      // Ensure pickup records exist for all vendors in this order
+      const pickupResult = await this.ensureOrderPickupRecords(orderId, deliveryPartnerId);
+      if (!pickupResult.success) {
+        console.warn('⚠️ Could not create pickup records for order:', orderId, pickupResult.error);
+        // Don't fail the order assignment, but log the issue
+      } else {
+        console.log('✅ Created pickup records for order:', orderId);
+      }
+
       return { success: true, data, message: 'Order accepted and assigned successfully' };
     } catch (error: any) {
       console.error('Error accepting order:', error.message);
@@ -723,34 +735,39 @@ export class DeliveryAPI {
    * Mark an order as picked up by the delivery partner
    */
   static async markPickedUp(
-    orderId: string, 
+    orderId: string,
     deliveryPartnerId: string
   ): Promise<ApiResponse<any>> {
     try {
-      const { data, error } = await supabase
+      // Start a transaction
+      const { data: currentStatus, error: statusError } = await supabase
         .from('delivery_partner_orders')
-        .update({ 
-          status: 'picked_up',
-          picked_up_at: new Date().toISOString() 
-        })
+        .select('status')
         .eq('order_id', orderId)
-        .eq('delivery_partner_id', deliveryPartnerId);
+        .eq('delivery_partner_id', deliveryPartnerId)
+        .single();
+
+      if (statusError) throw statusError;
+
+      // Validate status transition
+      if (currentStatus?.status !== 'assigned' && currentStatus?.status !== 'accepted') {
+        return { 
+          success: false, 
+          error: `Invalid status transition. Current status: ${currentStatus?.status}` 
+        };
+      }
+
+      const { data, error } = await supabase.rpc('mark_order_picked_up', {
+        p_order_id: orderId,
+        p_delivery_partner_id: deliveryPartnerId,
+        p_pickup_time: new Date().toISOString()
+      });
 
       if (error) throw error;
-      
-      // Also update the main order status
-      const { error: orderError } = await supabase
-        .from('orders')
-        .update({ 
-          order_status: 'out_for_delivery',
-          picked_up_date: new Date().toISOString(),
-        })
-        .eq('id', orderId);
-        
-      if (orderError) throw orderError;
 
       return { success: true, data };
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error in markPickedUp:', error);
       return { success: false, error: error.message };
     }
   }
@@ -763,32 +780,131 @@ export class DeliveryAPI {
     deliveryPartnerId: string
   ): Promise<ApiResponse<any>> {
     try {
-      console.log('🚚 markDelivered: Starting delivery process for order:', orderId);
+      // Start a transaction using a Postgres function or direct queries if functions are not feasible
+      // For simplicity, we'll chain queries. In a real-world scenario, consider a stored procedure for atomicity.
+      
+      const deliveredAt = new Date().toISOString();
 
-      // Call the Edge Function which has service role permissions
-      const { data, error } = await supabase.functions.invoke('mark-delivered', {
-        body: {
-          orderId,
-          deliveryPartnerId
+      // 1. Update delivery_partner_orders table
+      const { error: dpOrderError } = await supabaseServiceRole
+        .from('delivery_partner_orders')
+        .update({
+          status: 'delivered',
+          delivered_at: deliveredAt
+          // Note: delivery_partner_orders does not have a separate delivery_status column.
+        })
+        .eq('order_id', orderId)
+        .eq('delivery_partner_id', deliveryPartnerId);
+
+      if (dpOrderError) throw dpOrderError;
+
+      // 2. Update order_items table: set item_status to 'delivered'
+      const { error: orderItemsError } = await supabaseServiceRole
+        .from('order_items')
+        .update({ item_status: 'delivered' })
+        .eq('order_id', orderId);
+
+      if (orderItemsError) throw orderItemsError;
+
+      // 3. Update orders table: set order_status to 'delivered' and actual_delivery_date
+      const { error: ordersError } = await supabaseServiceRole
+        .from('orders')
+        .update({
+          order_status: 'delivered',
+          actual_delivery_date: deliveredAt
+        })
+        .eq('id', orderId);
+
+      if (ordersError) throw ordersError;
+
+      // 4. Update order_deliveries record (created earlier) to mark as delivered
+      const { error: deliveryRecError } = await supabaseServiceRole
+        .from('order_deliveries')
+        .update({
+          delivery_status: 'delivered',
+          delivery_time: deliveredAt
+        })
+        .eq('order_id', orderId)
+        .eq('delivery_partner_id', deliveryPartnerId);
+
+      if (deliveryRecError) throw deliveryRecError;
+
+      // FIXED: Update the delivery assignment status if all orders in the slot are delivered
+      // Check both delivery_assignments and delivery_partner_sector_assignments for slot completion
+
+      // First, get the specific slot_id for this order
+      const { data: orderData, error: orderError } = await supabase
+        .from('orders')
+        .select('slot_id, delivery_date, sector_id')
+        .eq('id', orderId)
+        .single();
+
+      if (orderError) {
+        console.warn("Could not find order details for slot completion check:", orderError);
+      } else if (orderData?.slot_id) {
+        console.log(`🔍 Checking slot completion for slot ${orderData.slot_id} on ${orderData.delivery_date}`);
+
+        // Check if all orders in this specific slot are delivered
+        const { data: pendingOrdersInSlot, error: pendingOrdersError } = await supabase
+          .from('delivery_partner_orders')
+          .select(`
+            id,
+            order_id,
+            status,
+            orders!inner(slot_id, delivery_date)
+          `)
+          .eq('delivery_partner_id', deliveryPartnerId)
+          .eq('orders.slot_id', orderData.slot_id)
+          .eq('orders.delivery_date', orderData.delivery_date)
+          .neq('status', 'delivered');
+
+        if (pendingOrdersError) {
+          console.error("Error checking pending orders in slot:", pendingOrdersError);
+        } else {
+          const pendingCount = pendingOrdersInSlot?.length || 0;
+          console.log(`📊 Slot ${orderData.slot_id}: ${pendingCount} pending orders remaining`);
+
+          if (pendingCount === 0) {
+            console.log(`🎉 All orders in slot ${orderData.slot_id} are delivered! Marking slot as completed.`);
+
+            // Mark delivery_assignments as completed
+            const { error: assignmentUpdateError } = await supabaseServiceRole
+              .from('delivery_assignments')
+              .update({ status: 'completed' })
+              .eq('slot_id', orderData.slot_id)
+              .eq('delivery_partner_id', deliveryPartnerId)
+              .eq('assigned_date', orderData.delivery_date);
+
+            if (assignmentUpdateError) {
+              console.error("Error updating delivery assignment status to completed:", assignmentUpdateError);
+            } else {
+              console.log("✅ Updated delivery_assignments status to completed");
+            }
+
+            // Also mark delivery_partner_sector_assignments as completed
+            const { error: sectorAssignmentUpdateError } = await supabaseServiceRole
+              .from('delivery_partner_sector_assignments')
+              .update({ is_active: false })
+              .eq('slot_id', orderData.slot_id)
+              .eq('delivery_partner_id', deliveryPartnerId)
+              .eq('assigned_date', orderData.delivery_date);
+
+            if (sectorAssignmentUpdateError) {
+              console.error("Error updating sector assignment status:", sectorAssignmentUpdateError);
+            } else {
+              console.log("✅ Updated delivery_partner_sector_assignments to inactive");
+            }
+          } else {
+            console.log(`ℹ️ Slot ${orderData.slot_id} still has ${pendingCount} pending orders`);
+          }
         }
-      });
-
-      if (error) {
-        console.error('❌ markDelivered: Edge function error:', error);
-        throw error;
       }
+      
 
-      if (!data.success) {
-        console.error('❌ markDelivered: Edge function returned error:', data.error);
-        throw new Error(data.error);
-      }
-
-      console.log('✅ markDelivered: Order marked as delivered successfully');
-      return { success: true, data: data, message: 'Order marked as delivered successfully' };
-
+      return { success: true, data: { message: 'Order marked as delivered and related statuses updated.' } };
     } catch (error) {
-      console.error('💥 markDelivered: Final error:', error);
-      return { success: false, error: error.message || 'Failed to mark order as delivered' };
+      console.error('Error in markDelivered transaction:', error);
+      return { success: false, error: error.message || 'An unknown error occurred during delivery marking.' };
     }
   }
 
@@ -802,23 +918,10 @@ export class DeliveryAPI {
         .select(`*`)
         .eq('delivery_partner_id', deliveryPartnerId)
         .single();
-      
+
       if (statsError) throw statsError;
 
-      const { data: walletData, error: walletError } = await supabase
-        .from('delivery_partner_wallets')
-        .select(`
-            available_balance,
-            pending_balance,
-            total_paid_out
-        `)
-        .eq('delivery_partner_id', deliveryPartnerId)
-        .maybeSingle();
-
-      if (walletError) {
-        // We can choose to return stats without wallet info if it's non-critical
-        console.warn('Could not fetch wallet info:', walletError.message);
-      }
+      // Wallet functionality removed
 
       const stats: DeliveryStats = {
         delivery_partner_id: statsData.delivery_partner_id,
@@ -839,9 +942,7 @@ export class DeliveryAPI {
         stats_date: statsData.stats_date,
         created_at: statsData.created_at,
         updated_at: statsData.updated_at,
-        available_balance: walletData?.available_balance || 0,
-        pending_balance: walletData?.pending_balance || 0,
-        total_paid_out: walletData?.total_paid_out || 0,
+        // Wallet fields removed
       };
 
       return { success: true, data: stats, message: 'Delivery stats retrieved successfully' };
@@ -855,8 +956,8 @@ export class DeliveryAPI {
    * Update delivery partner location
    */
   static async updateLocation(
-    deliveryPartnerId: string, 
-    latitude: number, 
+    deliveryPartnerId: string,
+    latitude: number,
     longitude: number
   ): Promise<ApiResponse<any>> {
     try {
@@ -884,7 +985,7 @@ export class DeliveryAPI {
       const { data, error } = await supabase
         .rpc('generate_otp', { p_order_id: orderId, p_otp_type: type })
         .single();
-      
+
       if (error) throw error;
 
       return { success: true, data: data as string, message: 'OTP generated successfully' };
@@ -898,15 +999,15 @@ export class DeliveryAPI {
    * Verify OTP for pickup or delivery
    */
   static async verifyOTP(
-    orderId: string, 
-    otp: string, 
+    orderId: string,
+    otp: string,
     type: 'pickup' | 'delivery'
   ): Promise<ApiResponse<boolean>> {
     try {
       const { data, error } = await supabase
         .rpc('verify_otp', { p_order_id: orderId, p_otp_type: type, p_otp_code: otp })
         .single();
-      
+
       if (error) throw error;
 
       return { success: true, data: data as boolean, message: 'OTP verified successfully' };
@@ -943,7 +1044,7 @@ export class DeliveryAPI {
    * Update delivery partner availability status
    */
   static async updateAvailabilityStatus(
-    deliveryPartnerId: string, 
+    deliveryPartnerId: string,
     isAvailable: boolean
   ): Promise<ApiResponse<any>> {
     try {
@@ -1026,13 +1127,13 @@ export class DeliveryAPI {
 
       const totalEarnings = data.reduce((sum, entry) => sum + entry.amount, 0);
 
-      return { 
-        success: true, 
-        data: { 
-          earnings: data, 
-          total: totalEarnings 
-        }, 
-        message: 'Earnings retrieved successfully' 
+      return {
+        success: true,
+        data: {
+          earnings: data,
+          total: totalEarnings
+        },
+        message: 'Earnings retrieved successfully'
       };
     } catch (error: any) {
       console.error('Error fetching earnings:', error.message);
@@ -1192,9 +1293,9 @@ export class DeliveryAPI {
 
       const { data: vendorAddresses, error: vendorAddressError } = await supabase
         .from('vendor_addresses')
-        .select('*')
+        .select('id,vendor_id,company_name,pincode,address_box,phone_number1,phone_number2,phone_number3,phone_number4,phone_number5')
         .in('vendor_id', vendorIds);
-      
+
       if (vendorAddressError) throw vendorAddressError;
 
       const customerAddressMap = new Map(customerAddresses?.map(addr => [addr.id, addr]));
@@ -1292,9 +1393,9 @@ export class DeliveryAPI {
       const vendorIds = Array.from(vendorsMap.keys());
       const { data: vendorAddresses, error: vendorAddressError } = await supabase
         .from('vendor_addresses')
-        .select('*')
+        .select('id,vendor_id,company_name,pincode,address_box,phone_number1,phone_number2,phone_number3,phone_number4,phone_number5')
         .in('vendor_id', vendorIds);
-      
+
       if (vendorAddressError) console.error('Error fetching vendor addresses for OTP generation:', vendorAddressError.message);
       const vendorAddressMap = new Map(vendorAddresses?.map(addr => [addr.vendor_id, addr]));
 
@@ -1417,9 +1518,9 @@ export class DeliveryAPI {
       const vendorIds = Array.from(vendorsMap.keys());
       const { data: vendorAddresses, error: vendorAddressError } = await supabase
         .from('vendor_addresses')
-        .select('*')
+        .select('id,vendor_id,company_name,pincode,address_box,phone_number1,phone_number2,phone_number3,phone_number4,phone_number5')
         .in('vendor_id', vendorIds);
-      
+
       if (vendorAddressError) console.error('Error fetching vendor addresses for pickup status:', vendorAddressError.message);
       const vendorAddressMap = new Map(vendorAddresses?.map(addr => [addr.vendor_id, addr]));
 
@@ -1539,9 +1640,9 @@ export class DeliveryAPI {
 
       const { data: vendorAddresses, error: vendorAddressError } = await supabase
         .from('vendor_addresses')
-        .select('*')
+        .select('id,vendor_id,company_name,pincode,address_box,phone_number1,phone_number2,phone_number3,phone_number4,phone_number5')
         .in('vendor_id', allVendorIds);
-      
+
       if (vendorAddressError) throw vendorAddressError;
 
       const customerAddressMap = new Map(customerAddresses?.map(addr => [addr.id, addr]));
@@ -1555,7 +1656,7 @@ export class DeliveryAPI {
         const customerProfile = customer?.profiles?.[0];
 
         const customerAddress = order.delivery_address_id ? customerAddressMap.get(order.delivery_address_id) : undefined;
-        
+
         const vendorsMap = new Map<string, { vendor: VendorSelectResult, items: OrderItemSelectResult[] }>();
         order.order_items.forEach(item => {
           const vendor = item.vendors?.[0];
@@ -1687,15 +1788,15 @@ export class DeliveryAPI {
       const totalDigitalCollected = data.filter(item => item.payment_method !== 'cash').reduce((sum, item) => sum + item.amount_collected, 0);
       const totalCollected = totalCashCollected + totalDigitalCollected;
 
-      return { 
-        success: true, 
-        data: { 
-          totalCashCollected, 
-          totalDigitalCollected, 
-          totalCollected, 
-          collections: data 
-        }, 
-        message: 'Daily collection summary retrieved successfully.' 
+      return {
+        success: true,
+        data: {
+          totalCashCollected,
+          totalDigitalCollected,
+          totalCollected,
+          collections: data
+        },
+        message: 'Daily collection summary retrieved successfully.'
       };
     } catch (error: any) {
       console.error('Error fetching daily collection summary:', error.message);
@@ -1739,21 +1840,65 @@ export class DeliveryAPI {
     assignedDate: string,
     sectorId: string
   ): Promise<{ success: boolean; error?: any }> {
+    try {
+      console.log('🎯 Creating slot assignment:', { deliveryPartnerId, slotId, assignedDate, sectorId });
+
     // 1. insert into delivery_assignments
     const { data: assignment, error: assignError } = await supabase
       .from('delivery_assignments')
       .insert([{ delivery_partner_id: deliveryPartnerId, slot_id: slotId, assigned_date: assignedDate, sector_id: sectorId }])
+        .select()
       .single();
-    if (assignError) return { success: false, error: assignError };
-  
+      
+      if (assignError) {
+        console.error('❌ Error creating delivery assignment:', assignError);
+        return { success: false, error: assignError };
+      }
+
+      console.log('✅ Created delivery assignment:', assignment.id);
+
     // 2. update orders so future reads will pick them up
     const { error: updateError } = await supabase
       .from('orders')
       .update({ slot_id: slotId })
       .eq('delivery_date', assignedDate)
       .eq('sector_id', sectorId);
-  
-    return { success: !updateError, error: updateError };
+
+      if (updateError) {
+        console.error('❌ Error updating orders with slot_id:', updateError);
+        return { success: false, error: updateError };
+      }
+
+      // 3. Get all orders for this slot and create pickup records
+      const { data: orders, error: ordersError } = await supabase
+        .from('orders')
+        .select('id')
+        .eq('slot_id', slotId)
+        .eq('delivery_date', assignedDate);
+
+      if (ordersError) {
+        console.error('❌ Error fetching orders for slot:', ordersError);
+        // Don't fail the assignment if we can't create pickup records
+      } else if (orders && orders.length > 0) {
+        console.log(`🔧 Creating pickup records for ${orders.length} orders in slot`);
+        
+        // Create pickup records for each order
+        let totalPickupRecords = 0;
+        for (const order of orders) {
+          const pickupResult = await this.ensureOrderPickupRecords(order.id, deliveryPartnerId);
+          if (pickupResult.success && pickupResult.data?.created) {
+            totalPickupRecords += pickupResult.data.created;
+          }
+        }
+        
+        console.log(`✅ Created ${totalPickupRecords} pickup records for slot assignment`);
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('💥 Error in createSlotAssignment:', error);
+      return { success: false, error };
+    }
   }
 
   // Partner Management
@@ -1835,51 +1980,128 @@ export class DeliveryAPI {
     }
   }
 
-  // Zone Management
-  static async createDeliveryZone(zoneData: Partial<DeliveryZone>) {
+  // Sector Assignment Management
+  static async createSectorAssignment(assignmentData: Partial<DeliveryPartnerSectorAssignment>) {
     try {
       const { data, error } = await supabase
-        .from('delivery_zones')
-        .insert(zoneData)
-        .select()
+        .from('delivery_partner_sector_assignments')
+        .insert(assignmentData)
+        .select(`
+          *,
+          sector:sectors(*),
+          delivery_slot:delivery_slots(*)
+        `)
         .single();
 
       if (error) throw error;
       return { success: true, data };
     } catch (error) {
-      console.error('Error creating delivery zone:', error);
+      console.error('Error creating sector assignment:', error);
       return { success: false, error };
     }
   }
 
-  static async updateDeliveryZone(zoneId: string, updates: Partial<DeliveryZone>) {
+  static async updateSectorAssignment(assignmentId: string, updates: Partial<DeliveryPartnerSectorAssignment>) {
     try {
       const { data, error } = await supabase
-        .from('delivery_zones')
+        .from('delivery_partner_sector_assignments')
         .update(updates)
-        .eq('id', zoneId)
-        .select()
+        .eq('id', assignmentId)
+        .select(`
+          *,
+          sector:sectors(*),
+          delivery_slot:delivery_slots(*)
+        `)
         .single();
 
       if (error) throw error;
       return { success: true, data };
     } catch (error) {
-      console.error('Error updating delivery zone:', error);
+      console.error('Error updating sector assignment:', error);
       return { success: false, error };
     }
   }
 
-  static async getAllDeliveryZones() {
+  static async getDeliveryPartnerSectorAssignments(partnerId: string, assignedDate?: string) {
     try {
-      const { data, error } = await supabase
-        .from('delivery_zones')
-        .select('*')
-        .order('name', { ascending: true });
+      let query = supabase
+        .from('delivery_partner_sector_assignments')
+        .select(`
+          *,
+          sector:sectors(*),
+          delivery_slot:delivery_slots(*)
+        `)
+        .eq('delivery_partner_id', partnerId)
+        .eq('is_active', true);
+
+      if (assignedDate) {
+        query = query.eq('assigned_date', assignedDate);
+      }
+
+      const { data, error } = await query.order('assigned_date', { ascending: false });
 
       if (error) throw error;
       return { success: true, data };
     } catch (error) {
-      console.error('Error fetching delivery zones:', error);
+      console.error('Error fetching sector assignments:', error);
+      return { success: false, error };
+    }
+  }
+
+  static async assignSectorToPartner(partnerId: string, sectorId: string, slotIds: string[], assignedDate: string) {
+    try {
+      const assignments = slotIds.map(slotId => ({
+        delivery_partner_id: partnerId,
+        sector_id: sectorId,
+        slot_id: slotId,
+        assigned_date: assignedDate,
+        is_active: true
+      }));
+
+      const { data, error } = await supabase
+        .from('delivery_partner_sector_assignments')
+        .insert(assignments)
+        .select(`
+          *,
+          sector:sectors(*),
+          delivery_slot:delivery_slots(*)
+        `);
+
+      if (error) throw error;
+
+      // Update delivery partner's assigned_pincodes
+      const { data: sectorData } = await supabase
+        .from('sectors')
+        .select('pincodes')
+        .eq('id', sectorId)
+        .single();
+
+      if (sectorData) {
+        const pincodes = sectorData.pincodes.map(p => p.toString());
+        await supabase
+          .from('delivery_partners')
+          .update({ assigned_pincodes: pincodes })
+          .eq('id', partnerId);
+      }
+
+      return { success: true, data };
+    } catch (error) {
+      console.error('Error assigning sector to partner:', error);
+      return { success: false, error };
+    }
+  }
+
+  static async deleteSectorAssignment(assignmentId: string) {
+    try {
+      const { error } = await supabase
+        .from('delivery_partner_sector_assignments')
+        .delete()
+        .eq('id', assignmentId);
+
+      if (error) throw error;
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting sector assignment:', error);
       return { success: false, error };
     }
   }
@@ -1925,22 +2147,7 @@ export class DeliveryAPI {
     }
   }
 
-  // Order Management
-  static async getMyOrders(partnerId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('delivery_partner_id', partnerId)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      return { success: true, data };
-    } catch (error) {
-      console.error('Error fetching partner orders:', error);
-      return { success: false, error };
-    }
-  }
+  // Order Management - Removed duplicate getMyOrders method
 
   static async updateOrderStatus(orderId: string, status: string, additionalData = {}) {
     try {
@@ -2144,8 +2351,117 @@ export class DeliveryAPI {
     deliveryPartnerId: string
   ): Promise<ApiResponse<any>> {
     try {
+      console.log('🚚 Starting vendor pickup process:', { orderId, vendorId, deliveryPartnerId });
+
+      // First validate that this delivery partner is assigned to this order
+      const { data: assignment, error: assignmentError } = await supabase
+        .from('delivery_partner_orders')
+        .select('status')
+        .eq('order_id', orderId)
+        .eq('delivery_partner_id', deliveryPartnerId)
+        .maybeSingle();
+
+      if (assignmentError) {
+        console.error('❌ Error checking delivery partner assignment:', assignmentError);
+        throw assignmentError;
+      }
+
+      if (!assignment) {
+        console.error('❌ Delivery partner not assigned to this order');
+        return {
+          success: false,
+          error: 'Delivery partner is not assigned to this order',
+          data: null
+        };
+      }
+
+      // Allow pickup if the assignment is in one of the expected in-progress states.
+      // This fixes a bug where subsequent vendor pickups on a multi-vendor order
+      // fail once the first vendor has already transitioned the assignment to
+      // "picked_up".
+      if (!['assigned', 'accepted', 'picked_up'].includes(assignment.status)) {
+        console.error('❌ Invalid assignment status for pickup:', assignment.status);
+        return {
+          success: false,
+          error: `Cannot mark pickup when assignment status is: ${assignment.status}`,
+          data: null
+        };
+      }
+
+      // First ensure all pickup records exist for this order
+      const ensureResult = await this.ensureOrderPickupRecords(orderId, deliveryPartnerId);
+      if (!ensureResult.success) {
+        console.warn('⚠️ Could not ensure pickup records exist:', ensureResult.error);
+        // Continue anyway as we might still be able to update individual records
+      }
+
+      // First check if this pickup is already marked
+      const { data: existingPickup, error: checkError } = await supabase
+        .from('order_pickups')
+        .select('pickup_status')
+        .eq('order_id', orderId)
+        .eq('vendor_id', vendorId)
+        .eq('delivery_partner_id', deliveryPartnerId)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('❌ Error checking existing pickup:', checkError);
+        throw checkError;
+      }
+
+      if (existingPickup?.pickup_status === 'picked_up') {
+        console.log('⚠️ Vendor pickup already marked as picked up');
+        return {
+          success: true,
+          data: { alreadyPickedUp: true },
+          message: 'Vendor pickup was already marked as picked up'
+        };
+      }
+
+      // Validate that this vendor actually has items in this order
+      const { data: orderItems, error: itemsError } = await supabase
+        .from('order_items')
+        .select('id')
+        .eq('order_id', orderId)
+        .eq('vendor_id', vendorId)
+        .limit(1);
+
+      if (itemsError) {
+        console.error('❌ Error checking order items:', itemsError);
+        throw itemsError;
+      }
+
+      if (!orderItems || orderItems.length === 0) {
+        console.error('❌ No items found for this vendor in this order');
+        return {
+          success: false,
+          error: 'This vendor has no items in this order',
+          data: null
+        };
+      }
+
+      // If record doesn't exist, create it
+      if (!existingPickup) {
+        console.log('🔧 Creating missing pickup record for vendor:', vendorId);
+        const { error: createError } = await supabase
+          .from('order_pickups')
+          .insert({
+            order_id: orderId,
+            vendor_id: vendorId,
+            delivery_partner_id: deliveryPartnerId,
+            pickup_status: 'picked_up',
+            pickup_time: new Date().toISOString()
+          });
+
+        if (createError) {
+          console.error('❌ Error creating pickup record:', createError);
+          throw createError;
+        }
+        
+        console.log('✅ Created and marked vendor pickup as picked up:', vendorId);
+      } else {
       // Update the vendor specific pickup record
-      const { error } = await supabase
+      const { error: pickupError } = await supabase
         .from('order_pickups')
         .update({
           pickup_status: 'picked_up',
@@ -2155,43 +2471,884 @@ export class DeliveryAPI {
         .eq('vendor_id', vendorId)
         .eq('delivery_partner_id', deliveryPartnerId);
 
-      if (error) throw error;
+      if (pickupError) {
+        console.error('❌ Error updating order_pickups:', pickupError);
+        throw pickupError;
+      }
 
-      /*
-       * Once the current vendor has been marked as picked-up we should check if
-       * the remaining vendor pickups of the SAME order are also completed.
-       * Only after every vendor pickup is done do we mark the entire order and
-       * delivery_partner_orders record as picked-up. This preserves the per-
-       * vendor workflow while still allowing the rest of the system (customer
-       * deliveries, earnings, etc.) to rely on the aggregate order status.
-       */
+      console.log('✅ Updated pickup status for vendor:', vendorId);
+      }
+
+      // Check if all vendors for this order have been picked up
       const { data: pickups, error: pickupsError } = await supabase
         .from('order_pickups')
-        .select('pickup_status')
+        .select('pickup_status, vendor_id')
+        .eq('order_id', orderId);
+
+      if (pickupsError) {
+        console.error('❌ Error checking vendor pickups:', pickupsError);
+        throw pickupsError;
+      }
+
+      const totalVendors = pickups?.length ?? 0;
+      const pickedUpVendors = pickups?.filter(p => p.pickup_status === 'picked_up').length ?? 0;
+      const allPicked = totalVendors > 0 && pickedUpVendors === totalVendors;
+
+      console.log('📦 Vendor pickup status:', { 
+        allPicked, 
+        totalVendors,
+        pickedUpVendors,
+        remainingVendors: totalVendors - pickedUpVendors
+      });
+
+      if (allPicked) {
+        console.log('🎯 All vendors picked up, updating order status...');
+
+        // Update main order status
+        const { error: orderError } = await supabase
+          .from('orders')
+          .update({ 
+            order_status: 'picked_up',
+            picked_up_date: new Date().toISOString()
+          })
+          .eq('id', orderId);
+
+        if (orderError) {
+          console.error('❌ Error updating order status:', orderError);
+          throw orderError;
+        }
+
+        console.log('✅ Updated main order status to picked_up');
+
+        // Update delivery partner order status
+        const { error: dpOrderError } = await supabase
+          .from('delivery_partner_orders')
+          .update({ 
+            status: 'picked_up',
+            picked_up_at: new Date().toISOString()
+          })
+          .eq('order_id', orderId)
+          .eq('delivery_partner_id', deliveryPartnerId);
+
+        if (dpOrderError) {
+          console.error('❌ Error updating delivery_partner_orders:', dpOrderError);
+          throw dpOrderError;
+        }
+
+        console.log('✅ Updated delivery partner order status to picked_up');
+
+        // Create order_deliveries record for later use
+        const ensureResult = await this.ensureOrderDeliveryRecord(orderId, deliveryPartnerId);
+        if (!ensureResult.success) {
+          console.error('⚠️ Failed to create order_deliveries record:', ensureResult.error);
+          // Don't throw error as this is not critical
+        }
+      } else {
+        console.log(`ℹ️ Waiting for ${totalVendors - pickedUpVendors} more vendors to be picked up`);
+      }
+
+      return { 
+        success: true, 
+        data: { 
+          allVendorsPickedUp: allPicked,
+          totalVendors,
+          pickedUpVendors,
+          remainingVendors: totalVendors - pickedUpVendors
+        },
+        message: allPicked 
+          ? `All ${totalVendors} vendors picked up successfully` 
+          : `Picked up vendor ${vendorId}, ${totalVendors - pickedUpVendors} vendors remaining`
+      };
+    } catch (error: any) {
+      console.error('💥 Error in markVendorPickedUp:', error);
+      return { 
+        success: false, 
+        error: error.message || 'Failed to mark vendor pickup',
+        data: null
+      };
+    }
+  }
+
+  /**
+   * Ensure order pickup records exist for all vendors in an order
+   * This should be called when an order is assigned to a delivery partner
+   */
+  static async ensureOrderPickupRecords(
+    orderId: string, 
+    deliveryPartnerId: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      console.log('🔧 Ensuring pickup records exist for order:', orderId);
+
+      // Get all vendors for this order
+      const { data: orderItems, error: itemsError } = await supabase
+        .from('order_items')
+        .select('vendor_id')
+        .eq('order_id', orderId);
+
+      if (itemsError) {
+        console.error('❌ Error fetching order items:', itemsError);
+        throw itemsError;
+      }
+
+      if (!orderItems || orderItems.length === 0) {
+        console.log('⚠️ No order items found for order:', orderId);
+        return { 
+          success: false, 
+          error: 'No order items found for this order',
+          data: { created: 0, vendorIds: [] }
+        };
+      }
+
+      // Get unique vendor IDs
+      const vendorIds = [...new Set(orderItems.map(item => item.vendor_id))];
+      console.log('📋 Found vendors for order:', vendorIds);
+
+      // Check which pickup records already exist
+      const { data: existingPickups, error: pickupsError } = await supabase
+        .from('order_pickups')
+        .select('vendor_id')
+        .eq('order_id', orderId)
+        .eq('delivery_partner_id', deliveryPartnerId);
+
+      if (pickupsError) {
+        console.error('❌ Error checking existing pickups:', pickupsError);
+        throw pickupsError;
+      }
+
+      const existingVendorIds = new Set(existingPickups?.map(p => p.vendor_id) || []);
+      const missingVendorIds = vendorIds.filter(id => !existingVendorIds.has(id));
+
+      console.log('🔍 Missing pickup records for vendors:', missingVendorIds);
+
+      if (missingVendorIds.length === 0) {
+        console.log('✅ All pickup records already exist');
+        return { success: true, message: 'All pickup records already exist' };
+      }
+
+      // Create missing pickup records
+      const pickupRecords = missingVendorIds.map(vendorId => ({
+        order_id: orderId,
+        vendor_id: vendorId,
+        delivery_partner_id: deliveryPartnerId,
+        pickup_status: 'pending' as const,
+      }));
+
+      const { error: insertError } = await supabase
+        .from('order_pickups')
+        .insert(pickupRecords);
+
+      if (insertError) {
+        console.error('❌ Error creating pickup records:', insertError);
+        throw insertError;
+      }
+
+      console.log(`✅ Created ${missingVendorIds.length} missing pickup records`);
+      return { 
+        success: true, 
+        data: { 
+          created: missingVendorIds.length,
+          vendorIds: missingVendorIds 
+        },
+        message: `Created ${missingVendorIds.length} pickup records` 
+      };
+
+    } catch (error: any) {
+      console.error('💥 Error ensuring pickup records:', error);
+      return { 
+        success: false, 
+        error: error.message || 'Failed to ensure pickup records exist' 
+      };
+    }
+  }
+
+  // Auto-assignment system for delivery partners
+  static async autoAssignDeliveryPartners(
+    targetDate: string = new Date().toISOString().split('T')[0]
+  ): Promise<{ success: boolean; assignments: number; error?: any }> {
+    try {
+      console.log('🤖 Starting auto-assignment for date:', targetDate);
+
+      // Get all available delivery partners
+      const { data: availablePartners, error: partnersError } = await supabase
+        .from('delivery_partners')
+        .select(`
+          id,
+          profile_id,
+          is_available,
+          is_active,
+          is_verified,
+          vehicle_type,
+          assigned_pincodes,
+          profiles!inner(full_name, phone)
+        `)
+        .eq('is_available', true)
+        .eq('is_active', true)
+        .eq('is_verified', true);
+
+      if (partnersError) throw partnersError;
+
+      if (!availablePartners || availablePartners.length === 0) {
+        console.log('⚠️ No available delivery partners found');
+        return { success: true, assignments: 0 };
+      }
+
+      // Get all slots with orders that don't have assignments yet
+      const { data: slotsWithOrders, error: slotsError } = await supabase
+        .from('delivery_slots')
+        .select(`
+          id,
+          slot_name,
+          start_time,
+          end_time,
+          sector_id,
+          max_orders,
+          sectors!inner(
+            id,
+            name,
+            pincodes
+          ),
+          orders!inner(
+            id,
+            delivery_date,
+            order_status,
+            sector_id
+          )
+        `)
+        .eq('orders.delivery_date', targetDate)
+        .in('orders.order_status', ['pending', 'confirmed', 'preparing'])
+        .eq('is_active', true);
+
+      if (slotsError) throw slotsError;
+
+      if (!slotsWithOrders || slotsWithOrders.length === 0) {
+        console.log('📝 No slots with orders found for assignment');
+        return { success: true, assignments: 0 };
+      }
+
+      // Filter out slots that already have assignments
+      const slotsNeedingAssignment = [];
+      for (const slot of slotsWithOrders) {
+        const { data: existingAssignment } = await supabase
+          .from('delivery_assignments')
+          .select('id')
+          .eq('slot_id', slot.id)
+          .eq('assigned_date', targetDate)
+          .single();
+
+        if (!existingAssignment) {
+          // Count orders for this slot
+          const { count: orderCount } = await supabase
+            .from('orders')
+            .select('*', { count: 'exact', head: true })
+            .eq('slot_id', slot.id)
+            .eq('delivery_date', targetDate)
+            .in('order_status', ['pending', 'confirmed', 'preparing']);
+
+          if (orderCount && orderCount > 0) {
+            slotsNeedingAssignment.push({
+              ...slot,
+              order_count: orderCount
+            });
+          }
+        }
+      }
+
+      console.log('🎯 Slots needing assignment:', slotsNeedingAssignment.length);
+
+      let assignmentCount = 0;
+      const usedPartners = new Set<string>();
+
+      // Assign delivery partners to slots
+      for (const slot of slotsNeedingAssignment) {
+        // Find best delivery partner for this slot
+        const sector = slot.sectors;
+        const sectorPincodes = sector.pincodes || [];
+
+        // Find delivery partner that serves this area and is not already assigned
+        const availablePartner = availablePartners.find(partner => {
+          if (usedPartners.has(partner.id)) return false;
+
+          // Check if partner serves this area
+          const partnerPincodes = partner.assigned_pincodes || [];
+          if (partnerPincodes.length === 0) return true; // Partner serves all areas
+
+          // Check if there's overlap between sector pincodes and partner pincodes
+          return sectorPincodes.some(pincode =>
+            partnerPincodes.includes(String(pincode))
+          );
+        });
+
+        if (availablePartner) {
+          // Create assignment
+          const assignmentResult = await this.createSlotAssignment(
+            availablePartner.id,
+            slot.id,
+            targetDate,
+            slot.sector_id
+          );
+
+          if (assignmentResult.success) {
+            usedPartners.add(availablePartner.id);
+            assignmentCount++;
+            console.log(`✅ Assigned ${availablePartner.profiles.full_name} to ${slot.slot_name} (${slot.order_count} orders)`);
+          } else {
+            console.error(`❌ Failed to assign ${availablePartner.profiles.full_name} to ${slot.slot_name}:`, assignmentResult.error);
+          }
+        } else {
+          console.log(`⚠️ No available delivery partner found for slot ${slot.slot_name} in sector ${sector.name}`);
+        }
+      }
+
+      console.log(`🎉 Auto-assignment completed: ${assignmentCount} assignments created`);
+      return { success: true, assignments: assignmentCount };
+
+    } catch (error) {
+      console.error('💥 Error in auto-assignment:', error);
+      return { success: false, assignments: 0, error };
+    }
+  }
+
+  // Schedule auto-assignment to run periodically
+  static async scheduleAutoAssignment(): Promise<{ success: boolean; assignments: number; error?: any }> {
+    try {
+      // Run auto-assignment for today
+      const today = new Date().toISOString().split('T')[0];
+      const result = await this.autoAssignDeliveryPartners(today);
+
+      if (result.success) {
+        console.log(`🕐 Scheduled assignment completed: ${result.assignments} assignments`);
+      }
+
+      return result;
+    } catch (error) {
+      console.error('💥 Error in scheduled auto-assignment:', error);
+      return { success: false, assignments: 0, error };
+    }
+  }
+
+  // For testing: Remove a slot assignment to allow auto-assignment to recreate it
+  static async removeSlotAssignment(
+    slotId: string,
+    date: string = new Date().toISOString().split('T')[0]
+  ): Promise<{ success: boolean; message: string; error?: any }> {
+    try {
+      console.log(`🧪 Removing assignment for slot ${slotId} on ${date} for testing`);
+
+      const { error } = await supabase
+        .from('delivery_assignments')
+        .delete()
+        .eq('slot_id', slotId)
+        .eq('assigned_date', date);
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        message: `Assignment for slot ${slotId} on ${date} removed successfully`
+      };
+    } catch (error) {
+      console.error('💥 Error removing slot assignment:', error);
+      return { success: false, message: 'Failed to remove assignment', error };
+    }
+  }
+
+  static async ensureOrderDeliveryRecord(
+    orderId: string,
+    deliveryPartnerId: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      // Check if record exists
+      const { data: existingRecord, error: checkError } = await supabase
+        .from('order_deliveries')
+        .select('id')
+        .eq('order_id', orderId)
+        .eq('delivery_partner_id', deliveryPartnerId)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('❌ Error checking order_deliveries record:', checkError);
+        throw checkError;
+      }
+
+      if (!existingRecord) {
+        // Create new record if it doesn't exist
+        const { error: createError } = await supabase
+          .from('order_deliveries')
+          .insert({
+            order_id: orderId,
+            delivery_partner_id: deliveryPartnerId,
+            delivery_status: 'pending'
+          });
+
+        if (createError) {
+          console.error('❌ Error creating order_deliveries record:', createError);
+          throw createError;
+        }
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('💥 Error in ensureOrderDeliveryRecord:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Utility function to retroactively fix existing assignments that are missing pickup records
+   * This can be used to fix orders that were assigned before the pickup record fix was implemented
+   */
+  static async fixExistingAssignments(targetDate?: string): Promise<ApiResponse<any>> {
+    try {
+      const date = targetDate || new Date().toISOString().split('T')[0];
+      console.log('🔧 Fixing existing assignments for date:', date);
+
+      // Get all delivery assignments for the target date
+      const { data: assignments, error: assignError } = await supabase
+        .from('delivery_assignments')
+        .select('delivery_partner_id, slot_id, assigned_date')
+        .eq('assigned_date', date)
+        .in('status', ['assigned', 'active']);
+
+      if (assignError) {
+        console.error('❌ Error fetching assignments:', assignError);
+        throw assignError;
+      }
+
+      if (!assignments || assignments.length === 0) {
+        console.log('📝 No assignments found for date:', date);
+        return { success: true, message: 'No assignments to fix' };
+      }
+
+      console.log(`🎯 Found ${assignments.length} assignments to check`);
+      let totalFixed = 0;
+
+      for (const assignment of assignments) {
+        // Get all orders for this slot
+        const { data: orders, error: ordersError } = await supabase
+          .from('orders')
+          .select('id')
+          .eq('slot_id', assignment.slot_id)
+          .eq('delivery_date', assignment.assigned_date);
+
+        if (ordersError) {
+          console.error('❌ Error fetching orders for slot:', assignment.slot_id, ordersError);
+          continue;
+        }
+
+        if (!orders || orders.length === 0) {
+          console.log('📝 No orders found for slot:', assignment.slot_id);
+          continue;
+        }
+
+        console.log(`🔍 Checking ${orders.length} orders in slot ${assignment.slot_id}`);
+
+        // Fix pickup records for each order
+        for (const order of orders) {
+          const fixResult = await this.ensureOrderPickupRecords(order.id, assignment.delivery_partner_id);
+          if (fixResult.success && fixResult.data?.created) {
+            totalFixed += fixResult.data.created;
+            console.log(`✅ Fixed ${fixResult.data.created} pickup records for order ${order.id}`);
+          }
+        }
+      }
+
+      console.log(`🎉 Fix completed: Created ${totalFixed} missing pickup records`);
+      return { 
+        success: true, 
+        data: { fixedRecords: totalFixed },
+        message: `Fixed ${totalFixed} missing pickup records` 
+      };
+
+    } catch (error: any) {
+      console.error('💥 Error fixing existing assignments:', error);
+      return { 
+        success: false, 
+        error: error.message || 'Failed to fix existing assignments' 
+      };
+    }
+  }
+
+  /**
+   * Diagnose a specific order to check if it's affected by the pickup bug
+   * This is useful for debugging and validation
+   */
+  static async diagnoseOrderPickupStatus(orderId: string): Promise<ApiResponse<any>> {
+    try {
+      console.log('🔍 Diagnosing pickup status for order:', orderId);
+
+      // Get order details
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .select('id, order_number, order_status, delivery_date')
+        .eq('id', orderId)
+        .single();
+
+      if (orderError) throw orderError;
+
+      // Get delivery partner assignment
+      const { data: assignment, error: assignmentError } = await supabase
+        .from('delivery_partner_orders')
+        .select('delivery_partner_id, status, accepted_at')
+        .eq('order_id', orderId)
+        .maybeSingle();
+
+      if (assignmentError) throw assignmentError;
+
+      // Get vendors in this order
+      const { data: vendors, error: vendorsError } = await supabase
+        .from('order_items')
+        .select('vendor_id, vendors(business_name)')
+        .eq('order_id', orderId);
+
+      if (vendorsError) throw vendorsError;
+
+      const uniqueVendors = vendors?.reduce((acc, item) => {
+        if (!acc.find(v => v.vendor_id === item.vendor_id)) {
+          acc.push({
+            vendor_id: item.vendor_id,
+            business_name: item.vendors?.business_name || 'Unknown'
+          });
+        }
+        return acc;
+      }, [] as any[]) || [];
+
+      // Get existing pickup records
+      const { data: pickups, error: pickupsError } = await supabase
+        .from('order_pickups')
+        .select('vendor_id, pickup_status, pickup_time, delivery_partner_id')
         .eq('order_id', orderId);
 
       if (pickupsError) throw pickupsError;
 
-      const allPicked = (pickups || []).every(p => p.pickup_status === 'picked_up');
+      const diagnosis = {
+        order: {
+          id: order.id,
+          order_number: order.order_number,
+          order_status: order.order_status,
+          delivery_date: order.delivery_date
+        },
+        assignment: assignment ? {
+          delivery_partner_id: assignment.delivery_partner_id,
+          status: assignment.status,
+          accepted_at: assignment.accepted_at
+        } : null,
+        vendors: {
+          total: uniqueVendors.length,
+          list: uniqueVendors
+        },
+        pickups: {
+          total_records: pickups?.length || 0,
+          records: pickups || [],
+          missing_vendors: uniqueVendors.filter(v => 
+            !pickups?.some(p => p.vendor_id === v.vendor_id)
+          )
+        },
+        is_affected: false,
+        issues: [] as string[]
+      };
 
-      if (allPicked) {
-        // Update order status
-        await supabase
-          .from('orders')
-          .update({ order_status: 'picked_up', picked_up_date: new Date().toISOString() })
-          .eq('id', orderId);
-
-        // Update delivery_partner_orders record(s)
-        await supabase
-          .from('delivery_partner_orders')
-          .update({ status: 'picked_up', picked_up_at: new Date().toISOString() })
-          .eq('order_id', orderId);
+      // Check for issues
+      if (assignment && !assignment.delivery_partner_id) {
+        diagnosis.issues.push('Order has assignment but no delivery partner ID');
       }
 
-      return { success: true, message: 'Vendor pickup marked as picked-up' };
-    } catch (e: any) {
-      console.error('Error marking vendor pickup:', e.message);
-      return { success: false, error: e.message || 'Failed to mark vendor pickup' };
+      if (assignment && diagnosis.pickups.total_records === 0) {
+        diagnosis.issues.push('Order has delivery partner assignment but no pickup records');
+        diagnosis.is_affected = true;
+      }
+
+      if (diagnosis.pickups.missing_vendors.length > 0) {
+        diagnosis.issues.push(`Missing pickup records for ${diagnosis.pickups.missing_vendors.length} vendors`);
+        diagnosis.is_affected = true;
+      }
+
+      if (pickups?.some(p => p.delivery_partner_id !== assignment?.delivery_partner_id)) {
+        diagnosis.issues.push('Pickup records have different delivery partner than assignment');
+      }
+
+      const statusMessage = diagnosis.is_affected 
+        ? `Order is affected by pickup bug: ${diagnosis.issues.join(', ')}`
+        : 'Order pickup records are properly configured';
+
+      console.log('🎯 Diagnosis complete:', statusMessage);
+
+      return {
+        success: true,
+        data: diagnosis,
+        message: statusMessage
+      };
+
+    } catch (error: any) {
+      console.error('💥 Error diagnosing order:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to diagnose order pickup status'
+      };
+    }
+  }
+
+  /**
+   * Diagnose delivery readiness for a specific order
+   * This helps identify why orders might not be showing in the delivery section
+   */
+  static async diagnoseOrderDeliveryReadiness(orderId: string): Promise<ApiResponse<any>> {
+    try {
+      console.log('🔍 Diagnosing delivery readiness for order:', orderId);
+
+      // Get order details
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .select('id, order_number, order_status, delivery_date, total_amount')
+        .eq('id', orderId)
+        .single();
+
+      if (orderError) throw orderError;
+
+      // Get delivery partner assignment
+      const { data: assignment, error: assignmentError } = await supabase
+        .from('delivery_partner_orders')
+        .select('delivery_partner_id, status, picked_up_at')
+        .eq('order_id', orderId)
+        .maybeSingle();
+
+      if (assignmentError) throw assignmentError;
+
+      // Check pickup records
+      const { data: pickupRecords, error: pickupError } = await supabase
+        .from('order_pickups')
+        .select('vendor_id, pickup_status, pickup_time')
+        .eq('order_id', orderId);
+
+      if (pickupError) throw pickupError;
+
+      // Check delivery records
+      const { data: deliveryRecords, error: deliveryError } = await supabase
+        .from('order_deliveries')
+        .select('delivery_partner_id, delivery_status, delivery_time')
+        .eq('order_id', orderId);
+
+      if (deliveryError) throw deliveryError;
+
+      // Check order items and vendors
+      const { data: orderItems, error: itemsError } = await supabase
+        .from('order_items')
+        .select('vendor_id, item_status')
+        .eq('order_id', orderId);
+
+      if (itemsError) throw itemsError;
+
+      const analysis = {
+        order: {
+          id: order.id,
+          number: order.order_number,
+          status: order.order_status,
+          total_amount: order.total_amount
+        },
+        assignment: assignment ? {
+          delivery_partner_id: assignment.delivery_partner_id,
+          status: assignment.status,
+          picked_up_at: assignment.picked_up_at
+        } : null,
+        pickup_records: {
+          total: pickupRecords?.length || 0,
+          records: pickupRecords || [],
+          all_picked_up: pickupRecords?.every(p => p.pickup_status === 'picked_up') || false
+        },
+        delivery_records: {
+          total: deliveryRecords?.length || 0,
+          records: deliveryRecords || []
+        },
+        vendors: {
+          total: new Set(orderItems?.map(item => item.vendor_id)).size || 0,
+          items: orderItems || []
+        },
+        ready_for_delivery: false,
+        issues: [] as string[]
+      };
+
+      // Determine if order should be ready for delivery
+      const orderStatus = order.order_status;
+      analysis.ready_for_delivery = orderStatus === 'picked_up' || orderStatus === 'out_for_delivery';
+
+      // Identify issues
+      if (!assignment) {
+        analysis.issues.push('No delivery partner assignment found');
+      }
+
+      if (analysis.pickup_records.total === 0) {
+        analysis.issues.push('No pickup records found');
+      }
+
+      if (analysis.delivery_records.total === 0 && orderStatus === 'picked_up') {
+        analysis.issues.push('No delivery records found for picked up order');
+      }
+
+      if (analysis.pickup_records.total > 0 && !analysis.pickup_records.all_picked_up && orderStatus === 'picked_up') {
+        analysis.issues.push('Order marked as picked_up but some vendor pickups are still pending');
+      }
+
+      console.log('📊 Delivery readiness analysis:', analysis);
+
+      return {
+        success: true,
+        data: analysis,
+        message: `Diagnosed order ${order.order_number}`
+      };
+
+    } catch (error: any) {
+      console.error('❌ Error diagnosing order delivery readiness:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to diagnose order delivery readiness'
+      };
+    }
+  }
+
+  static async fixMissingDeliveryPartnerAssignments(
+    targetDate: string = new Date().toISOString().split('T')[0]
+  ): Promise<{ success: boolean; fixed: number; error?: any }> {
+    try {
+      console.log('🔧 Fixing missing delivery partner order assignments for date:', targetDate);
+
+      // Get all delivery assignments for the target date
+      const { data: assignments, error: assignmentsError } = await supabase
+        .from('delivery_assignments')
+        .select(`
+          id,
+          delivery_partner_id,
+          slot_id,
+          assigned_date,
+          sector_id
+        `)
+        .eq('assigned_date', targetDate)
+        .in('status', ['assigned', 'active']);
+
+      if (assignmentsError) throw assignmentsError;
+
+      if (!assignments || assignments.length === 0) {
+        console.log('📝 No delivery assignments found for the date');
+        return { success: true, fixed: 0 };
+      }
+
+      let fixedCount = 0;
+
+      for (const assignment of assignments) {
+        // Get orders for this slot that don't have delivery_partner_orders records
+        const { data: ordersNeedingAssignment, error: ordersError } = await supabase
+          .from('orders')
+          .select(`
+            id,
+            order_number,
+            order_status,
+            delivery_partner_orders(delivery_partner_id)
+          `)
+          .eq('slot_id', assignment.slot_id)
+          .eq('delivery_date', assignment.assigned_date);
+
+        if (ordersError) {
+          console.error('Error fetching orders for slot:', assignment.slot_id, ordersError);
+          continue;
+        }
+
+        if (!ordersNeedingAssignment) continue;
+
+        for (const order of ordersNeedingAssignment) {
+          // Check if this order already has a delivery_partner_orders record for this partner
+          const hasAssignment = order.delivery_partner_orders?.some((dpo: any) => 
+            dpo.delivery_partner_id === assignment.delivery_partner_id
+          );
+
+          if (!hasAssignment) {
+            console.log(`🔧 Creating missing assignment for order ${order.order_number} to partner ${assignment.delivery_partner_id}`);
+            
+            const { error: insertError } = await supabase
+              .from('delivery_partner_orders')
+              .insert({
+                delivery_partner_id: assignment.delivery_partner_id,
+                order_id: order.id,
+                status: order.order_status === 'picked_up' ? 'picked_up' : 
+                       order.order_status === 'out_for_delivery' ? 'out_for_delivery' :
+                       order.order_status === 'delivered' ? 'delivered' : 'assigned',
+                accepted_at: new Date().toISOString(),
+                ...(order.order_status === 'picked_up' && { picked_up_at: new Date().toISOString() }),
+                ...(order.order_status === 'delivered' && { delivered_at: new Date().toISOString() })
+              });
+
+            if (insertError) {
+              console.error('Error creating delivery partner order assignment:', insertError);
+            } else {
+              console.log(`✅ Created assignment for order ${order.order_number}`);
+              fixedCount++;
+            }
+          }
+        }
+      }
+
+      console.log(`🎉 Fixed ${fixedCount} missing delivery partner order assignments`);
+      return { success: true, fixed: fixedCount };
+
+    } catch (error) {
+      console.error('💥 Error fixing missing assignments:', error);
+      return { success: false, fixed: 0, error };
+    }
+  }
+
+  static async ensureOrderDeliveryPartnerAssignment(
+    orderId: string,
+    deliveryPartnerId: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      // Check if assignment already exists
+      const { data: existingAssignment, error: checkError } = await supabase
+        .from('delivery_partner_orders')
+        .select('id, status')
+        .eq('order_id', orderId)
+        .eq('delivery_partner_id', deliveryPartnerId)
+        .single();
+
+      if (checkError && checkError.code !== 'PGRST116') {
+        throw checkError;
+      }
+
+      if (existingAssignment) {
+        console.log('✅ Delivery partner assignment already exists');
+        return { success: true, data: existingAssignment };
+      }
+
+      // Get order status to set appropriate assignment status
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .select('order_status')
+        .eq('id', orderId)
+        .single();
+
+      if (orderError) throw orderError;
+
+      // Create new assignment
+      const { data: newAssignment, error: insertError } = await supabase
+        .from('delivery_partner_orders')
+        .insert({
+          delivery_partner_id: deliveryPartnerId,
+          order_id: orderId,
+          status: order.order_status === 'picked_up' ? 'picked_up' : 
+                 order.order_status === 'out_for_delivery' ? 'out_for_delivery' :
+                 order.order_status === 'delivered' ? 'delivered' : 'assigned',
+          accepted_at: new Date().toISOString(),
+          ...(order.order_status === 'picked_up' && { picked_up_at: new Date().toISOString() }),
+          ...(order.order_status === 'delivered' && { delivered_at: new Date().toISOString() })
+        })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      console.log('✅ Created delivery partner order assignment');
+      return { success: true, data: newAssignment };
+
+    } catch (error: any) {
+      console.error('Error ensuring delivery partner assignment:', error);
+      return { success: false, error: error.message };
     }
   }
 }
@@ -2205,7 +3362,7 @@ export const sectorAPI = {
       .from('sectors')
       .select('*')
       .order('city_name', { ascending: true });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -2218,7 +3375,7 @@ export const sectorAPI = {
       .eq('city_name', cityName)
       .eq('is_active', true)
       .order('name', { ascending: true });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -2231,7 +3388,7 @@ export const sectorAPI = {
       .contains('pincodes', [pincode])
       .eq('is_active', true)
       .maybeSingle();
-    
+
     if (error) throw error;
     return data;
   },
@@ -2243,7 +3400,7 @@ export const sectorAPI = {
       .insert([sector])
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -2256,7 +3413,7 @@ export const sectorAPI = {
       .eq('id', id)
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -2267,7 +3424,7 @@ export const sectorAPI = {
       .from('sectors')
       .delete()
       .eq('id', id);
-    
+
     if (error) throw error;
   }
 };
@@ -2278,7 +3435,7 @@ export const deliverySlotAPI = {
   // Get available slots for a date and sector
   getAvailableSlots: async (sectorId: string, date: string): Promise<DeliverySlot[]> => {
     const dayOfWeek = new Date(date).getDay();
-    
+
     const { data, error } = await supabase
       .from('delivery_slots')
       .select(`
@@ -2288,7 +3445,7 @@ export const deliverySlotAPI = {
       .eq('sector_id', sectorId)
       .eq('is_active', true)
       .or(`day_of_week.is.null,day_of_week.cs.{${dayOfWeek}}`);
-    
+
     if (error) throw error;
 
     // Calculate available orders for each slot
@@ -2310,10 +3467,10 @@ export const deliverySlotAPI = {
     // Filter out slots that are past cutoff time for today
     const now = new Date();
     const selectedDate = new Date(date);
-    
+
     if (selectedDate.toDateString() === now.toDateString()) {
       const currentTime = now.toTimeString().slice(0, 5);
-      return slotsWithAvailability.filter(slot => 
+      return slotsWithAvailability.filter(slot =>
         slot.cutoff_time > currentTime && slot.available_orders > 0
       );
     }
@@ -2330,7 +3487,7 @@ export const deliverySlotAPI = {
         sector:sectors(*)
       `)
       .order('sector_id', { ascending: true });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -2345,7 +3502,7 @@ export const deliverySlotAPI = {
         sector:sectors(*)
       `)
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -2361,7 +3518,7 @@ export const deliverySlotAPI = {
         sector:sectors(*)
       `)
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -2372,7 +3529,7 @@ export const deliverySlotAPI = {
       .from('delivery_slots')
       .delete()
       .eq('id', id);
-    
+
     if (error) throw error;
   }
 };
@@ -2396,7 +3553,7 @@ export const deliveryAssignmentAPI = {
     }
 
     const { data, error } = await query.order('assigned_date', { ascending: true });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -2412,7 +3569,7 @@ export const deliveryAssignmentAPI = {
       `)
       .eq('assigned_date', date)
       .eq('sector_id', sectorId);
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -2424,7 +3581,7 @@ export const deliveryAssignmentAPI = {
       .insert([assignment])
       .select()
       .single();
-    
+
     if (error) throw error;
 
     // backfill matching orders with this slot_id
@@ -2446,7 +3603,7 @@ export const deliveryAssignmentAPI = {
       .eq('id', id)
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   }
@@ -2468,11 +3625,11 @@ export const orderPickupAPI = {
 
     if (date) {
       query = query.gte('created_at', `${date}T00:00:00`)
-                  .lt('created_at', `${date}T23:59:59`);
+        .lt('created_at', `${date}T23:59:59`);
     }
 
     const { data, error } = await query.order('created_at', { ascending: true });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -2480,11 +3637,11 @@ export const orderPickupAPI = {
   // Update pickup status
   updateStatus: async (id: string, status: OrderPickup['pickup_status'], notes?: string): Promise<OrderPickup> => {
     const updates: any = { pickup_status: status };
-    
+
     if (status === 'picked_up') {
       updates.pickup_time = new Date().toISOString();
     }
-    
+
     if (notes) {
       updates.notes = notes;
     }
@@ -2495,7 +3652,7 @@ export const orderPickupAPI = {
       .eq('id', id)
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -2507,7 +3664,7 @@ export const orderPickupAPI = {
       .insert([pickup])
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   }
@@ -2528,11 +3685,11 @@ export const orderDeliveryAPI = {
 
     if (date) {
       query = query.gte('created_at', `${date}T00:00:00`)
-                  .lt('created_at', `${date}T23:59:59`);
+        .lt('created_at', `${date}T23:59:59`);
     }
 
     const { data, error } = await query.order('created_at', { ascending: true });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -2540,11 +3697,11 @@ export const orderDeliveryAPI = {
   // Update delivery status
   updateStatus: async (id: string, status: OrderDelivery['delivery_status'], notes?: string): Promise<OrderDelivery> => {
     const updates: any = { delivery_status: status };
-    
+
     if (status === 'delivered') {
       updates.delivery_time = new Date().toISOString();
     }
-    
+
     if (notes) {
       updates.delivery_notes = notes;
     }
@@ -2555,7 +3712,7 @@ export const orderDeliveryAPI = {
       .eq('id', id)
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -2567,7 +3724,7 @@ export const orderDeliveryAPI = {
       .insert([delivery])
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   }
@@ -2587,11 +3744,11 @@ export const deliveryUtils = {
   calculateEstimatedDelivery: (slotStartTime: string, slotEndTime: string): string => {
     const now = new Date();
     const today = now.toISOString().split('T')[0];
-    
+
     // Create delivery window
     const startTime = new Date(`${today}T${slotStartTime}`);
     const endTime = new Date(`${today}T${slotEndTime}`);
-    
+
     return `${startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   },
 

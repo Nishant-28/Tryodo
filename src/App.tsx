@@ -29,8 +29,7 @@ import AdminQualitiesManagement from "./pages/AdminQualitiesManagement";
 
 import AdminCommissionRules from "./pages/AdminCommissionRules";
 import AdminVendorManagement from "./pages/AdminVendorManagement";
-import AdminVendorWallets from "./pages/AdminVendorWallets";
-import AdminDeliveryWallets from "./pages/AdminDeliveryWallets";
+
 import AdminPayoutManagement from "./pages/AdminPayoutManagement";
 import AdminSectorManagement from "./pages/AdminSectorManagement";
 import AdminSlotManagement from "./pages/AdminSlotManagement";
@@ -176,8 +175,7 @@ const App = () => (
                 <Route path="/admin/qualities" element={<ProtectedRoute allowedRoles={['admin']}><AdminQualitiesManagement /></ProtectedRoute>} />
                 <Route path="/admin/vendor-management" element={<ProtectedRoute allowedRoles={['admin']}><AdminVendorManagement /></ProtectedRoute>} />
                 <Route path="/admin/commission-rules" element={<ProtectedRoute allowedRoles={['admin']}><AdminCommissionRules /></ProtectedRoute>} />
-                <Route path="/admin/vendor-wallets" element={<ProtectedRoute allowedRoles={['admin']}><AdminVendorWallets /></ProtectedRoute>} />
-                <Route path="/admin/delivery-wallets" element={<ProtectedRoute allowedRoles={['admin']}><AdminDeliveryWallets /></ProtectedRoute>} />
+
                 <Route path="/admin/payouts" element={<ProtectedRoute allowedRoles={['admin']}><AdminPayoutManagement /></ProtectedRoute>} />
                 <Route path="/admin/sectors" element={<ProtectedRoute allowedRoles={['admin']}><AdminSectorManagement /></ProtectedRoute>} />
                 <Route path="/admin/slots" element={<ProtectedRoute allowedRoles={['admin']}><AdminSlotManagement /></ProtectedRoute>} />

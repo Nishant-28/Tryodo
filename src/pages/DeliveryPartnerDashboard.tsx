@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Package, TrendingUp, MapPin, Star, Clock, Check, X, 
+import {
+  Package, TrendingUp, MapPin, Star, Clock, Check, X,
   RefreshCw, Phone, Navigation, AlertTriangle, CheckCircle,
-  DollarSign, Target, Truck, User, Store, ArrowRight, Timer
+  DollarSign, Target, Truck, User, Store, ArrowRight, Timer,
+  ChevronDown, ChevronUp, Route, Calendar, Zap, Activity,
+  Shield, Eye, EyeOff, Copy, ExternalLink, Menu, Bell
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,6 +14,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import Header from '@/components/Header';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -37,7 +43,7 @@ interface DeliveryPartner {
   average_delivery_time_minutes: number;
 }
 
-// New slot-based delivery order interfaces
+// Enhanced slot-based delivery order interfaces
 interface SlotOrder {
   slot_id: string;
   slot_name: string;
@@ -45,12 +51,17 @@ interface SlotOrder {
   end_time: string;
   delivery_date: string;
   sector_name: string;
-  status: 'assigned' | 'picking_up' | 'delivering' | 'completed';
+  status: 'assigned' | 'picking_up' | 'delivering' | 'completed' | 'blocked';
   total_orders: number;
   total_amount: number;
   vendors: VendorPickup[];
   ready_for_delivery: CustomerDelivery[];
   estimated_completion: string;
+  can_start: boolean;
+  previous_slot_completed: boolean;
+  pickup_progress: number;
+  delivery_progress: number;
+  estimated_earnings: number;
 }
 
 interface VendorPickup {
@@ -58,12 +69,15 @@ interface VendorPickup {
   vendor_name: string;
   vendor_phone: string;
   vendor_address: string;
+  vendor_full_address?: string;
   total_items: number;
   total_amount: number;
   pickup_status: 'pending' | 'en_route' | 'picked_up';
   orders: VendorOrder[];
   pickup_otp?: string;
   estimated_prep_time?: string;
+  distance_from_current?: number;
+  navigation_url?: string;
 }
 
 interface VendorOrder {
@@ -72,10 +86,13 @@ interface VendorOrder {
   items: OrderItem[];
   total_amount: number;
   special_instructions?: string;
+  customer_name?: string;
+  customer_phone?: string;
 }
 
 interface OrderItem {
   product_name: string;
+  quality_type_name: string | null;
   quantity: number;
   unit_price: number;
   line_total: number;
@@ -87,12 +104,16 @@ interface CustomerDelivery {
   customer_name: string;
   customer_phone: string;
   delivery_address: string;
+  delivery_full_address?: string;
   total_amount: number;
   payment_method: string;
   delivery_status: 'pending' | 'out_for_delivery' | 'delivered';
   delivery_otp?: string;
   estimated_delivery_time?: string;
   special_instructions?: string;
+  distance_from_vendor?: number;
+  navigation_url?: string;
+  vendor_name?: string;
 }
 
 interface CompletedOrder {
@@ -111,7 +132,7 @@ interface CompletedOrder {
 const DeliveryPartnerDashboard = () => {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
-  
+
   const [deliveryPartner, setDeliveryPartner] = useState<DeliveryPartner | null>(null);
   const [myOrders, setMyOrders] = useState<SlotOrder[]>([]);
   const [deliveredOrders, setDeliveredOrders] = useState<CompletedOrder[]>([]);
@@ -122,6 +143,7 @@ const DeliveryPartnerDashboard = () => {
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedSlotId, setExpandedSlotId] = useState<string>('');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Initialize delivery partner dashboard
   useEffect(() => {
@@ -151,7 +173,7 @@ const DeliveryPartnerDashboard = () => {
             lng: position.coords.longitude
           };
           setCurrentLocation(location);
-          
+
           // Update location in database if delivery partner exists
           if (deliveryPartner) {
             updateLocationInDatabase(location);
@@ -171,7 +193,7 @@ const DeliveryPartnerDashboard = () => {
 
       // Fetch delivery partner data
       const deliveryPartnerData = await fetchDeliveryPartnerByProfileId(profile!.id);
-      
+
       if (!deliveryPartnerData) {
         setError('Delivery partner account not found. Please contact support.');
         return;
@@ -179,6 +201,15 @@ const DeliveryPartnerDashboard = () => {
 
       setDeliveryPartner(deliveryPartnerData);
       setIsAvailable(deliveryPartnerData.is_available);
+
+      // FIXED: Run system fixes before loading data to ensure proper relationships
+      console.log('🔧 Running delivery system fixes...');
+      try {
+        await DeliveryAPI.fixMissingDeliveryPartnerAssignments();
+        console.log('✅ System fixes completed');
+      } catch (fixError) {
+        console.warn('⚠️ System fixes failed, continuing with normal load:', fixError);
+      }
 
       // Load dashboard data
       await Promise.allSettled([
@@ -222,9 +253,26 @@ const DeliveryPartnerDashboard = () => {
   const loadMyOrders = async (deliveryPartnerId: string) => {
     try {
       console.log('🎯 Loading orders for delivery partner:', deliveryPartnerId);
-      
-      // First try to get slot-based assignments
-      const { data: slotData, error: slotError } = await supabase
+
+      // Get slot-based assignments from both tables for backward compatibility
+      // Include today and yesterday to handle late completions
+      const today = new Date().toISOString().split('T')[0];
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      // First try the new sector assignments table
+      const { data: sectorAssignments, error: sectorError } = await supabase
+        .from('delivery_partner_sector_assignments')
+        .select(`
+          *,
+          delivery_slot:delivery_slots(*),
+          sector:sectors(*)
+        `)
+        .eq('delivery_partner_id', deliveryPartnerId)
+        .in('assigned_date', [today, yesterday])
+        .eq('is_active', true);
+
+      // Also get delivery assignments for backward compatibility
+      const { data: deliveryAssignments, error: deliveryError } = await supabase
         .from('delivery_assignments')
         .select(`
           *,
@@ -232,33 +280,100 @@ const DeliveryPartnerDashboard = () => {
           sector:sectors(*)
         `)
         .eq('delivery_partner_id', deliveryPartnerId)
-        .eq('assigned_date', new Date().toISOString().split('T')[0])
-        .in('status', ['assigned', 'active']);
+        .in('assigned_date', [today, yesterday])
+        .in('status', ['assigned', 'active'])
+        .order('slot_id');
+
+      // Combine both assignment types, prioritizing sector assignments
+      let slotData: any[] = [];
+
+      if (sectorAssignments && sectorAssignments.length > 0) {
+        // Transform sector assignments to match the expected format
+        slotData = sectorAssignments.map(assignment => ({
+          ...assignment,
+          status: 'assigned', // Default status for sector assignments
+          slot_id: assignment.slot_id,
+          assigned_date: assignment.assigned_date
+        }));
+        console.log('📋 Using sector-based assignments:', slotData.length);
+      } else if (deliveryAssignments && deliveryAssignments.length > 0) {
+        slotData = deliveryAssignments;
+        console.log('📋 Using legacy delivery assignments:', slotData.length);
+      }
+
+      const slotError = sectorError || deliveryError;
 
       if (slotError) {
-        console.log('⚠️ No slot-based assignments, falling back to individual orders');
+        console.log('⚠️ Error loading slot-based assignments:', slotError);
       }
 
       const slotsWithOrders: SlotOrder[] = [];
 
-      // If we have slot-based assignments, process them
+      // Process slot-based assignments only
       if (slotData && slotData.length > 0) {
         console.log('📋 Processing slot-based assignments:', slotData.length);
-        
-        for (const assignment of slotData) {
-          // Get orders for this slot
+
+        // Sort by start time since we can't do it in the query
+        slotData.sort((a, b) => {
+          const aTime = a.delivery_slot?.start_time || '';
+          const bTime = b.delivery_slot?.start_time || '';
+          return aTime.localeCompare(bTime);
+        });
+
+        // FIXED: More lenient slot time filtering for current day only
+        const now = new Date();
+        const currentTime = now.toTimeString().slice(0, 5); // HH:mm format
+
+        const validSlots = slotData.filter(assignment => {
+          // Don't filter future dates or yesterday's slots (let completion logic handle them)
+          if (assignment.assigned_date !== today) return true;
+
+          const slot = assignment.delivery_slot;
+          if (!slot) return false;
+
+          // Only filter if slot has ended + 1 hour buffer (to allow late pickups/deliveries)
+          const slotEndTime = slot.end_time;
+          const [endHour, endMinute] = slotEndTime.split(':').map(Number);
+          const slotEndWithBuffer = `${String(endHour + 1).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`;
+          const isSlotExpired = currentTime > slotEndWithBuffer;
+
+          if (isSlotExpired) {
+            console.log(`⏰ Filtering out expired slot: ${slot.slot_name} (${slot.start_time}-${slot.end_time}), current time: ${currentTime}`);
+            return false;
+          }
+
+          return true;
+        });
+
+        console.log(`📋 Valid slots after time filtering: ${validSlots.length}/${slotData.length}`);
+
+        for (let i = 0; i < validSlots.length; i++) {
+          const assignment = validSlots[i];
+
+          // FIXED: Remove the inner join requirement and make it more flexible
           const { data: orders, error: ordersError } = await supabase
             .from('orders')
             .select(`
               *,
-              order_pickups(pickup_status,vendor_id),
+              delivery_partner_orders!left(
+                delivery_partner_id,
+                status
+              ),
+              order_pickups(pickup_status, vendor_id),
               order_items(
                 *,
                 vendor_products(
                   *,
                   smartphone_models(model_name)
                 ),
-                vendors(id, business_name, profiles(phone))
+                vendors(
+                  id,
+                  business_name,
+                  profiles(phone),
+                  vendor_addresses(
+                    address_box
+                  )
+                )
               ),
               customer_addresses(*),
               customers(profiles(full_name, phone))
@@ -271,31 +386,106 @@ const DeliveryPartnerDashboard = () => {
             continue;
           }
 
-          // Group orders by vendor
+          // FIXED: Normalize delivery_partner_orders to always be an array
+          if (orders) {
+            orders.forEach(order => {
+              if (order.delivery_partner_orders && !Array.isArray(order.delivery_partner_orders)) {
+                order.delivery_partner_orders = [order.delivery_partner_orders];
+              } else if (!order.delivery_partner_orders) {
+                order.delivery_partner_orders = [];
+              }
+            });
+          }
+
+          // FIXED: Filter orders to only include those assigned to this delivery partner
+          const assignedOrders = orders?.filter(order => {
+            // Check if order has delivery_partner_orders record for this partner
+            // Now we can safely use .find() since we normalized the data structure
+            const dpOrder = order.delivery_partner_orders?.find((dpo: any) =>
+              dpo.delivery_partner_id === deliveryPartnerId
+            );
+
+            return dpOrder || order.order_status === 'picked_up' || order.order_status === 'out_for_delivery';
+          }) || [];
+
+          console.log(`📦 Total orders in slot: ${orders?.length || 0}, Assigned to partner: ${assignedOrders.length}`);
+
+          // If no orders are assigned to this partner, create the assignment records
+          if (assignedOrders.length === 0 && orders && orders.length > 0) {
+            console.log('🔧 Creating missing delivery partner order assignments...');
+
+            for (const order of orders) {
+              // Check if delivery_partner_orders record exists
+              // Since we normalized the data, we can safely check array length
+              if (order.delivery_partner_orders.length === 0) {
+                const { error: insertError } = await supabase
+                  .from('delivery_partner_orders')
+                  .insert({
+                    delivery_partner_id: deliveryPartnerId,
+                    order_id: order.id,
+                    status: 'assigned',
+                    accepted_at: new Date().toISOString()
+                  });
+
+                if (insertError) {
+                  console.error('Error creating delivery partner order assignment:', insertError);
+                } else {
+                  console.log(`✅ Created assignment for order ${order.order_number}`);
+                  // Add the new assignment to the order object
+                  const newAssignment = {
+                    delivery_partner_id: deliveryPartnerId,
+                    status: 'assigned'
+                  };
+
+                  // Since we normalized the data, we can safely push to the array
+                  order.delivery_partner_orders.push(newAssignment);
+                  assignedOrders.push(order);
+                }
+              }
+            }
+          }
+
+          // Group orders by vendor - FIXED: Only process non-delivered orders for vendor pickups
           const vendorGroups: { [vendorId: string]: VendorPickup } = {};
           const customerDeliveries: CustomerDelivery[] = [];
 
-          for (const order of orders || []) {
-            // Process vendor pickups
+          // FIXED: Filter out delivered orders before processing vendors
+          const nonDeliveredOrders = assignedOrders.filter(order => order.order_status !== 'delivered');
+          const deliveredOrders = assignedOrders.filter(order => order.order_status === 'delivered');
+
+          console.log(`📦 Processing ${nonDeliveredOrders.length} non-delivered orders and ${deliveredOrders.length} delivered orders`);
+
+          for (const order of nonDeliveredOrders) {
+            // Process vendor pickups - only for non-delivered orders
             for (const item of order.order_items) {
               const vendorInfo = Array.isArray(item.vendors) ? item.vendors[0] : item.vendors;
               const vendorId = vendorInfo?.id ?? '';
+              const vendorAddress = vendorInfo?.vendor_addresses?.[0];
+
               if (!vendorGroups[vendorId]) {
+                const fullAddress = vendorAddress ?
+                  `${vendorAddress.address_box}`
+                  : 'Address not available';
+
+                const navigationUrl = null;
+
                 vendorGroups[vendorId] = {
                   vendor_id: vendorId,
                   vendor_name: vendorInfo?.business_name || '',
                   vendor_phone: Array.isArray(vendorInfo?.profiles) ? vendorInfo.profiles[0]?.phone || '' : vendorInfo?.profiles?.phone || '',
-                  vendor_address: '', // TODO: Get vendor address
+                  vendor_address: vendorAddress?.address_box || 'Address not available',
+                  vendor_full_address: fullAddress,
                   total_items: 0,
                   total_amount: 0,
                   pickup_status: (() => {
                     const pr = order.order_pickups?.find((p: any) => p.vendor_id === vendorId);
                     return pr?.pickup_status ?? 'pending';
                   })(),
-                  orders: []
+                  orders: [],
+                  navigation_url: navigationUrl || undefined
                 };
               }
-              
+
               vendorGroups[vendorId].total_items += item.quantity;
               vendorGroups[vendorId].total_amount += item.line_total;
 
@@ -305,33 +495,98 @@ const DeliveryPartnerDashboard = () => {
                   order_id: order.id,
                   order_number: order.order_number,
                   items: [],
-                  total_amount: order.total_amount
+                  total_amount: order.total_amount,
+                  special_instructions: order.special_instructions,
+                  customer_name: order.customers?.profiles?.full_name || 'Unknown',
+                  customer_phone: order.customers?.profiles?.phone || ''
                 };
                 vendorGroups[vendorId].orders.push(vendorOrder);
               }
 
               vendorOrder.items.push({
                 product_name: item.vendor_products?.smartphone_models?.model_name || 'Unknown',
+                quality_type_name: item.quality_type_name,
                 quantity: item.quantity,
                 unit_price: item.unit_price,
                 line_total: item.line_total
               });
             }
 
-            // If order is picked up, add to customer deliveries
-            if (order.order_status === 'picked_up' || order.order_status === 'out_for_delivery') {
+            // FIXED: More inclusive delivery readiness logic (delivered orders already filtered out)
+            const isReadyForDelivery = order.order_status === 'picked_up' || order.order_status === 'out_for_delivery';
+
+            // For orders in confirmed/preparing status, check if vendors are picked up
+            const hasPickedUpVendors = Object.values(vendorGroups).some(v => v.pickup_status === 'picked_up');
+            const allVendorsPickedUp = Object.values(vendorGroups).every(v => v.pickup_status === 'picked_up');
+
+            // Include orders that are ready for delivery OR have all vendors picked up (delivered orders already excluded)
+            if (isReadyForDelivery || allVendorsPickedUp || order.order_status === 'confirmed' || order.order_status === 'preparing') {
+              const customerAddress = order.customer_addresses;
+              const fullDeliveryAddress = customerAddress ?
+                `${customerAddress.address_box}, ${customerAddress.area}, ${customerAddress.city} ${customerAddress.pincode}${customerAddress.landmark ? `, Near ${customerAddress.landmark}` : ''}`
+                : 'Address not available';
+
+              const deliveryNavigationUrl = customerAddress?.latitude && customerAddress?.longitude ?
+                `https://www.google.com/maps/dir/?api=1&destination=${customerAddress.latitude},${customerAddress.longitude}&travelmode=driving`
+                : null;
+
+              // Determine delivery status based on order status and vendor pickup progress
+              let deliveryStatus: 'pending' | 'out_for_delivery' | 'delivered' = 'pending';
+              if (order.order_status === 'out_for_delivery') {
+                deliveryStatus = 'out_for_delivery';
+              } else if (order.order_status === 'delivered') {
+                deliveryStatus = 'delivered';
+              } else if (allVendorsPickedUp) {
+                deliveryStatus = 'pending'; // Ready for delivery
+              } else {
+                deliveryStatus = 'pending'; // Partially ready
+              }
+
               customerDeliveries.push({
                 order_id: order.id,
                 order_number: order.order_number,
                 customer_name: order.customers?.profiles?.full_name || 'Unknown',
                 customer_phone: order.customers?.profiles?.phone || '',
-                delivery_address: order.customer_addresses?.address_box || '',
+                delivery_address: customerAddress?.address_box || '',
+                delivery_full_address: fullDeliveryAddress,
                 total_amount: order.total_amount,
                 payment_method: order.payment_method,
-                delivery_status: order.order_status === 'out_for_delivery' ? 'out_for_delivery' : 'pending',
-                estimated_delivery_time: assignment.delivery_slot?.end_time
+                delivery_status: deliveryStatus,
+                estimated_delivery_time: assignment.delivery_slot?.end_time,
+                special_instructions: order.special_instructions,
+                navigation_url: deliveryNavigationUrl || undefined
               });
             }
+          }
+
+          // FIXED: Clean up vendors with no active orders (all orders delivered)
+          const activeVendors = Object.values(vendorGroups).filter(vendor => vendor.orders.length > 0);
+          
+          console.log(`🏪 Filtered vendors: ${Object.values(vendorGroups).length} total, ${activeVendors.length} with active orders`);
+
+          // Calculate progress metrics using only active vendors
+          const totalVendors = activeVendors.length;
+          const pickedUpVendors = activeVendors.filter(v => v.pickup_status === 'picked_up').length;
+          const pickupProgress = totalVendors > 0 ? Math.round((pickedUpVendors / totalVendors) * 100) : 0;
+
+          const totalDeliveries = customerDeliveries.length;
+          const completedDeliveries = customerDeliveries.filter(d => d.delivery_status === 'delivered').length;
+          const deliveryProgress = totalDeliveries > 0 ? Math.round((completedDeliveries / totalDeliveries) * 100) : 0;
+
+          // Check if previous slot is completed (slot-wise restriction logic)
+          const previousSlotCompleted = i === 0 ? true : (slotsWithOrders[i - 1]?.status === 'completed');
+          const canStart = previousSlotCompleted && (assignment.status === 'assigned' || assignment.status === 'active');
+
+          // Determine slot status based on progress and restrictions
+          let slotStatus: SlotOrder['status'] = 'assigned';
+          if (!canStart && !previousSlotCompleted) {
+            slotStatus = 'blocked';
+          } else if (pickupProgress === 100 && deliveryProgress === 100) {
+            slotStatus = 'completed';
+          } else if (pickupProgress === 100 && deliveryProgress < 100) {
+            slotStatus = 'delivering';
+          } else if (pickupProgress < 100) {
+            slotStatus = 'picking_up';
           }
 
           const slotOrder: SlotOrder = {
@@ -341,136 +596,87 @@ const DeliveryPartnerDashboard = () => {
             end_time: assignment.delivery_slot?.end_time || '',
             delivery_date: assignment.assigned_date,
             sector_name: assignment.sector?.name || '',
-            status: assignment.status === 'active' ? 'picking_up' : 'assigned',
-            total_orders: orders?.length || 0,
-            total_amount: orders?.reduce((sum, order) => sum + order.total_amount, 0) || 0,
-            vendors: Object.values(vendorGroups),
+            status: slotStatus,
+            total_orders: assignedOrders?.length || 0,
+            total_amount: assignedOrders?.reduce((sum, order) => sum + order.total_amount, 0) || 0,
+            vendors: activeVendors,
             ready_for_delivery: customerDeliveries,
-            estimated_completion: assignment.delivery_slot?.end_time || ''
+            estimated_completion: assignment.delivery_slot?.end_time || '',
+            can_start: canStart,
+            previous_slot_completed: previousSlotCompleted,
+            pickup_progress: pickupProgress,
+            delivery_progress: deliveryProgress,
+            estimated_earnings: Math.round((assignedOrders?.reduce((sum, order) => sum + order.total_amount, 0) || 0) * 0.1) // 10% commission
           };
 
-          slotsWithOrders.push(slotOrder);
-        }
-      } else {
-        // Fall back to individual order assignments
-        console.log('📦 Loading individual order assignments...');
-        
-        const { data: individualOrders, error: individualError } = await supabase
-          .from('delivery_partner_orders')
-          .select(`
-            *,
-            orders(
-              *,
-              order_pickups(pickup_status,vendor_id),
-              order_items(
-                *,
-                vendor_products(
-                  *,
-                  smartphone_models(model_name)
-                ),
-                vendors(id, business_name, profiles(phone))
-              ),
-              customer_addresses(*),
-              customers(profiles(full_name, phone)),
-              delivery_slots(slot_name, start_time, end_time)
-            )
-          `)
-          .eq('delivery_partner_id', deliveryPartnerId)
-          .in('status', ['assigned', 'accepted', 'picked_up']);
-
-        if (individualError) {
-          console.error('Error loading individual orders:', individualError);
-        } else if (individualOrders && individualOrders.length > 0) {
-          console.log('📋 Processing individual orders:', individualOrders.length);
+          // FIXED: Filter out completed slots from My Orders - they should only appear in Delivered section
+          // Also filter out slots from previous days that are completed or have no active vendors/deliveries
+          const isPreviousDay = assignment.assigned_date !== today;
+          const hasNoActiveWork = activeVendors.length === 0 && customerDeliveries.length === 0;
           
-          // Group orders by vendor for a unified view
-          const vendorGroups: { [vendorId: string]: VendorPickup } = {};
-          const customerDeliveries: CustomerDelivery[] = [];
+          if (slotStatus !== 'completed' && !(isPreviousDay && hasNoActiveWork)) {
+            slotsWithOrders.push(slotOrder);
+            console.log(`✅ Added slot ${slotOrder.slot_name} to My Orders (status: ${slotStatus}, date: ${assignment.assigned_date})`);
+          } else {
+            const reason = slotStatus === 'completed' ? 'all deliveries completed' : 'no active work remaining';
+            console.log(`🎯 Skipping slot ${slotOrder.slot_name} from My Orders - ${reason} (date: ${assignment.assigned_date})`);
+            
+            // FIXED: Auto-update slot assignment status to 'completed' in database for consistency
+            try {
+              // Update sector assignment status if it exists (only is_active field)
+              const { error: sectorUpdateError } = await supabase
+                .from('delivery_partner_sector_assignments')
+                .update({ 
+                  is_active: false
+                })
+                .eq('delivery_partner_id', deliveryPartnerId)
+                .eq('slot_id', assignment.slot_id)
+                .eq('assigned_date', assignment.assigned_date);
 
-          for (const partnerOrder of individualOrders) {
-            const order = partnerOrder.orders;
-            if (!order) continue;
+              // Update legacy delivery assignment status if it exists
+              const { error: assignmentUpdateError } = await supabase
+                .from('delivery_assignments')
+                .update({ 
+                  status: 'completed'
+                })
+                .eq('delivery_partner_id', deliveryPartnerId)
+                .eq('slot_id', assignment.slot_id)
+                .eq('assigned_date', assignment.assigned_date);
 
-            // Process vendor pickups
-            for (const item of order.order_items || []) {
-              const vendorInfo = Array.isArray(item.vendors) ? item.vendors[0] : item.vendors;
-              const vendorId = vendorInfo?.id ?? '';
-              if (!vendorGroups[vendorId]) {
-                vendorGroups[vendorId] = {
-                  vendor_id: vendorId,
-                  vendor_name: vendorInfo?.business_name || '',
-                  vendor_phone: Array.isArray(vendorInfo?.profiles) ? vendorInfo.profiles[0]?.phone || '' : vendorInfo?.profiles?.phone || '',
-                  vendor_address: '', // TODO: Get vendor address
-                  total_items: 0,
-                  total_amount: 0,
-                  pickup_status: (() => {
-                    const pr = order.order_pickups?.find((p: any) => p.vendor_id === vendorId);
-                    return pr?.pickup_status ?? (partnerOrder.status === 'picked_up' ? 'picked_up' : 'pending');
-                  })(),
-                  orders: []
-                };
+              if (sectorUpdateError || assignmentUpdateError) {
+                console.warn('Warning: Could not update slot assignment status:', sectorUpdateError || assignmentUpdateError);
+              } else {
+                console.log(`✅ Updated slot assignment status to completed for ${slotOrder.slot_name} (${assignment.assigned_date})`);
               }
-              
-              vendorGroups[vendorId].total_items += item.quantity;
-              vendorGroups[vendorId].total_amount += item.line_total;
-
-              let vendorOrder = vendorGroups[vendorId].orders.find(o => o.order_id === order.id);
-              if (!vendorOrder) {
-                vendorOrder = {
-                  order_id: order.id,
-                  order_number: order.order_number,
-                  items: [],
-                  total_amount: order.total_amount
-                };
-                vendorGroups[vendorId].orders.push(vendorOrder);
-              }
-
-              vendorOrder.items.push({
-                product_name: item.vendor_products?.smartphone_models?.model_name || 'Unknown',
-                quantity: item.quantity,
-                unit_price: item.unit_price,
-                line_total: item.line_total
-              });
-            }
-
-            // If order is picked up, add to customer deliveries
-            if (partnerOrder.status === 'picked_up') {
-              customerDeliveries.push({
-                order_id: order.id,
-                order_number: order.order_number,
-                customer_name: order.customers?.profiles?.full_name || 'Unknown',
-                customer_phone: order.customers?.profiles?.phone || '',
-                delivery_address: order.customer_addresses?.address_box || '',
-                total_amount: order.total_amount,
-                payment_method: order.payment_method,
-                delivery_status: 'pending',
-                estimated_delivery_time: order.delivery_slots?.end_time
-              });
+            } catch (error) {
+              console.error('Error updating slot assignment status:', error);
             }
           }
-
-          // Create a virtual slot for individual orders
-          const virtualSlot: SlotOrder = {
-            slot_id: 'individual-orders',
-            slot_name: 'My Orders',
-            start_time: '09:00',
-            end_time: '18:00',
-            delivery_date: new Date().toISOString().split('T')[0],
-            sector_name: 'All Areas',
-            status: customerDeliveries.length > 0 ? 'delivering' : 'picking_up',
-            total_orders: individualOrders.length,
-            total_amount: individualOrders.reduce((sum, po) => sum + (po.orders?.total_amount || 0), 0),
-            vendors: Object.values(vendorGroups),
-            ready_for_delivery: customerDeliveries,
-            estimated_completion: '18:00'
-          };
-
-          slotsWithOrders.push(virtualSlot);
         }
+      } else {
+        console.log('📝 No slot-based assignments found for today or yesterday');
       }
 
       setMyOrders(slotsWithOrders);
       console.log('✅ Orders loaded:', slotsWithOrders.length);
+
+      // Debug logging for delivery section
+      slotsWithOrders.forEach((slot, index) => {
+        console.log(`🚚 Slot ${index + 1} (${slot.slot_name}):`, {
+          total_orders: slot.total_orders,
+          ready_for_delivery_count: slot.ready_for_delivery.length,
+          ready_for_delivery: slot.ready_for_delivery.map(d => ({
+            order_id: d.order_id,
+            order_number: d.order_number,
+            delivery_status: d.delivery_status
+          })),
+          vendor_statuses: slot.vendors.map(v => ({
+            vendor_id: v.vendor_id,
+            vendor_name: v.vendor_name,
+            pickup_status: v.pickup_status
+          }))
+        });
+      });
     } catch (error) {
       console.error('💥 Error loading orders:', error);
       setMyOrders([]);
@@ -480,42 +686,96 @@ const DeliveryPartnerDashboard = () => {
   const loadDeliveredOrders = async (deliveryPartnerId: string) => {
     try {
       console.log('📦 Loading delivered orders for delivery partner:', deliveryPartnerId);
-      
-      const { data: deliveredData, error } = await supabase
-        .from('delivery_partner_orders')
-        .select(`
-          *,
-          orders(
-            order_number,
-            total_amount,
-            delivery_date,
-            delivery_slots(slot_name),
-            customers(profiles(full_name)),
-            delivery_partner_earnings(amount)
-          )
-        `)
+
+      // Step 1: Get all slot_ids assigned to this delivery partner from both tables
+      const { data: sectorSlots, error: sectorError } = await supabase
+        .from('delivery_partner_sector_assignments')
+        .select('slot_id, assigned_date')
         .eq('delivery_partner_id', deliveryPartnerId)
-        .eq('status', 'delivered')
-        .order('delivered_at', { ascending: false })
-        .limit(20);
+        .eq('is_active', true);
 
-      if (error) throw error;
+      const { data: assignedSlots, error: assignmentError } = await supabase
+        .from('delivery_assignments')
+        .select('slot_id, assigned_date')
+        .eq('delivery_partner_id', deliveryPartnerId)
+        .in('status', ['completed', 'active', 'assigned']); // Include active/assigned slots that might have completed deliveries
 
-      const completedOrders: CompletedOrder[] = (deliveredData || []).map(item => ({
-        order_id: item.order_id,
-        order_number: item.orders?.order_number || '',
-        customer_name: item.orders?.customers?.profiles?.full_name || 'Unknown',
-        delivery_date: item.orders?.delivery_date || '',
-        delivery_time: item.delivered_at || '',
-        total_amount: item.orders?.total_amount || 0,
-        slot_name: item.orders?.delivery_slots?.slot_name || '',
-        earnings: item.orders?.delivery_partner_earnings?.amount || 0
+      if (sectorError || assignmentError) {
+        console.warn('Error loading slot assignments:', sectorError || assignmentError);
+      }
+
+      // Combine slot IDs from both sources with their dates
+      const sectorSlotData = sectorSlots?.map(assignment => ({ 
+        slot_id: assignment.slot_id, 
+        assigned_date: assignment.assigned_date 
+      })).filter((item): item is { slot_id: string; assigned_date: string } => 
+        item.slot_id !== null && item.assigned_date !== null
+      ) || [];
+      
+      const deliverySlotData = assignedSlots?.map(assignment => ({ 
+        slot_id: assignment.slot_id, 
+        assigned_date: assignment.assigned_date 
+      })).filter((item): item is { slot_id: string; assigned_date: string } => 
+        item.slot_id !== null && item.assigned_date !== null
+      ) || [];
+      
+      // Combine and deduplicate slot data
+      const allSlotData = [...sectorSlotData, ...deliverySlotData];
+      const uniqueSlotData = allSlotData.filter((item, index, self) => 
+        index === self.findIndex(t => t.slot_id === item.slot_id && t.assigned_date === item.assigned_date)
+      );
+
+      if (uniqueSlotData.length === 0) {
+        setDeliveredOrders([]);
+        console.log('📝 No slot assignments found for this partner.');
+        return;
+      }
+
+      // Step 2: Get delivered orders associated with these slots
+      const slotIds = uniqueSlotData.map(item => item.slot_id);
+      const { data: deliveredData, error: ordersError } = await supabase
+        .from('orders')
+        .select(`
+          id,
+          order_number,
+          total_amount,
+          delivery_date,
+          actual_delivery_date,
+          slot_id,
+          delivery_slots(slot_name),
+          customers(profiles(full_name))
+        `)
+        .in('slot_id', slotIds)
+        .eq('order_status', 'delivered')
+        .not('actual_delivery_date', 'is', null)
+        .order('actual_delivery_date', { ascending: false })
+        .limit(50); // Increased limit to show more delivered orders
+
+      if (ordersError) throw ordersError;
+
+      // Filter to only include orders from slots actually assigned to this delivery partner
+      const validDeliveredOrders = (deliveredData || []).filter(order => {
+        return uniqueSlotData.some(slotData => 
+          slotData.slot_id === order.slot_id && 
+          slotData.assigned_date === order.delivery_date
+        );
+      });
+
+      const completedOrders: CompletedOrder[] = validDeliveredOrders.map(item => ({
+        order_id: item.id,
+        order_number: item.order_number || '',
+        customer_name: item.customers?.[0]?.profiles?.[0]?.full_name || 'Unknown',
+        delivery_date: item.delivery_date || '',
+        delivery_time: item.actual_delivery_date || '',
+        total_amount: item.total_amount || 0,
+        slot_name: item.delivery_slots?.[0]?.slot_name || '',
+        earnings: Math.round((item.total_amount || 0) * 0.1) // 10% commission
       }));
 
       setDeliveredOrders(completedOrders);
       console.log('✅ Delivered orders loaded:', completedOrders.length);
-    } catch (error) {
-      console.error('💥 Error loading delivered orders:', error);
+    } catch (error: any) {
+      console.error('💥 Error loading delivered orders:', error.message);
       setDeliveredOrders([]);
     }
   };
@@ -524,7 +784,7 @@ const DeliveryPartnerDashboard = () => {
     try {
       console.log('📊 Loading delivery stats for partner:', deliveryPartnerId);
       const result = await DeliveryAPI.getDeliveryStats(deliveryPartnerId);
-      
+
       if (result.success && result.data) {
         setStats(result.data);
         console.log('✅ Stats loaded successfully');
@@ -540,7 +800,7 @@ const DeliveryPartnerDashboard = () => {
 
   const refreshData = async () => {
     if (!deliveryPartner) return;
-    
+
     try {
       setRefreshing(true);
       await Promise.allSettled([
@@ -566,7 +826,7 @@ const DeliveryPartnerDashboard = () => {
     try {
       const { error } = await supabase
         .from('delivery_partners')
-        .update({ 
+        .update({
           is_available: available,
           updated_at: new Date().toISOString()
         })
@@ -576,7 +836,7 @@ const DeliveryPartnerDashboard = () => {
 
       setIsAvailable(available);
       setDeliveryPartner({ ...deliveryPartner, is_available: available });
-      
+
       toast.success(available ? 'You are now available for orders' : 'You are now unavailable');
     } catch (error) {
       console.error('Error updating availability:', error);
@@ -598,9 +858,67 @@ const DeliveryPartnerDashboard = () => {
 
       toast.success('Vendor pickup marked as complete');
       await refreshData();
+      // Log the updated status for debugging
+      console.log('DEBUG: Vendor status after refresh for vendor', vendor.vendor_id, 'is', vendor.pickup_status);
     } catch (error) {
       console.error('Error marking vendor pickup:', error);
       toast.error('Failed to mark vendor pickup');
+    }
+  };
+
+  const handleStartDelivery = async (orderId: string) => {
+    if (!deliveryPartner) return;
+    try {
+      // First ensure the order is marked as picked_up in the main orders table
+      const { data: currentOrder, error: fetchError } = await supabase
+        .from('orders')
+        .select('order_status')
+        .eq('id', orderId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      // If order is not yet marked as picked_up, update it first
+      if (currentOrder.order_status !== 'picked_up') {
+        const { error: updateError } = await supabase
+          .from('orders')
+          .update({
+            order_status: 'picked_up',
+            picked_up_date: new Date().toISOString()
+          })
+          .eq('id', orderId);
+
+        if (updateError) throw updateError;
+        console.log('✅ Updated order status to picked_up');
+      }
+
+      // Now mark as out for delivery
+      const { error: outForDeliveryError } = await supabase
+        .from('orders')
+        .update({
+          order_status: 'out_for_delivery',
+          out_for_delivery_time: new Date().toISOString()
+        })
+        .eq('id', orderId);
+
+      if (outForDeliveryError) throw outForDeliveryError;
+
+      // Also update delivery partner orders status
+      const { error: dpOrderError } = await supabase
+        .from('delivery_partner_orders')
+        .update({
+          status: 'out_for_delivery'
+        })
+        .eq('order_id', orderId)
+        .eq('delivery_partner_id', deliveryPartner.id);
+
+      if (dpOrderError) throw dpOrderError;
+
+      toast.success('Started delivery - Order is now out for delivery');
+      await refreshData();
+    } catch (error) {
+      console.error('Error starting delivery:', error);
+      toast.error('Failed to start delivery');
     }
   };
 
@@ -608,6 +926,7 @@ const DeliveryPartnerDashboard = () => {
     if (!deliveryPartner) return;
     try {
       const res = await DeliveryAPI.markDelivered(orderId, deliveryPartner.id);
+      console.log('DEBUG: markDelivered API response:', res);
       if (!res.success) throw res.error;
 
       toast.success('Order delivered successfully');
@@ -624,12 +943,37 @@ const DeliveryPartnerDashboard = () => {
       case 'picking_up': return 'bg-yellow-100 text-yellow-800';
       case 'delivering': return 'bg-purple-100 text-purple-800';
       case 'completed': return 'bg-green-100 text-green-800';
+      case 'blocked': return 'bg-red-100 text-red-800';
       case 'picked_up': return 'bg-green-100 text-green-800';
       case 'pending': return 'bg-gray-100 text-gray-800';
       case 'out_for_delivery': return 'bg-blue-100 text-blue-800';
       case 'delivered': return 'bg-green-100 text-green-800';
       default: return 'bg-gray-100 text-gray-800';
     }
+  };
+
+  const getSlotStatusIcon = (status: SlotOrder['status']) => {
+    switch (status) {
+      case 'assigned': return <Clock className="h-4 w-4" />;
+      case 'picking_up': return <Package className="h-4 w-4" />;
+      case 'delivering': return <Truck className="h-4 w-4" />;
+      case 'completed': return <CheckCircle className="h-4 w-4" />;
+      case 'blocked': return <Shield className="h-4 w-4" />;
+      default: return <Activity className="h-4 w-4" />;
+    }
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Copied to clipboard');
+    } catch (err) {
+      toast.error('Failed to copy');
+    }
+  };
+
+  const openNavigation = (url: string) => {
+    window.open(url, '_blank');
   };
 
   const formatTime = (timeString: string) => {
@@ -688,15 +1032,9 @@ const DeliveryPartnerDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      {/* Organic background shapes */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-20 right-20 w-72 h-72 bg-blue-100 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob"></div>
-        <div className="absolute top-40 left-20 w-96 h-96 bg-purple-100 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob animation-delay-2000"></div>
-      </div>
-      
-      <Header cartItems={0} onCartClick={() => {}} />
-      
-      <main className="relative container mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <Header cartItems={0} onCartClick={() => { }} />
+
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-20 sm:pb-8">
         {/* Mobile-First Header */}
         <div className="mb-6 sm:mb-8">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -706,12 +1044,12 @@ const DeliveryPartnerDashboard = () => {
               </h1>
               <p className="text-gray-600 font-medium">Manage your slot-based deliveries and track earnings</p>
             </div>
-            
+
             <div className="flex flex-col gap-3 w-full sm:w-auto">
               {/* Mobile: Grid layout for better touch */}
               <div className="grid grid-cols-2 sm:hidden gap-2">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={refreshData}
                   className="flex-1 min-h-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
                   disabled={refreshing}
@@ -719,17 +1057,6 @@ const DeliveryPartnerDashboard = () => {
                   <div className="flex flex-col items-center gap-1">
                     <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
                     <span className="text-xs">{refreshing ? 'Updating' : 'Refresh'}</span>
-                  </div>
-                </Button>
-
-                <Button 
-                  variant="outline" 
-                  onClick={() => navigate('/delivery-slot-dashboard')}
-                  className="flex-1 min-h-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
-                >
-                  <div className="flex flex-col items-center gap-1">
-                    <Clock className="h-4 w-4" />
-                    <span className="text-xs">Slot View</span>
                   </div>
                 </Button>
               </div>
@@ -746,23 +1073,14 @@ const DeliveryPartnerDashboard = () => {
 
               {/* Desktop: Original layout */}
               <div className="hidden sm:flex gap-3">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={refreshData}
                   className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 font-medium"
                   disabled={refreshing}
                 >
                   <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
                   <span>{refreshing ? 'Updating...' : 'Refresh'}</span>
-                </Button>
-
-                <Button 
-                  variant="outline" 
-                  onClick={() => navigate('/delivery-slot-dashboard')}
-                  className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 font-medium"
-                >
-                  <Clock className="h-4 w-4" />
-                  <span>Slot Dashboard</span>
                 </Button>
               </div>
             </div>
@@ -796,44 +1114,14 @@ const DeliveryPartnerDashboard = () => {
               </p>
             </CardContent>
           </Card>
-
-          <Card className="bg-gradient-to-br from-yellow-50 to-yellow-100 border-yellow-200 shadow-soft hover:shadow-medium transition-all duration-200">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-semibold text-yellow-800">Rating</CardTitle>
-              <Star className="h-5 w-5 text-yellow-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl lg:text-3xl font-bold text-yellow-700">{deliveryPartner?.rating || 0.0}</div>
-              <p className="text-xs text-yellow-600 font-medium mt-1">
-                {deliveryPartner?.total_deliveries || 0} total deliveries
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200 shadow-soft hover:shadow-medium transition-all duration-200">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-semibold text-purple-800">Success Rate</CardTitle>
-              <Target className="h-5 w-5 text-purple-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl lg:text-3xl font-bold text-purple-700">
-                {deliveryPartner?.total_deliveries ? 
-                  Math.round((deliveryPartner.successful_deliveries / deliveryPartner.total_deliveries) * 100) 
-                  : 0}%
-              </div>
-              <p className="text-xs text-purple-600 font-medium mt-1">
-                {deliveryPartner?.successful_deliveries || 0} successful
-              </p>
-            </CardContent>
-          </Card>
         </div>
 
         <Tabs defaultValue="my-orders" className="w-full">
           {/* Mobile-first tabs with improved layout */}
           <div className="block sm:hidden mb-4">
             <TabsList className="flex flex-wrap gap-1 p-1 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl shadow-soft h-auto">
-              <TabsTrigger 
-                value="my-orders" 
+              <TabsTrigger
+                value="my-orders"
                 className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
               >
                 <div className="flex flex-col items-center gap-1">
@@ -841,8 +1129,8 @@ const DeliveryPartnerDashboard = () => {
                   <span>My Orders ({myOrders.length})</span>
                 </div>
               </TabsTrigger>
-              <TabsTrigger 
-                value="delivered" 
+              <TabsTrigger
+                value="delivered"
                 className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
               >
                 <div className="flex flex-col items-center gap-1">
@@ -879,125 +1167,235 @@ const DeliveryPartnerDashboard = () => {
               <CardContent>
                 {!isAvailable && (
                   <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-xl shadow-soft">
-                    <div className="flex items-center">
-                      <AlertTriangle className="h-4 w-4 text-yellow-600 mr-2" />
-                      <span className="text-sm font-medium text-yellow-800">
-                        You're currently unavailable. Toggle your availability to receive new slot assignments.
-                      </span>
+                    <div className="flex items-center gap-3">
+                      <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0" />
+                      <div>
+                        <h4 className="font-semibold text-yellow-800">Currently Unavailable</h4>
+                        <p className="text-sm text-yellow-700">Turn on availability to start receiving orders</p>
+                      </div>
                     </div>
                   </div>
                 )}
 
                 {myOrders.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">No active slots</h3>
-                    <p className="text-gray-600">
-                      {!isAvailable
-                        ? "Set yourself as available to receive slot assignments."
-                        : "New delivery slots will appear here when assigned."
-                      }
+                  <div className="text-center py-12">
+                    <div className="mx-auto w-20 h-20 bg-gradient-to-br from-gray-100 to-gray-200 rounded-full flex items-center justify-center mb-4">
+                      <Package className="h-8 w-8 text-gray-400" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-gray-700 mb-2">No Active Slots</h3>
+                    <p className="text-gray-500 mb-4">
+                      You don't have any active delivery slots assigned for today.
+                      {deliveredOrders.length > 0 && (
+                        <span className="block mt-2 text-sm">
+                          ✅ Completed slots have been moved to the "Delivered" tab.
+                        </span>
+                      )}
                     </p>
+                    {isAvailable && (
+                      <Button
+                        onClick={refreshData}
+                        variant="outline"
+                        className="rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50"
+                      >
+                        Check for New Assignments
+                      </Button>
+                    )}
                   </div>
                 ) : (
-                  <div className="space-y-4">
+                  <div className="space-y-4 lg:space-y-6">
                     {myOrders.map((slot) => (
-                      <Card key={slot.slot_id} className="border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-                        <CardHeader 
-                          className="cursor-pointer"
-                          onClick={() => setExpandedSlotId(expandedSlotId === slot.slot_id ? '' : slot.slot_id)}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="p-2 bg-blue-100 rounded-lg">
-                                <Clock className="h-5 w-5 text-blue-600" />
+                      <Card key={slot.slot_id} className={cn(
+                        "shadow-soft border transition-all duration-200 hover:shadow-medium",
+                        slot.status === 'completed' ? 'border-green-200 bg-green-50' :
+                          slot.status === 'blocked' ? 'border-red-200 bg-red-50' :
+                            slot.status === 'delivering' ? 'border-purple-200 bg-purple-50' :
+                              slot.status === 'picking_up' ? 'border-yellow-200 bg-yellow-50' :
+                                'border-blue-200 bg-blue-50'
+                      )}>
+                        <CardHeader>
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                {getSlotStatusIcon(slot.status)}
+                                <h3 className="text-lg lg:text-xl font-bold text-gray-900">{slot.slot_name}</h3>
+                                <Badge className={cn("text-xs", getStatusBadgeColor(slot.status))}>
+                                  {slot.status.replace('_', ' ').toUpperCase()}
+                                </Badge>
                               </div>
-                              <div>
-                                <CardTitle className="text-base font-semibold text-gray-900">
-                                  {slot.slot_name}
-                                </CardTitle>
-                                <p className="text-sm text-gray-600">
-                                  {formatTime(slot.start_time)} - {formatTime(slot.end_time)} • {slot.sector_name}
-                                </p>
+                              <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600 mb-2">
+                                <div className="flex items-center gap-1">
+                                  <Clock className="h-4 w-4" />
+                                  <span className="font-medium">{formatTime(slot.start_time)} - {formatTime(slot.end_time)}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <MapPin className="h-4 w-4" />
+                                  <span>{slot.sector_name}</span>
+                                </div>
+                              </div>
+
+                              {/* Mobile-optimized progress bars */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-xs font-medium text-gray-700">Pickup Progress</span>
+                                    <span className="text-xs font-bold text-gray-900">{slot.pickup_progress}%</span>
+                                  </div>
+                                  <Progress value={slot.pickup_progress} className="h-2" />
+                                </div>
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-xs font-medium text-gray-700">Delivery Progress</span>
+                                    <span className="text-xs font-bold text-gray-900">{slot.delivery_progress}%</span>
+                                  </div>
+                                  <Progress value={slot.delivery_progress} className="h-2" />
+                                </div>
                               </div>
                             </div>
-                            <div className="flex items-center gap-3">
-                              <Badge className={cn("text-xs", getStatusBadgeColor(slot.status))}>
-                                {slot.status.replace('_', ' ').toUpperCase()}
-                              </Badge>
-                              <ArrowRight 
-                                className={cn(
-                                  "h-4 w-4 text-gray-400 transition-transform",
-                                  expandedSlotId === slot.slot_id && "rotate-90"
-                                )} 
-                              />
+
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                              <div className="text-right">
+                                <div className="text-2xl lg:text-3xl font-bold text-gray-900">₹{slot.total_amount.toLocaleString()}</div>
+                                <div className="text-sm text-gray-600">{slot.total_orders} orders</div>
+                              </div>
+
+                              <Button
+                                variant="outline"
+                                onClick={() => setExpandedSlotId(expandedSlotId === slot.slot_id ? '' : slot.slot_id)}
+                                className="rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 p-2 transition-all duration-200"
+                              >
+                                {expandedSlotId === slot.slot_id ?
+                                  <ChevronUp className="h-5 w-5" /> :
+                                  <ChevronDown className="h-5 w-5" />
+                                }
+                              </Button>
                             </div>
                           </div>
-                          
-                          <div className="grid grid-cols-3 gap-4 pt-3">
-                            <div className="text-center">
-                              <p className="text-sm text-gray-600">Orders</p>
-                              <p className="font-semibold text-gray-900">{slot.total_orders}</p>
-                            </div>
-                            <div className="text-center">
-                              <p className="text-sm text-gray-600">Vendors</p>
-                              <p className="font-semibold text-gray-900">{slot.vendors.length}</p>
-                            </div>
-                            <div className="text-center">
-                              <p className="text-sm text-gray-600">Amount</p>
-                              <p className="font-semibold text-gray-900">₹{slot.total_amount}</p>
-                            </div>
-                          </div>
+
+                          {!slot.can_start && slot.status === 'blocked' && (
+                            <Alert className="bg-red-50 border-red-200">
+                              <Shield className="h-4 w-4 text-red-600" />
+                              <AlertDescription className="text-red-700 font-medium">
+                                Complete the previous slot before starting this one
+                              </AlertDescription>
+                            </Alert>
+                          )}
                         </CardHeader>
 
                         {expandedSlotId === slot.slot_id && (
                           <CardContent className="pt-0">
-                            <Separator className="mb-4" />
-                            
-                            {/* Vendor Pickup Section */}
+                            <Separator className="mb-6" />
+
+                            {/* Enhanced Vendor Pickup Section - Mobile Optimized */}
                             {slot.vendors.length > 0 && (
-                              <div className="mb-6">
-                                <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                                  <Store className="h-4 w-4" />
-                                  Vendor Pickups ({slot.vendors.filter(v => v.pickup_status === 'picked_up').length}/{slot.vendors.length})
-                                </h4>
-                                <div className="space-y-3">
+                              <div className="mb-8">
+                                <div className="flex items-center justify-between mb-4">
+                                  <h4 className="font-bold text-gray-900 flex items-center gap-2">
+                                    <Store className="h-5 w-5 text-orange-600" />
+                                    Vendor Pickups ({slot.vendors.filter(v => v.pickup_status === 'picked_up').length}/{slot.vendors.length})
+                                  </h4>
+                                  <Badge variant="outline" className="text-xs">
+                                    {slot.pickup_progress}% Complete
+                                  </Badge>
+                                </div>
+
+                                <div className="space-y-4">
                                   {slot.vendors.map((vendor) => (
-                                    <Card key={vendor.vendor_id} className="border border-gray-100">
+                                    <Card key={vendor.vendor_id} className="bg-white border border-gray-200 shadow-soft">
                                       <CardContent className="p-4">
-                                        <div className="flex items-center justify-between mb-3">
-                                          <div className="flex items-center gap-3">
-                                            <div className="p-2 bg-orange-100 rounded-lg">
-                                              <Store className="h-4 w-4 text-orange-600" />
+                                        <div className="flex flex-col gap-4">
+                                          <div className="flex items-start justify-between">
+                                            <div className="flex-1">
+                                              <h5 className="font-semibold text-gray-900 mb-1">{vendor.vendor_name}</h5>
+                                              <div className="flex items-center gap-1 text-sm text-gray-600">
+                                                <Phone className="h-3 w-3" />
+                                                <button
+                                                  onClick={() => copyToClipboard(vendor.vendor_phone)}
+                                                  className="hover:text-blue-600 transition-colors"
+                                                >
+                                                  {vendor.vendor_phone}
+                                                </button>
+                                              </div>
                                             </div>
-                                            <div>
-                                              <p className="font-medium text-gray-900">{vendor.vendor_name}</p>
-                                              <p className="text-sm text-gray-600">{vendor.vendor_phone}</p>
+
+                                            <div className="text-right">
+                                              <Badge className={cn("text-xs mb-2", getStatusBadgeColor(vendor.pickup_status))}>
+                                                {vendor.pickup_status.replace('_', ' ').toUpperCase()}
+                                              </Badge>
+                                              <p className="text-sm font-semibold text-gray-900">₹{vendor.total_amount.toLocaleString()}</p>
+                                              <p className="text-xs text-gray-600">{vendor.total_items} items</p>
                                             </div>
                                           </div>
-                                          <div className="flex items-center gap-2">
-                                            <Badge className={cn("text-xs", getStatusBadgeColor(vendor.pickup_status))}>
-                                              {vendor.pickup_status.replace('_', ' ').toUpperCase()}
-                                            </Badge>
-                                            {vendor.pickup_status === 'pending' && (
+
+                                          {/* Mobile-optimized action buttons */}
+                                          <div className="flex flex-col sm:flex-row gap-2">
+                                            {vendor.navigation_url && (
+                                              <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => openNavigation(vendor.navigation_url!)}
+                                                className="flex-1 sm:flex-none rounded-lg border-gray-200 hover:border-blue-300 hover:bg-blue-50"
+                                              >
+                                                <Route className="h-4 w-4 mr-2" />
+                                                Navigate
+                                              </Button>
+                                            )}
+
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={() => window.open(`tel:${vendor.vendor_phone}`)}
+                                              className="flex-1 sm:flex-none rounded-lg border-gray-200 hover:border-green-300 hover:bg-green-50"
+                                            >
+                                              <Phone className="h-4 w-4 mr-2" />
+                                              Call
+                                            </Button>
+
+                                            {vendor.pickup_status === 'pending' && slot.can_start && (
                                               <Button
                                                 size="sm"
                                                 onClick={() => handleVendorPickup(slot.slot_id, vendor)}
-                                                className="bg-green-600 hover:bg-green-700"
+                                                className="flex-1 sm:flex-none bg-green-600 hover:bg-green-700 rounded-lg"
                                               >
-                                                <CheckCircle className="h-4 w-4 mr-1" />
+                                                <CheckCircle className="h-4 w-4 mr-2" />
                                                 Mark Picked Up
                                               </Button>
                                             )}
                                           </div>
-                                        </div>
-                                        
-                                        <div className="grid grid-cols-2 gap-4 text-sm">
-                                          <div>
-                                            <p className="text-gray-600">Items: <span className="font-medium">{vendor.total_items}</span></p>
-                                          </div>
-                                          <div>
-                                            <p className="text-gray-600">Amount: <span className="font-medium">₹{vendor.total_amount}</span></p>
+
+                                          {/* Order Details for this Vendor - Collapsible on mobile */}
+                                          <div className="border-t border-gray-100 pt-3">
+                                            <p className="text-xs font-medium text-gray-700 mb-2">Orders to pickup:</p>
+                                            <div className="space-y-2">
+                                              {vendor.orders.map((order) => (
+                                                <div key={order.order_id} className="bg-gray-50 rounded-lg p-3">
+                                                  <div className="flex items-center justify-between mb-2">
+                                                    <p className="font-medium text-sm text-gray-900">{order.order_number}</p>
+                                                    <p className="text-sm font-semibold text-gray-900">₹{order.total_amount.toLocaleString()}</p>
+                                                  </div>
+                                                  <div className="text-xs text-gray-600 mb-2">
+                                                    Customer: {order.customer_name} • {order.customer_phone}
+                                                  </div>
+                                                  <div className="space-y-1 max-h-20 overflow-y-auto">
+                                                    {order.items.map((item, idx) => (
+                                                      <div key={idx} className="flex justify-between text-xs">
+                                                        <div className="truncate mr-2">
+                                                          <div className="font-bold text-gray-900 text-sm">{item.product_name} x{item.quantity}</div>
+                                                          {item.quality_type_name && (
+                                                            <div className="flex items-center gap-1 mt-1">
+                                                              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                                                              <span className="text-blue-700 font-bold text-xs bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                                                                Quality: {item.quality_type_name}
+                                                              </span>
+                                                            </div>
+                                                          )}
+                                                        </div>
+                                                        <span className="flex-shrink-0 font-bold text-gray-900 text-sm">₹{item.line_total.toLocaleString()}</span>
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                </div>
+                                              ))}
+                                            </div>
                                           </div>
                                         </div>
                                       </CardContent>
@@ -1007,57 +1405,132 @@ const DeliveryPartnerDashboard = () => {
                               </div>
                             )}
 
-                            {/* Customer Delivery Section */}
+                            {/* Show message if no deliveries are ready yet */}
+                            {slot.ready_for_delivery.length === 0 && slot.vendors.length > 0 && (
+                              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <Truck className="h-4 w-4 text-blue-600" />
+                                  <h4 className="font-medium text-blue-800">Customer Deliveries</h4>
+                                </div>
+                                <p className="text-sm text-blue-700 mb-2">
+                                  No deliveries ready yet. Complete vendor pickups to unlock customer deliveries.
+                                </p>
+                                <div className="text-xs text-blue-600">
+                                  Progress: {slot.vendors.filter(v => v.pickup_status === 'picked_up').length}/{slot.vendors.length} vendors picked up
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Customer Delivery Section - Mobile Optimized */}
                             {slot.ready_for_delivery.length > 0 && (
                               <div>
-                                <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                                  <Navigation className="h-4 w-4" />
-                                  Ready for Delivery ({slot.ready_for_delivery.length})
-                                </h4>
-                                <div className="space-y-3">
+                                <div className="flex items-center justify-between mb-4">
+                                  <h4 className="font-bold text-gray-900 flex items-center gap-2">
+                                    <Truck className="h-5 w-5 text-blue-600" />
+                                    Customer Deliveries ({slot.ready_for_delivery.filter(d => d.delivery_status === 'delivered').length}/{slot.ready_for_delivery.length})
+                                  </h4>
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="outline" className="text-xs">
+                                      {slot.delivery_progress}% Complete
+                                    </Badge>
+                                    {slot.ready_for_delivery.filter(d => d.delivery_status === 'out_for_delivery').length > 0 && (
+                                      <Badge className="bg-purple-100 text-purple-800 text-xs">
+                                        {slot.ready_for_delivery.filter(d => d.delivery_status === 'out_for_delivery').length} En Route
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="space-y-4">
                                   {slot.ready_for_delivery.map((delivery) => (
-                                    <Card key={delivery.order_id} className="border border-gray-100">
+                                    <Card key={delivery.order_id} className="bg-white border border-gray-200 shadow-soft">
                                       <CardContent className="p-4">
-                                        <div className="flex items-center justify-between mb-3">
-                                          <div className="flex items-center gap-3">
-                                            <div className="p-2 bg-purple-100 rounded-lg">
-                                              <User className="h-4 w-4 text-purple-600" />
+                                        <div className="flex flex-col gap-4">
+                                          <div className="flex items-start justify-between">
+                                            <div className="flex-1">
+                                              <h5 className="font-semibold text-gray-900 mb-1">#{delivery.order_number}</h5>
+                                              <p className="text-sm text-gray-900 font-medium mb-1">{delivery.customer_name}</p>
+                                              <p className="text-sm text-gray-600 mb-1">{delivery.delivery_address}</p>
+                                              <div className="flex items-center gap-1 text-sm text-gray-600">
+                                                <Phone className="h-3 w-3" />
+                                                <button
+                                                  onClick={() => copyToClipboard(delivery.customer_phone)}
+                                                  className="hover:text-blue-600 transition-colors"
+                                                >
+                                                  {delivery.customer_phone}
+                                                </button>
+                                              </div>
                                             </div>
-                                            <div>
-                                              <p className="font-medium text-gray-900">{delivery.customer_name}</p>
-                                              <p className="text-sm text-gray-600">{delivery.order_number}</p>
+
+                                            <div className="text-right">
+                                              <Badge className={cn("text-xs mb-2", getStatusBadgeColor(delivery.delivery_status))}>
+                                                {delivery.delivery_status.replace('_', ' ').toUpperCase()}
+                                              </Badge>
+                                              <p className="text-sm font-semibold text-gray-900">₹{delivery.total_amount.toLocaleString()}</p>
+                                              <p className="text-xs text-gray-600">{delivery.payment_method}</p>
                                             </div>
                                           </div>
-                                          <div className="flex items-center gap-2">
-                                            <Badge className={cn("text-xs", getStatusBadgeColor(delivery.delivery_status))}>
-                                              {delivery.delivery_status.replace('_', ' ').toUpperCase()}
-                                            </Badge>
+
+                                          {delivery.special_instructions && (
+                                            <div className="p-2 bg-blue-50 rounded-lg">
+                                              <p className="text-xs text-blue-800 font-medium">Special Instructions:</p>
+                                              <p className="text-xs text-blue-700">{delivery.special_instructions}</p>
+                                            </div>
+                                          )}
+
+                                          {/* Mobile-optimized action buttons */}
+                                          <div className="flex flex-col sm:flex-row gap-2">
+                                            {delivery.navigation_url && (
+                                              <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => openNavigation(delivery.navigation_url!)}
+                                                className="flex-1 sm:flex-none rounded-lg border-gray-200 hover:border-blue-300 hover:bg-blue-50"
+                                              >
+                                                <Route className="h-4 w-4 mr-2" />
+                                                Navigate
+                                              </Button>
+                                            )}
+
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={() => window.open(`tel:${delivery.customer_phone}`)}
+                                              className="flex-1 sm:flex-none rounded-lg border-gray-200 hover:border-green-300 hover:bg-green-50"
+                                            >
+                                              <Phone className="h-4 w-4 mr-2" />
+                                              Call Customer
+                                            </Button>
+
                                             {delivery.delivery_status === 'pending' && (
                                               <Button
                                                 size="sm"
-                                                onClick={() => handleCustomerDelivery(delivery.order_id)}
-                                                className="bg-blue-600 hover:bg-blue-700"
+                                                onClick={() => handleStartDelivery(delivery.order_id)}
+                                                className="flex-1 sm:flex-none bg-purple-600 hover:bg-purple-700 rounded-lg"
                                               >
-                                                <CheckCircle className="h-4 w-4 mr-1" />
+                                                <Truck className="h-4 w-4 mr-2" />
+                                                Start Delivery
+                                              </Button>
+                                            )}
+
+                                            {delivery.delivery_status === 'out_for_delivery' && (
+                                              <Button
+                                                size="sm"
+                                                onClick={() => handleCustomerDelivery(delivery.order_id)}
+                                                className="flex-1 sm:flex-none bg-green-600 hover:bg-green-700 rounded-lg"
+                                              >
+                                                <CheckCircle className="h-4 w-4 mr-2" />
                                                 Mark Delivered
                                               </Button>
                                             )}
+
+                                            {delivery.delivery_status === 'delivered' && (
+                                              <div className="flex items-center gap-2 text-green-600">
+                                                <CheckCircle className="h-4 w-4" />
+                                                <span className="text-sm font-medium">Delivered</span>
+                                              </div>
+                                            )}
                                           </div>
-                                        </div>
-                                        
-                                        <div className="space-y-2 text-sm">
-                                          <p className="text-gray-600">
-                                            <Phone className="h-3 w-3 inline mr-1" />
-                                            {delivery.customer_phone}
-                                          </p>
-                                          <p className="text-gray-600">
-                                            <MapPin className="h-3 w-3 inline mr-1" />
-                                            {delivery.delivery_address}
-                                          </p>
-                                          <p className="text-gray-600">
-                                            <DollarSign className="h-3 w-3 inline mr-1" />
-                                            ₹{delivery.total_amount} • {delivery.payment_method}
-                                          </p>
                                         </div>
                                       </CardContent>
                                     </Card>
@@ -1088,42 +1561,42 @@ const DeliveryPartnerDashboard = () => {
               </CardHeader>
               <CardContent>
                 {deliveredOrders.length === 0 ? (
-                  <div className="text-center py-8">
-                    <CheckCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">No delivered orders</h3>
-                    <p className="text-gray-600">
-                      Completed deliveries will appear here.
-                    </p>
+                  <div className="text-center py-12">
+                    <div className="mx-auto w-20 h-20 bg-gradient-to-br from-gray-100 to-gray-200 rounded-full flex items-center justify-center mb-4">
+                      <CheckCircle className="h-8 w-8 text-gray-400" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-gray-700 mb-2">No Deliveries Yet</h3>
+                    <p className="text-gray-500">Your completed deliveries will appear here</p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {deliveredOrders.map((order) => (
-                      <Card key={order.order_id} className="border border-gray-100 hover:shadow-md transition-shadow">
+                      <Card key={order.order_id} className="bg-green-50 border border-green-200 shadow-soft">
                         <CardContent className="p-4">
-                          <div className="flex items-center justify-between mb-3">
-                            <div className="flex items-center gap-3">
-                              <div className="p-2 bg-green-100 rounded-lg">
-                                <CheckCircle className="h-5 w-5 text-green-600" />
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <h5 className="font-semibold text-gray-900">#{order.order_number}</h5>
+                                <Badge className="bg-green-100 text-green-800 text-xs">
+                                  {order.slot_name}
+                                </Badge>
                               </div>
-                              <div>
-                                <p className="font-medium text-gray-900">{order.customer_name}</p>
-                                <p className="text-sm text-gray-600">{order.order_number} • {order.slot_name}</p>
-                              </div>
+                              <p className="text-sm text-gray-900 font-medium mb-1">{order.customer_name}</p>
+                              <p className="text-xs text-gray-600">
+                                Delivered: {formatDateTime(order.delivery_time)}
+                              </p>
                             </div>
+
                             <div className="text-right">
-                              <p className="font-semibold text-gray-900">₹{order.total_amount}</p>
-                              <p className="text-sm text-green-600">+₹{order.earnings} earned</p>
+                              <div className="text-lg font-bold text-gray-900">₹{order.total_amount.toLocaleString()}</div>
+                              <div className="text-sm font-semibold text-green-600">Earned: ₹{order.earnings}</div>
+                              {order.rating && (
+                                <div className="flex items-center gap-1 justify-end">
+                                  <Star className="h-3 w-3 text-yellow-500 fill-current" />
+                                  <span className="text-xs text-gray-600">{order.rating}</span>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                          
-                          <div className="flex items-center justify-between text-sm text-gray-600">
-                            <p>Delivered: {formatDateTime(order.delivery_time)}</p>
-                            {order.rating && (
-                              <div className="flex items-center gap-1">
-                                <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-                                <span>{order.rating}</span>
-                              </div>
-                            )}
                           </div>
                         </CardContent>
                       </Card>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Package, Truck, Clock, MapPin, User, Phone, CheckCircle, 
+import {
+  Package, Truck, Clock, MapPin, User, Phone, CheckCircle,
   AlertTriangle, Navigation, RefreshCw, Settings, Timer,
   Store, ArrowRight, Bell, Star, Target, TrendingUp
 } from 'lucide-react';
@@ -93,7 +93,7 @@ interface DeliveryPartner {
 const DeliverySlotDashboard = () => {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
-  
+
   // Core state
   const [deliveryPartner, setDeliveryPartner] = useState<DeliveryPartner | null>(null);
   const [deliverySlots, setDeliverySlots] = useState<DeliverySlot[]>([]);
@@ -105,7 +105,7 @@ const DeliverySlotDashboard = () => {
     total_earnings: 0,
     efficiency_score: 95
   });
-  
+
   // UI state
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -144,7 +144,7 @@ const DeliverySlotDashboard = () => {
     try {
       setError(null); // Clear previous errors
       setLoading(true);
-      
+
       // Get delivery partner info
       const partnerData = await fetchDeliveryPartnerByProfileId(profile!.id);
       if (!partnerData) {
@@ -152,15 +152,15 @@ const DeliverySlotDashboard = () => {
         setLoading(false);
         return;
       }
-      
+
       setDeliveryPartner(partnerData);
-      
+
       // Load slot-based deliveries and stats
       await Promise.all([
         loadDeliverySlots(partnerData.id),
         loadDeliveryStats(partnerData.id)
       ]);
-      
+
     } catch (error) {
       console.error('Error initializing delivery dashboard:', error);
       setError('Failed to load dashboard data. Please try again later.');
@@ -260,10 +260,7 @@ const DeliverySlotDashboard = () => {
                 )
               ),
               vendor_addresses!inner(
-                address_box,
-                area,
-                city,
-                pincode
+                address_box
               )
             )
           )
@@ -277,20 +274,20 @@ const DeliverySlotDashboard = () => {
 
       // Group by slots and vendors
       const slotMap = new Map<string, DeliverySlot>();
-      
+
       assignmentsData?.forEach((assignment: any) => {
         const order = assignment.orders;
         const slot = order.delivery_slots;
         const customer = order.customers.profiles;
         const deliveryAddress = order.delivery_addresses;
         const sector = slot.sectors;
-        
+
         // Initialize slot if not exists
         if (!slotMap.has(slot.id)) {
           const now = new Date();
           const cutoffTime = new Date(`${selectedDate}T${slot.cutoff_time}`);
           const pickupTime = new Date(cutoffTime.getTime() + (slot.pickup_delay_minutes * 60000));
-          
+
           slotMap.set(slot.id, {
             slot_id: slot.id,
             slot_name: slot.slot_name,
@@ -308,21 +305,21 @@ const DeliverySlotDashboard = () => {
             sector_name: sector.name
           });
         }
-        
+
         const slotData = slotMap.get(slot.id)!;
-        
+
         // Group by vendors within the slot
         order.order_items.forEach((item: any) => {
           const vendor = item.vendors;
           const vendorAddress = item.vendor_addresses;
-          
+
           let vendorPickup = slotData.vendors.find(v => v.vendor_id === vendor.id);
-          
+
           if (!vendorPickup) {
             vendorPickup = {
               vendor_id: vendor.id,
               vendor_name: vendor.business_name,
-              vendor_address: `${vendorAddress.address_box}, ${vendorAddress.area}, ${vendorAddress.city} ${vendorAddress.pincode}`,
+              vendor_address: vendorAddress.address_box,
               vendor_phone: vendor.profiles.phone || 'N/A',
               orders: [],
               total_items: 0,
@@ -332,10 +329,10 @@ const DeliverySlotDashboard = () => {
             };
             slotData.vendors.push(vendorPickup);
           }
-          
+
           // Find or create order within vendor
           let vendorOrder = vendorPickup.orders.find(o => o.order_id === order.id);
-          
+
           if (!vendorOrder) {
             vendorOrder = {
               order_id: order.id,
@@ -353,7 +350,7 @@ const DeliverySlotDashboard = () => {
             };
             vendorPickup.orders.push(vendorOrder);
           }
-          
+
           // Add item to order
           vendorOrder.items.push({
             product_name: item.product_name,
@@ -362,17 +359,17 @@ const DeliverySlotDashboard = () => {
             line_total: item.line_total,
             vendor_instructions: 'Handle with care'
           });
-          
+
           vendorPickup.total_items += item.quantity;
           vendorPickup.total_amount += item.line_total;
         });
-        
+
         slotData.total_orders++;
         slotData.total_revenue += order.total_amount;
       });
 
       // Convert to array and sort
-      const slotsArray = Array.from(slotMap.values()).sort((a, b) => 
+      const slotsArray = Array.from(slotMap.values()).sort((a, b) =>
         a.start_time.localeCompare(b.start_time)
       );
 
@@ -388,16 +385,16 @@ const DeliverySlotDashboard = () => {
       // This would be implemented based on your analytics requirements
       setStats({
         today_slots: deliverySlots.length,
-        pending_pickups: deliverySlots.reduce((sum, slot) => 
+        pending_pickups: deliverySlots.reduce((sum, slot) =>
           sum + slot.vendors.filter(v => v.pickup_status === 'pending').length, 0
         ),
-        active_deliveries: deliverySlots.reduce((sum, slot) => 
-          sum + slot.vendors.reduce((vSum, vendor) => 
+        active_deliveries: deliverySlots.reduce((sum, slot) =>
+          sum + slot.vendors.reduce((vSum, vendor) =>
             vSum + vendor.orders.filter(o => o.status === 'picked_up' || o.status === 'out_for_delivery').length, 0
           ), 0
         ),
-        completed_deliveries: deliverySlots.reduce((sum, slot) => 
-          sum + slot.vendors.reduce((vSum, vendor) => 
+        completed_deliveries: deliverySlots.reduce((sum, slot) =>
+          sum + slot.vendors.reduce((vSum, vendor) =>
             vSum + vendor.orders.filter(o => o.status === 'delivered').length, 0
           ), 0
         ),
@@ -411,7 +408,7 @@ const DeliverySlotDashboard = () => {
 
   const refreshData = async () => {
     if (!deliveryPartner || refreshing) return;
-    
+
     setRefreshing(true);
     try {
       await Promise.all([
@@ -469,14 +466,14 @@ const DeliverySlotDashboard = () => {
       // Update all orders from this vendor to 'picked_up'
       const slot = deliverySlots.find(s => s.slot_id === slotId);
       const vendor = slot?.vendors.find(v => v.vendor_id === vendorId);
-      
+
       if (!vendor) return;
 
       const orderIds = vendor.orders.map(o => o.order_id);
-      
+
       const { error } = await supabase
         .from('delivery_partner_orders')
-        .update({ 
+        .update({
           status: 'picked_up',
           picked_up_at: new Date().toISOString()
         })
@@ -497,7 +494,7 @@ const DeliverySlotDashboard = () => {
     try {
       // Use the proper DeliveryAPI.markDelivered function that updates all tables
       const result = await DeliveryAPI.markDelivered(orderId, deliveryPartner!.id);
-      
+
       if (!result.success) {
         throw new Error(result.error);
       }
@@ -541,7 +538,7 @@ const DeliverySlotDashboard = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       <Header onCartClick={() => {}} />
-      
+
       <div className="container mx-auto px-4 py-6 space-y-6">
         {/* Header Section */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -553,7 +550,7 @@ const DeliverySlotDashboard = () => {
             <p className="text-gray-600 mt-1">Slot-based Pickup & Delivery</p>
             <p className="text-sm text-gray-500">{currentTime.toLocaleString()}</p>
           </div>
-          
+
           <div className="flex items-center gap-3">
             <Button
               onClick={refreshData}
@@ -661,7 +658,7 @@ const DeliverySlotDashboard = () => {
                           {slot.status === 'completed' && '✅ Completed'}
                         </Badge>
                       </div>
-                      
+
                       <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
                         <span className="flex items-center gap-1">
                           <Clock className="h-4 w-4" />
@@ -677,7 +674,7 @@ const DeliverySlotDashboard = () => {
                         </span>
                       </div>
                     </div>
-                    
+
                     <div className="text-right">
                       <div className="text-xl font-bold text-green-600">₹{slot.total_revenue.toLocaleString()}</div>
                       <div className="text-sm text-gray-600">{slot.total_orders} orders</div>
@@ -700,7 +697,7 @@ const DeliverySlotDashboard = () => {
                               <div className="flex items-center gap-2 mb-1">
                                 <Store className="h-4 w-4 text-orange-600" />
                                 <h4 className="font-semibold text-gray-900">{vendor.vendor_name}</h4>
-                                <Badge 
+                                <Badge
                                   variant="outline"
                                   className={
                                     vendor.pickup_status === 'completed' ? 'border-green-500 text-green-700' :
@@ -716,7 +713,7 @@ const DeliverySlotDashboard = () => {
                               <p className="text-sm text-gray-600">{vendor.vendor_address}</p>
                               <p className="text-xs text-gray-500">📞 {vendor.vendor_phone}</p>
                             </div>
-                            
+
                             <div className="text-right">
                               <div className="text-lg font-bold text-gray-900">₹{vendor.total_amount.toLocaleString()}</div>
                               <div className="text-sm text-gray-600">{vendor.orders.length} orders • {vendor.total_items} items</div>
@@ -749,7 +746,7 @@ const DeliverySlotDashboard = () => {
                                       {order.items.length} items • Est. {order.estimated_delivery_time}m delivery
                                     </div>
                                   </div>
-                                  
+
                                   <div className="text-right">
                                     <div className="font-bold text-gray-900">₹{order.total_amount.toLocaleString()}</div>
                                     {order.status === 'picked_up' && (
@@ -791,4 +788,4 @@ const DeliverySlotDashboard = () => {
   );
 };
 
-export default DeliverySlotDashboard; 
+export default DeliverySlotDashboard;

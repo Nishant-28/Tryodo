@@ -46,6 +46,19 @@ interface Order {
   cancellation_reason?: string;
   cancelled_date?: string;
   actual_delivery_date?: string;
+  slot_info?: {
+    slot_id: string;
+    slot_name: string;
+    delivery_window: string;
+    start_time: string;
+    end_time: string;
+    cutoff_time: string;
+    pickup_delay_minutes: number;
+  } | null;
+  sector_info?: {
+    sector_id: string;
+    sector_name: string;
+  } | null;
 }
 
 interface OrderItem {
@@ -598,6 +611,41 @@ const MyOrders = () => {
                             </div>
                             <div className="bg-green-100 p-3 rounded-full">
                               <User className="w-6 h-6 text-green-600" />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Delivery Slot Information */}
+                    {order.slot_info && (
+                      <div className="mb-6">
+                        <h4 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                          <Clock className="h-5 w-5 text-blue-600" />
+                          Delivery Slot
+                        </h4>
+                        <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-4 border-2 border-purple-200">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <h5 className="font-semibold text-lg text-purple-700 mb-1">{order.slot_info.slot_name}</h5>
+                              <p className="text-gray-700 text-lg">
+                                <span className="font-bold">📅 {order.slot_info.delivery_window}</span>
+                              </p>
+                              {order.sector_info && (
+                                <p className="text-sm text-gray-600 mt-1">
+                                  <MapPin className="h-4 w-4 inline mr-1" />
+                                  Sector: {order.sector_info.sector_name}
+                                </p>
+                              )}
+                            </div>
+                            <div className="text-right">
+                              <div className="bg-white rounded-lg p-3 shadow-sm">
+                                <p className="text-sm text-gray-600">Delivery Window</p>
+                                <p className="text-xl font-bold text-purple-600">{order.slot_info.delivery_window}</p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  Cut-off: {order.slot_info.cutoff_time}
+                                </p>
+                              </div>
                             </div>
                           </div>
                         </div>

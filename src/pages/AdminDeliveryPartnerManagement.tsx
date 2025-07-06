@@ -3,14 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import {
   Users, UserPlus, MapPin, TrendingUp, Shield,
   AlertTriangle, CheckCircle, Ban, RefreshCw,
-  Wallet, Settings, Search, Filter, Download
+  Wallet, Settings, Search, Filter, Download, Zap, RotateCcw,
+  Plus, Edit3, Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -18,6 +19,7 @@ import { Switch } from '@/components/ui/switch';
 import Header from '@/components/Header';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import { DeliveryAPI } from '@/lib/deliveryApi';
 import { toast } from 'sonner';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
@@ -41,11 +43,15 @@ interface DeliveryPartner {
   wallet_balance: number;
 }
 
-interface DeliveryZone {
+interface DeliveryPartnerSectorAssignment {
   id: string;
-  name: string;
-  pincodes: string[];
+  delivery_partner_id: string;
+  sector_id: string;
+  slot_id: string;
+  assigned_date: string;
   is_active: boolean;
+  sector?: any;
+  delivery_slot?: any;
 }
 
 const AdminDeliveryPartnerManagement = () => {
@@ -54,17 +60,28 @@ const AdminDeliveryPartnerManagement = () => {
   
   // State management
   const [partners, setPartners] = useState<DeliveryPartner[]>([]);
-  const [zones, setZones] = useState<DeliveryZone[]>([]);
+  const [availableSlots, setAvailableSlots] = useState<any[]>([]);
+  const [sectors, setSectors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
   const [filterVerified, setFilterVerified] = useState<'all' | 'verified' | 'unverified'>('all');
   
+  // Sector assignment states
+  const [selectedSector, setSelectedSector] = useState<string>('');
+  const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
+  const [submittingSectorAssignment, setSubmittingSectorAssignment] = useState(false);
+  
   // Dialog states
   const [addPartnerDialog, setAddPartnerDialog] = useState(false);
   const [editPartnerDialog, setEditPartnerDialog] = useState(false);
   const [selectedPartner, setSelectedPartner] = useState<DeliveryPartner | null>(null);
-  const [zoneManagementDialog, setZoneManagementDialog] = useState(false);
+  const [sectorAssignmentDialog, setSectorAssignmentDialog] = useState(false);
+  const [selectedPartnerForSector, setSelectedPartnerForSector] = useState<DeliveryPartner | null>(null);
+  
+  // Auto-assignment states
+  const [autoAssignLoading, setAutoAssignLoading] = useState(false);
+  const [resetAssignLoading, setResetAssignLoading] = useState(false);
   
   // Form states for new partner
   const [newPartner, setNewPartner] = useState({
@@ -80,11 +97,16 @@ const AdminDeliveryPartnerManagement = () => {
   useEffect(() => {
     if (user && profile?.role === 'admin') {
       loadDeliveryPartners();
-      loadDeliveryZones();
+      loadSectors();
+      loadAvailableSlots();
     } else {
       navigate('/login');
     }
   }, [user, profile]);
+
+  const generateTemporaryPassword = () => {
+    return Math.random().toString(36).slice(-8) + 'Temp!';
+  };
 
   const loadDeliveryPartners = async () => {
     try {
@@ -118,17 +140,57 @@ const AdminDeliveryPartnerManagement = () => {
     }
   };
 
-  const loadDeliveryZones = async () => {
+  const loadSectors = async () => {
     try {
+      console.log('🔄 Loading sectors...');
+      
       const { data, error } = await supabase
-        .from('delivery_zones')
-        .select('*');
+        .from('sectors')
+        .select('*')
+        .eq('is_active', true)
+        .order('city_name', { ascending: true });
 
       if (error) throw error;
-      setZones(data);
+      
+      console.log('✅ Loaded sectors successfully:', data);
+      setSectors(data || []);
+      
+      if (data && data.length > 0) {
+        toast.success(`Loaded ${data.length} sectors`);
+      } else {
+        console.log('ℹ️ No sectors found in database');
+      }
     } catch (error) {
-      console.error('Error loading delivery zones:', error);
-      toast.error('Failed to load delivery zones');
+      console.error('💥 Unexpected error loading sectors:', error);
+      toast.error(`Failed to load sectors: ${error.message}`);
+    }
+  };
+
+  const loadAvailableSlots = async () => {
+    try {
+      console.log('Loading available slots...');
+      const { data, error } = await supabase
+        .from('delivery_slots')
+        .select(`
+          *,
+          sector:sectors(name, city_name)
+        `)
+        .eq('is_active', true)
+        .order('start_time', { ascending: true });
+
+      if (error) throw error;
+      
+      console.log('Loaded available slots:', data);
+      setAvailableSlots(data || []);
+      
+      if (data && data.length > 0) {
+        console.log(`Loaded ${data.length} available slots`);
+      } else {
+        console.log('No available slots found');
+      }
+    } catch (error) {
+      console.error('Error loading available slots:', error);
+      toast.error('Failed to load available slots');
     }
   };
 
@@ -137,7 +199,7 @@ const AdminDeliveryPartnerManagement = () => {
       // First create a new profile
       const { data: profileData, error: profileError } = await supabase.auth.signUp({
         email: newPartner.email,
-        password: generateTemporaryPassword(), // You'll need to implement this
+        password: generateTemporaryPassword(),
         options: {
           data: {
             full_name: newPartner.full_name,
@@ -198,20 +260,74 @@ const AdminDeliveryPartnerManagement = () => {
     await handleUpdatePartner(partnerId, { is_verified: true });
   };
 
-  const handleUpdateZone = async (zoneId: string, updates: Partial<DeliveryZone>) => {
+  const handleAutoAssignDeliveryPartners = async () => {
     try {
-      const { error } = await supabase
-        .from('delivery_zones')
-        .update(updates)
-        .eq('id', zoneId);
+      setAutoAssignLoading(true);
+      toast.success("Starting Auto-Assignment", {
+        description: "Assigning delivery partners to slots with orders...",
+      });
 
-      if (error) throw error;
-
-      toast.success('Zone updated successfully');
-      loadDeliveryZones();
+      const result = await DeliveryAPI.autoAssignDeliveryPartners();
+      
+      if (result.success) {
+        toast.success("Auto-Assignment Complete", {
+          description: `Successfully assigned ${result.assignments} delivery partners to slots.`,
+        });
+      } else {
+        toast.error("Auto-Assignment Failed", {
+          description: result.error?.message || "Failed to auto-assign delivery partners",
+        });
+      }
     } catch (error) {
-      console.error('Error updating zone:', error);
-      toast.error('Failed to update zone');
+      console.error('Error in auto-assignment:', error);
+      toast.error("Error", {
+        description: "Failed to run auto-assignment",
+      });
+    } finally {
+      setAutoAssignLoading(false);
+    }
+  };
+
+  const handleResetAllAssignments = async () => {
+    try {
+      setResetAssignLoading(true);
+      const today = new Date().toISOString().split('T')[0];
+      
+      toast.success("Resetting Assignments", {
+        description: "Removing all delivery assignments for today...",
+      });
+
+      // Get all delivery assignments for today
+      const { data: assignments, error: fetchError } = await supabase
+        .from('delivery_assignments')
+        .select('slot_id')
+        .eq('assigned_date', today);
+
+      if (fetchError) throw fetchError;
+
+      if (!assignments || assignments.length === 0) {
+        toast.success("No assignments to reset");
+        return;
+      }
+
+      // Remove all assignments for today
+      const { error: deleteError } = await supabase
+        .from('delivery_assignments')
+        .delete()
+        .eq('assigned_date', today);
+
+      if (deleteError) throw deleteError;
+
+      toast.success("Reset Complete", {
+        description: `Successfully removed ${assignments.length} delivery assignments. You can now run auto-assignment again.`,
+      });
+    } catch (error) {
+      console.error('Error resetting assignments:', error);
+      toast.error("Error", {
+        description: "Failed to reset assignments",
+      });
+    } finally {
+      setResetAssignLoading(false);
     }
   };
 
@@ -234,6 +350,133 @@ const AdminDeliveryPartnerManagement = () => {
     return matchesSearch && matchesStatus && matchesVerified;
   });
 
+  const handleAssignSectorToPartner = async () => {
+    if (!selectedPartnerForSector || !selectedSector || selectedSlots.length === 0) {
+      toast.error('Please select a sector and at least one slot');
+      return;
+    }
+
+    try {
+      setSubmittingSectorAssignment(true);
+      const assignedDate = new Date().toISOString().split('T')[0];
+      
+      // First, check for existing assignments to avoid duplicates
+      const { data: existingAssignments, error: checkError } = await supabase
+        .from('delivery_partner_sector_assignments')
+        .select('slot_id')
+        .eq('delivery_partner_id', selectedPartnerForSector.id)
+        .eq('sector_id', selectedSector)
+        .eq('assigned_date', assignedDate)
+        .eq('is_active', true);
+
+      if (checkError) throw checkError;
+
+      // Filter out slots that are already assigned
+      const existingSlotIds = existingAssignments?.map(a => a.slot_id) || [];
+      const newSlotIds = selectedSlots.filter(slotId => !existingSlotIds.includes(slotId));
+      
+      if (newSlotIds.length === 0) {
+        toast.error('All selected slots are already assigned to this partner for today');
+        return;
+      }
+
+      // Create sector assignments for new slots only
+      const sectorAssignments = newSlotIds.map(slotId => ({
+        delivery_partner_id: selectedPartnerForSector.id,
+        sector_id: selectedSector,
+        slot_id: slotId,
+        assigned_date: assignedDate,
+        is_active: true
+      }));
+
+      const { error: sectorError } = await supabase
+        .from('delivery_partner_sector_assignments')
+        .insert(sectorAssignments);
+
+      if (sectorError) throw sectorError;
+
+      // Check for existing delivery assignments to avoid duplicates
+      const { data: existingDeliveryAssignments, error: deliveryCheckError } = await supabase
+        .from('delivery_assignments')
+        .select('slot_id')
+        .eq('delivery_partner_id', selectedPartnerForSector.id)
+        .eq('assigned_date', assignedDate);
+
+      if (deliveryCheckError) throw deliveryCheckError;
+
+      // Filter out slots that already have delivery assignments
+      const existingDeliverySlotIds = existingDeliveryAssignments?.map(a => a.slot_id) || [];
+      const newDeliverySlotIds = newSlotIds.filter(slotId => !existingDeliverySlotIds.includes(slotId));
+
+      // Create delivery assignments for backward compatibility (only for new slots)
+      if (newDeliverySlotIds.length > 0) {
+        const deliveryAssignments = newDeliverySlotIds.map(slotId => ({
+          delivery_partner_id: selectedPartnerForSector.id,
+          slot_id: slotId,
+          assigned_date: assignedDate,
+          sector_id: selectedSector,
+          max_orders: 30,
+          current_orders: 0,
+          status: 'assigned'
+        }));
+
+        const { error: deliveryError } = await supabase
+          .from('delivery_assignments')
+          .insert(deliveryAssignments);
+
+        if (deliveryError) {
+          console.warn('Warning: Failed to create delivery assignments for backward compatibility:', deliveryError);
+          // Don't throw error here as the main sector assignment succeeded
+        }
+      }
+
+      // Update delivery partner's assigned pincodes
+      const sector = sectors.find(s => s.id === selectedSector);
+      if (sector) {
+        // Get current assigned pincodes and merge with new sector pincodes
+        const currentPincodes = selectedPartnerForSector.assigned_pincodes || [];
+        const newPincodes = sector.pincodes.map(String);
+        const mergedPincodes = [...new Set([...currentPincodes, ...newPincodes])];
+        
+        await handleUpdatePartner(selectedPartnerForSector.id, {
+          assigned_pincodes: mergedPincodes
+        });
+      }
+
+      const assignedCount = newSlotIds.length;
+      const skippedCount = selectedSlots.length - assignedCount;
+      
+      let message = `Successfully assigned ${assignedCount} slot${assignedCount !== 1 ? 's' : ''} to ${selectedPartnerForSector.full_name}`;
+      if (skippedCount > 0) {
+        message += ` (${skippedCount} slot${skippedCount !== 1 ? 's' : ''} were already assigned)`;
+      }
+      
+      toast.success(message);
+      setSectorAssignmentDialog(false);
+      setSelectedSector('');
+      setSelectedSlots([]);
+      setSelectedPartnerForSector(null);
+      loadDeliveryPartners();
+    } catch (error) {
+      console.error('Error assigning sector:', error);
+      toast.error(`Failed to assign sector: ${error.message || 'Unknown error'}`);
+    } finally {
+      setSubmittingSectorAssignment(false);
+    }
+  };
+
+  const handleOpenSectorAssignment = async (partner: DeliveryPartner) => {
+    setSelectedPartnerForSector(partner);
+    
+    // Reload sectors and slots to ensure we have the latest data
+    await Promise.all([
+      loadSectors(),
+      loadAvailableSlots()
+    ]);
+    
+    setSectorAssignmentDialog(true);
+  };
+
   const exportToCSV = () => {
     // Implementation for exporting partner data to CSV
   };
@@ -250,12 +493,50 @@ const AdminDeliveryPartnerManagement = () => {
               <UserPlus size={20} />
               Add Partner
             </Button>
-            <Button variant="outline" onClick={() => setZoneManagementDialog(true)}>
-              <MapPin size={20} className="mr-2" />
-              Manage Zones
-            </Button>
           </div>
         </div>
+
+        {/* Auto-Assignment Controls */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5" />
+              Delivery Assignment Management
+            </CardTitle>
+            <CardDescription>
+              Automatically assign delivery partners to slots with orders, or reset all assignments for today
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-4 flex-wrap">
+              <Button 
+                onClick={handleAutoAssignDeliveryPartners}
+                disabled={autoAssignLoading}
+                className="flex items-center gap-2"
+              >
+                {autoAssignLoading ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Zap className="h-4 w-4" />
+                )}
+                {autoAssignLoading ? 'Assigning...' : 'Auto-Assign Delivery Partners'}
+              </Button>
+              <Button 
+                variant="outline"
+                onClick={handleResetAllAssignments}
+                disabled={resetAssignLoading}
+                className="flex items-center gap-2"
+              >
+                {resetAssignLoading ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-4 w-4" />
+                )}
+                {resetAssignLoading ? 'Resetting...' : 'Reset All Assignments'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
 
         <Card className="mb-6">
           <CardContent className="pt-6">
@@ -265,7 +546,7 @@ const AdminDeliveryPartnerManagement = () => {
                   placeholder="Search partners..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  prefix={<Search size={20} />}
+                  className="pl-10"
                 />
               </div>
               <Select value={filterStatus} onValueChange={(value: any) => setFilterStatus(value)}>
@@ -317,7 +598,7 @@ const AdminDeliveryPartnerManagement = () => {
                 <CardContent>
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
-                      <Badge variant={partner.is_verified ? "success" : "warning"}>
+                      <Badge variant={partner.is_verified ? "default" : "secondary"}>
                         {partner.is_verified ? "Verified" : "Unverified"}
                       </Badge>
                       <Badge variant="outline">
@@ -328,7 +609,7 @@ const AdminDeliveryPartnerManagement = () => {
                     <div className="text-sm space-y-2">
                       <p>📱 {partner.phone}</p>
                       <p>🚗 {partner.vehicle_type} - {partner.vehicle_number}</p>
-                      <p>📍 {partner.assigned_pincodes.join(", ")}</p>
+                      <p>📍 {partner.assigned_pincodes.length > 0 ? partner.assigned_pincodes.join(", ") : "No sectors assigned"}</p>
                     </div>
 
                     <div className="flex justify-between items-center text-sm">
@@ -336,7 +617,7 @@ const AdminDeliveryPartnerManagement = () => {
                       <span>Success Rate: {((partner.successful_deliveries / partner.total_deliveries) * 100 || 0).toFixed(1)}%</span>
                     </div>
 
-                    <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-center gap-2">
                       <Button
                         variant="outline"
                         size="sm"
@@ -346,6 +627,14 @@ const AdminDeliveryPartnerManagement = () => {
                         }}
                       >
                         Edit
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => handleOpenSectorAssignment(partner)}
+                      >
+                        <MapPin size={16} className="mr-1" />
+                        Assign Sector
                       </Button>
                       {!partner.is_verified && (
                         <Button
@@ -450,15 +739,150 @@ const AdminDeliveryPartnerManagement = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Zone Management Dialog */}
-      <Dialog open={zoneManagementDialog} onOpenChange={setZoneManagementDialog}>
-        <DialogContent className="sm:max-w-[600px]">
+      {/* Sector Assignment Dialog */}
+      <Dialog open={sectorAssignmentDialog} onOpenChange={setSectorAssignmentDialog}>
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Manage Delivery Zones</DialogTitle>
+            <DialogTitle className="flex items-center justify-between">
+              <span>Assign Sector & Slots to Delivery Partner</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  await Promise.all([
+                    loadSectors(),
+                    loadAvailableSlots()
+                  ]);
+                }}
+                className="flex items-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Refresh Data
+              </Button>
+            </DialogTitle>
+            <DialogDescription>
+              {selectedPartnerForSector && 
+                `Assign delivery sector and time slots to ${selectedPartnerForSector.full_name}`
+              }
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            {/* Zone management content */}
+          
+          <div className="space-y-6 py-4">
+            {/* Sector Selection */}
+            <div className="space-y-2">
+              <Label htmlFor="sector-select">Select Delivery Sector *</Label>
+              {sectors.length === 0 ? (
+                <div className="p-3 border rounded-lg bg-yellow-50 text-yellow-800">
+                  <p className="text-sm">
+                    No delivery sectors found. Please ensure sectors are created in the system.
+                  </p>
+                </div>
+              ) : (
+                <Select value={selectedSector} onValueChange={setSelectedSector}>
+                  <SelectTrigger id="sector-select">
+                    <SelectValue placeholder="Choose a delivery sector" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sectors.filter(sector => sector.is_active).map(sector => (
+                      <SelectItem key={sector.id} value={sector.id}>
+                        {sector.name}, {sector.city_name} ({sector.pincodes.join(', ')})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <div className="text-xs text-gray-500">
+                Available sectors: {sectors.filter(sector => sector.is_active).length} / Total sectors: {sectors.length}
+              </div>
+            </div>
+
+            {/* Slot Selection */}
+            <div className="space-y-3">
+              <Label>Select Time Slots *</Label>
+              <div className="text-sm text-gray-600 mb-2">
+                Choose which time slots this delivery partner will handle
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto">
+                {availableSlots.filter(slot => slot.sector_id === selectedSector).map(slot => (
+                  <div key={slot.id} className="flex items-center space-x-3 p-3 border rounded-lg hover:bg-gray-50">
+                    <input
+                      type="checkbox"
+                      id={`slot-${slot.id}`}
+                      checked={selectedSlots.includes(slot.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedSlots([...selectedSlots, slot.id]);
+                        } else {
+                          setSelectedSlots(selectedSlots.filter(id => id !== slot.id));
+                        }
+                      }}
+                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor={`slot-${slot.id}`} className="flex-1 cursor-pointer">
+                      <div className="font-medium">{slot.slot_name}</div>
+                      <div className="text-sm text-gray-500">
+                        {slot.start_time} - {slot.end_time}
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        {slot.sector?.name}, {slot.sector?.city_name}
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        Max Orders: {slot.max_orders}
+                      </div>
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Selected Summary */}
+            {selectedSector && selectedSlots.length > 0 && (
+              <div className="p-4 bg-blue-50 rounded-lg">
+                <h4 className="font-medium text-blue-900 mb-2">Assignment Summary</h4>
+                <div className="text-sm text-blue-800">
+                  <div className="mb-1">
+                    <strong>Sector:</strong> {sectors.find(s => s.id === selectedSector)?.name}, {sectors.find(s => s.id === selectedSector)?.city_name}
+                  </div>
+                  <div className="mb-1">
+                    <strong>Pincodes:</strong> {sectors.find(s => s.id === selectedSector)?.pincodes.join(', ')}
+                  </div>
+                  <div>
+                    <strong>Slots:</strong> {selectedSlots.length} selected
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
+
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setSectorAssignmentDialog(false);
+                setSelectedSector('');
+                setSelectedSlots([]);
+                setSelectedPartnerForSector(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleAssignSectorToPartner}
+              disabled={!selectedSector || selectedSlots.length === 0 || submittingSectorAssignment}
+            >
+              {submittingSectorAssignment ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Assigning...
+                </>
+              ) : (
+                <>
+                  <MapPin className="w-4 h-4 mr-2" />
+                  Assign Sector & Slots
+                </>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

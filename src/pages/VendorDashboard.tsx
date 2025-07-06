@@ -19,15 +19,21 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import Header from '@/components/Header';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase, supabaseServiceRole } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import { TryodoAPI, TransactionAPI, WalletAPI, CommissionAPI, AnalyticsAPI } from '@/lib/api';
+import { TryodoAPI, TransactionAPI, CommissionAPI, AnalyticsAPI } from '@/lib/api';
 import { DeliveryAPI } from '@/lib/deliveryApi';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
 import { Alert as AlertComponent, AlertDescription } from '@/components/ui/alert';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
+
+// Silence console.log in production build for this file
+if (import.meta.env && import.meta.env.PROD) {
+  // eslint-disable-next-line no-console
+  console.log = () => { };
+}
 
 type SupabaseOrderData = {
   id: string;
@@ -129,6 +135,7 @@ interface PendingOrder {
   vendor_id: string;
   product_name: string;
   product_description: string;
+  quality_type_name: string | null;
   unit_price: number;
   quantity: number;
   line_total: number;
@@ -160,6 +167,7 @@ interface ConfirmedOrder {
   vendor_id: string;
   product_name: string | null;
   product_description: string | null;
+  quality_type_name: string | null;
   unit_price: number;
   quantity: number;
   line_total: number;
@@ -177,6 +185,14 @@ interface ConfirmedOrder {
   delivery_assigned_at: string | null | undefined;
   out_for_delivery_at: string | null | undefined;
   current_status: 'confirmed' | 'assigned_to_delivery' | 'out_for_delivery' | 'delivered';
+  // Slot-related fields for slot-wise management
+  slot_id: string | null;
+  slot_name: string | null;
+  slot_start_time: string | null;
+  slot_end_time: string | null;
+  slot_cutoff_time: string | null;
+  delivery_date: string | null;
+  sector_name: string | null;
   _debug?: {
     hasOrderData: boolean;
     hasCustomerData: boolean;
@@ -200,6 +216,7 @@ interface DeliveredOrder {
   vendor_id: string;
   product_name: string | null;
   product_description: string | null;
+  quality_type_name: string | null;
   unit_price: number;
   quantity: number;
   line_total: number;
@@ -228,12 +245,12 @@ interface VendorSettings {
 }
 
 interface FinancialSummary {
-    total_sales: number;
-    total_commission: number;
-    net_earnings: number;
-    pending_payouts: number;
-    total_orders: number;
-    total_products: number;
+  total_sales: number;
+  total_commission: number;
+  net_earnings: number;
+  pending_payouts: number;
+  total_orders: number;
+  total_products: number;
 }
 
 interface Analytics {
@@ -313,7 +330,7 @@ const VendorDashboard = () => {
   const [confirmedOrdersLoading, setConfirmedOrdersLoading] = useState(false);
 
   // Financial data state
-  const [wallet, setWallet] = useState<any>(null);
+  // Wallet functionality removed
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loadingFinancials, setLoadingFinancials] = useState(false);
 
@@ -397,17 +414,12 @@ const VendorDashboard = () => {
 
   const loadFinancialSummary = async (vendorId: string) => {
     try {
-      console.log('🔍 [DEBUG] Loading financial summary for vendor ID:', vendorId);
       const response = await AnalyticsAPI.getVendorFinancialSummary(vendorId);
-      console.log('📊 [DEBUG] Financial summary response:', response);
-      
+
       if (response.success && response.data) {
-        console.log('✅ [DEBUG] Setting financial summary data:', response.data);
         setFinancialSummary(response.data);
-        toast.success(`Financial data loaded: ₹${response.data.total_sales?.toLocaleString()} total sales`);
+
       } else {
-        console.error('❌ [DEBUG] Financial summary failed:', response.error);
-        toast.error("Failed to load financial summary: " + (response.error || "Unknown error"));
         // Set default values to prevent showing zeros
         setFinancialSummary({
           total_sales: 0,
@@ -419,7 +431,6 @@ const VendorDashboard = () => {
         });
       }
     } catch (error: any) {
-      console.error('💥 [DEBUG] Exception in loadFinancialSummary:', error);
       toast.error("Failed to load financial summary: " + error.message);
       // Set default values to prevent showing zeros
       setFinancialSummary({
@@ -431,13 +442,6 @@ const VendorDashboard = () => {
         total_products: 0
       });
     }
-  };
-
-  // Add a test function to manually test with Rohan's vendor ID
-  const testVendorAnalytics = async () => {
-    const testVendorId = 'aa5c87ad-0072-4721-a77a-7b5af6997def'; // Rohan Communication
-    console.log('🧪 [TEST] Testing vendor analytics with Rohan Communication vendor ID');
-    await loadFinancialSummary(testVendorId);
   };
 
   // Fetch vendor information by profile ID
@@ -598,7 +602,6 @@ const VendorDashboard = () => {
               .single();
 
             if (!serviceError && serviceData) {
-              console.log('✅ Successfully retrieved vendor data with service role');
               // Continue with the normal flow using serviceData instead of data
               return {
                 id: serviceData.id,
@@ -658,117 +661,8 @@ const VendorDashboard = () => {
 
   const loadPendingOrders = async (vendorId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('vendor_pending_orders')
-        .select('*')
-        .eq('vendor_id', vendorId)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setPendingOrders(data || []);
-    } catch (error) {
-      console.error('Error loading pending orders:', error);
-    }
-  };
-
-  const debugConfirmedOrders = async (vendorId: string) => {
-    console.log('🔧 Starting debug for vendor:', vendorId);
-
-    // Step 1: Check if vendor has any order items at all
-    const { data: allItems } = await supabase
-      .from('order_items')
-      .select('id, item_status, vendor_id, product_name')
-      .eq('vendor_id', vendorId);
-    console.log('Step 1 - All order items:', allItems);
-
-    // Step 2: Check confirmed order items
-    const { data: confirmedItems } = await supabase
-      .from('order_items')
-      .select('*')
-      .eq('vendor_id', vendorId)
-      .eq('item_status', 'confirmed');
-    console.log('Step 2 - Confirmed items:', confirmedItems);
-
-    // Step 3: Check delivery_partner_orders table
-    const { data: deliveryOrders } = await supabase
-      .from('delivery_partner_orders')
-      .select('*');
-    console.log('Step 3 - All delivery orders:', deliveryOrders);
-
-    // Step 4: Try simple join
-    if (confirmedItems && confirmedItems.length > 0) {
-      const { data: withOrders } = await supabase
-        .from('order_items')
-        .select(`
-          *,
-          orders(id, order_number, customer_id, delivery_address)
-        `)
-        .eq('vendor_id', vendorId)
-        .eq('item_status', 'confirmed');
-      console.log('Step 4 - With orders join:', withOrders);
-    }
-  };
-
-  const loadConfirmedOrders = async (vendorId: string) => {
-    try {
-      setConfirmedOrdersLoading(true);
-
-      // ---------------------------------------------
-      // 1) Try optimized view: vendor_confirmed_orders
-      // ---------------------------------------------
-      try {
-        const { data: viewData, error: viewErr } = await supabase
-          .from('vendor_confirmed_orders')
-          .select('*')
-          .eq('vendor_id', vendorId)
-          .order('order_date', { ascending: false });
-
-        if (!viewErr && viewData && viewData.length > 0) {
-          const processedView = viewData.map((o: any) => ({
-            order_id: o.order_id,
-            order_number: o.order_number,
-            customer_id: o.customer_id || 'unknown',
-            customer_name: o.customer_name || null,
-            customer_phone: o.customer_phone || null,
-            total_amount: o.total_amount ?? o.line_total,
-            order_status: o.order_status || 'confirmed',
-            payment_status: o.payment_status || 'paid',
-            created_at: o.order_date || o.created_at,
-            delivery_address: o.delivery_address || {},
-            order_item_id: o.item_id,
-            vendor_id: vendorId,
-            product_name: o.product_name || null,
-            product_description: o.product_description || null,
-            unit_price: o.unit_price || 0,
-            quantity: o.quantity || 1,
-            line_total: o.line_total || o.total_amount,
-            item_status: o.item_status || 'confirmed',
-            picked_up_at: o.picked_up_at || null,
-            pickup_confirmed_by: o.pickup_confirmed_by || null,
-            vendor_notes: o.vendor_notes || null,
-            updated_at: o.updated_at || o.order_date,
-            delivery_partner_id: o.delivery_partner_id || null,
-            delivery_partner_name: o.delivery_partner_name || null,
-            delivery_partner_phone: o.delivery_partner_phone || null,
-            pickup_otp: o.pickup_otp || null,
-            delivery_otp: o.delivery_otp || null,
-            delivered_at: o.delivered_at || null,
-            delivery_assigned_at: o.delivery_assigned_at || null,
-            out_for_delivery_at: o.out_for_delivery_at || null,
-            current_status: (o.delivery_status as any) || 'confirmed',
-          })) as ConfirmedOrder[];
-
-          setConfirmedOrders(processedView);
-          return; // ✅ Done – skip the fallback query
-        }
-      } catch (viewCatchErr) {
-        console.warn('VendorDashboard: View vendor_confirmed_orders not available or failed – falling back to manual query', viewCatchErr);
-      }
-
-      // ---------------------------------------------
-      // 2) Fallback – original deep join query
-      // ---------------------------------------------
-      // 1) fetch confirmed order items with nested order and customers (without profiles)
+      // Query order_items directly instead of using vendor_pending_orders view
+      // to ensure we get quality information properly
       const { data, error } = await supabase
         .from('order_items')
         .select(`
@@ -777,6 +671,94 @@ const VendorDashboard = () => {
           vendor_id,
           product_name,
           product_description,
+          quality_type_name,
+          unit_price,
+          quantity,
+          line_total,
+          item_status,
+          created_at,
+          updated_at,
+          orders!inner(
+            id,
+            order_number,
+            customer_id,
+            total_amount,
+            order_status,
+            payment_status,
+            created_at
+          )
+        `)
+        .eq('vendor_id', vendorId)
+        .eq('item_status', 'pending')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Transform the data to match PendingOrder interface
+      const transformedData: PendingOrder[] = (data || []).map((item: any) => {
+        const order = item.orders;
+        const createdAt = new Date(order?.created_at || item.created_at);
+        const now = new Date();
+        const minutesElapsed = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60));
+        const minutesRemaining = Math.max(0, 15 - minutesElapsed); // Assuming 15 min timeout
+
+        return {
+          order_id: order?.id || item.order_id,
+          order_number: order?.order_number || `ORD-${item.order_id.slice(0, 8).toUpperCase()}`,
+          customer_id: order?.customer_id || 'unknown',
+          total_amount: order?.total_amount || item.line_total,
+          order_status: order?.order_status || 'pending',
+          payment_status: order?.payment_status || 'paid',
+          created_at: order?.created_at || item.created_at,
+          delivery_address: null, // Could be fetched separately if needed
+          order_item_id: item.id,
+          vendor_id: item.vendor_id,
+          product_name: item.product_name,
+          product_description: item.product_description,
+          quality_type_name: item.quality_type_name,
+          unit_price: item.unit_price,
+          quantity: item.quantity,
+          line_total: item.line_total,
+          item_status: item.item_status,
+          vendor_business_name: 'Unknown', // Could be fetched separately if needed
+          auto_approve_orders: false,
+          order_confirmation_timeout_minutes: 15,
+          auto_approve_under_amount: null,
+          business_hours_start: '09:00',
+          business_hours_end: '18:00',
+          auto_approve_during_business_hours_only: true,
+          customer_profile_id: order?.customer_id || 'unknown',
+          minutes_remaining: minutesRemaining,
+          should_auto_approve: false
+        };
+      });
+
+      setPendingOrders(transformedData);
+    } catch (error) {
+      console.error('Error loading pending orders:', error);
+      setPendingOrders([]);
+    }
+  };
+
+  const loadConfirmedOrders = async (vendorId: string) => {
+    try {
+      setConfirmedOrdersLoading(true);
+
+      // ---------------------------------------------
+      // Skip the view-based query since vendor_confirmed_orders view 
+      // doesn't include slot information. Use the full query instead.
+      // ---------------------------------------------
+
+      // 1) fetch confirmed order items with nested order, customers, and slot information
+      const { data, error } = await supabase
+        .from('order_items')
+        .select(`
+          id,
+          order_id,
+          vendor_id,
+          product_name,
+          product_description,
+          quality_type_name,
           unit_price,
           quantity,
           line_total,
@@ -793,11 +775,23 @@ const VendorDashboard = () => {
             total_amount,
             order_status,
             payment_status,
-            delivery_address,
+            delivery_address_id,
+            delivery_date,
+            slot_id,
             created_at,
             customers(
               id,
               profile_id
+            ),
+            delivery_slots(
+              id,
+              slot_name,
+              start_time,
+              end_time,
+              cutoff_time,
+              sectors(
+                name
+              )
             ),
             delivery_partner_orders(
               delivery_partner_id,
@@ -817,7 +811,7 @@ const VendorDashboard = () => {
           )
         `)
         .eq('vendor_id', vendorId)
-        .in('item_status', ['confirmed', 'processing', 'packed', 'picked_up', 'shipped', 'delivered'])
+        .in('item_status', ['confirmed', 'processing', 'packed'])  // Only include orders ready for pickup
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -828,11 +822,19 @@ const VendorDashboard = () => {
 
       // 2) collect unique customer profile_ids to fetch names/phones
       const profileIds: string[] = [];
+      const deliveryAddressIds: string[] = [];
+
       data.forEach((item: any) => {
         const pId = item.orders?.customers?.profile_id;
         if (pId) profileIds.push(pId);
+
+        const daId = item.orders?.delivery_address_id;
+        if (daId) deliveryAddressIds.push(daId);
       });
+
       const uniqueProfileIds = Array.from(new Set(profileIds));
+      const uniqueDeliveryAddressIds = Array.from(new Set(deliveryAddressIds));
+
       let profilesMap: Record<string, { full_name: string | null; phone: string | null }> = {};
       if (uniqueProfileIds.length) {
         const { data: profilesData, error: profilesErr } = await supabase
@@ -846,10 +848,27 @@ const VendorDashboard = () => {
         }
       }
 
+      let customerAddressesMap: Record<string, any> = {};
+      if (uniqueDeliveryAddressIds.length) {
+        const { data: addressesData, error: addressesErr } = await supabase
+          .from('customer_addresses')
+          .select('id, address_box, area, city, pincode, postal_code, zip_code') // Select all relevant address fields
+          .in('id', uniqueDeliveryAddressIds);
+
+        if (!addressesErr && addressesData) {
+          addressesData.forEach((addr: any) => {
+            customerAddressesMap[addr.id] = addr;
+          });
+        }
+      }
+
       const processed: ConfirmedOrder[] = data.map((item: any) => {
         const order = item.orders;
         const customer = order?.customers || null;
         const profileInfo = customer?.profile_id ? profilesMap[customer.profile_id] : undefined;
+        const customerAddress = order?.delivery_address_id ? customerAddressesMap[order.delivery_address_id] : null;
+        const slot = order?.delivery_slots || null;
+        const sector = slot?.sectors || null;
 
         const deliveryRecord = order?.delivery_partner_orders?.[0] || null;
         const deliveryPartnerProfile = Array.isArray(deliveryRecord?.delivery_partners?.profiles)
@@ -883,11 +902,18 @@ const VendorDashboard = () => {
           order_status: order?.order_status || 'confirmed',
           payment_status: order?.payment_status || 'paid',
           created_at: order?.created_at || item.created_at,
-          delivery_address: order?.delivery_address || {},
+          delivery_address: customerAddress ? {
+            id: customerAddress.id,
+            address_box: customerAddress.address_box,
+            area: customerAddress.area,
+            city: customerAddress.city,
+            pincode: customerAddress.pincode
+          } : { delivery_address_id: order?.delivery_address_id },
           order_item_id: item.id,
           vendor_id: item.vendor_id,
           product_name: item.product_name,
           product_description: item.product_description,
+          quality_type_name: item.quality_type_name,
           unit_price: item.unit_price,
           quantity: item.quantity,
           line_total: item.line_total,
@@ -905,10 +931,31 @@ const VendorDashboard = () => {
           delivery_assigned_at: deliveryRecord?.accepted_at || null,
           out_for_delivery_at: deliveryRecord?.picked_up_at || null,
           current_status: currentStatus,
+          // Slot-related fields for slot-wise management
+          slot_id: order?.slot_id || null,
+          slot_name: slot?.slot_name || null,
+          slot_start_time: slot?.start_time || null,
+          slot_end_time: slot?.end_time || null,
+          slot_cutoff_time: slot?.cutoff_time || null,
+          delivery_date: order?.delivery_date || null,
+          sector_name: sector?.name || null,
         } as ConfirmedOrder;
       });
 
-      setConfirmedOrders(processed);
+      // Filter out orders that have been picked up or delivered by delivery partners
+      const filteredProcessed = processed.filter((order: ConfirmedOrder) => {
+        // Exclude orders that have been picked up or delivered
+        if (order.current_status === 'out_for_delivery' || order.current_status === 'delivered') {
+          return false;
+        }
+        // Exclude orders with pickup or delivery timestamps
+        if (order.picked_up_at || order.delivered_at) {
+          return false;
+        }
+        return true;
+      });
+
+      setConfirmedOrders(filteredProcessed);
     } catch (err) {
       console.error('Error loading confirmed orders:', err);
       toast.error(`Failed to load confirmed orders: ${err.message || err}`);
@@ -922,7 +969,55 @@ const VendorDashboard = () => {
     try {
       const { data, error } = await supabase
         .from('order_items')
-        .select('id,order_id,product_name,product_description,unit_price,quantity,line_total,item_status,picked_up_at,pickup_confirmed_by,vendor_notes,created_at,updated_at,orders!inner(id,order_number,customer_id,total_amount,order_status,payment_status,created_at)')
+        .select(`
+          id,
+          order_id,
+          product_name,
+          product_description,
+          quality_type_name,
+          unit_price,
+          quantity,
+          line_total,
+          item_status,
+          picked_up_at,
+          pickup_confirmed_by,
+          vendor_notes,
+          created_at,
+          updated_at,
+          orders!inner(
+            id,
+            order_number,
+            customer_id,
+            total_amount,
+            order_status,
+            payment_status,
+            delivery_address_id,
+            created_at,
+            customers(
+              id,
+              profile_id
+            ),
+            delivery_address:customer_addresses(
+              id,
+              shop_name,
+              owner_name,
+              pincode,
+              address_box,
+              phone_number
+            ),
+            delivery_partner_orders(
+              delivery_partner_id,
+              status,
+              delivered_at,
+              delivery_partners(
+                profiles(
+                  full_name,
+                  phone
+                )
+              )
+            )
+          )
+        `)
         .eq('vendor_id', vendorId)
         .eq('item_status', 'delivered')
         .order('updated_at', { ascending: false });
@@ -931,21 +1026,28 @@ const VendorDashboard = () => {
 
       const processed: DeliveredOrder[] = (data || []).map((item: any) => {
         const order = item.orders;
+        const customer = order?.customers?.[0] || null;
+        const customerProfile = customer?.profile_id ? { full_name: customer.profiles?.full_name, phone: customer.profiles?.phone } : null; // Added customerProfile
+        const deliveryAddress = order?.delivery_address || null;
+        const deliveryRecord = order?.delivery_partner_orders?.[0] || null;
+        const deliveryPartnerProfile = deliveryRecord?.delivery_partners?.profiles?.[0] || null;
+
         return {
           order_id: order.id || '',
           order_number: order.order_number || '',
-          customer_id: order.customer_id || '',
-          customer_name: null,
-          customer_phone: null,
+          customer_id: customer?.id || '',
+          customer_name: customerProfile?.full_name || null,
+          customer_phone: customerProfile?.phone || null,
           total_amount: order.total_amount || 0,
           order_status: order.order_status || 'completed',
           payment_status: order.payment_status || 'paid',
           created_at: item.created_at,
-          delivery_address: null,
+          delivery_address: deliveryAddress,
           order_item_id: item.id,
           vendor_id: vendorId,
           product_name: item.product_name,
           product_description: item.product_description,
+          quality_type_name: item.quality_type_name,
           unit_price: item.unit_price,
           quantity: item.quantity,
           line_total: item.line_total,
@@ -954,17 +1056,17 @@ const VendorDashboard = () => {
           pickup_confirmed_by: item.pickup_confirmed_by,
           vendor_notes: item.vendor_notes,
           updated_at: item.updated_at,
-          delivery_partner_id: null,
-          delivery_partner_name: null,
-          delivery_partner_phone: null,
-          delivered_at: item.updated_at,
+          delivery_partner_id: deliveryRecord?.delivery_partner_id || null,
+          delivery_partner_name: deliveryPartnerProfile?.full_name || null,
+          delivery_partner_phone: deliveryPartnerProfile?.phone || null,
+          delivered_at: deliveryRecord?.delivered_at || null,
           delivery_assigned_at: null,
           out_for_delivery_at: null,
         } as DeliveredOrder;
       });
 
       setDeliveredOrders(processed);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading delivered orders:', error);
       toast.error(`Failed to load delivered orders: ${error.message || error}`);
       setDeliveredOrders([]);
@@ -1056,11 +1158,7 @@ const VendorDashboard = () => {
     try {
       setLoadingFinancials(true);
 
-      // Load wallet information
-      const walletResponse = await WalletAPI.getVendorWallet(vendorId);
-      if (walletResponse.success && walletResponse.data) {
-        setWallet(walletResponse.data);
-      }
+      // Wallet functionality removed
 
       // Load recent transactions
       const transactionsResponse = await TransactionAPI.getTransactions({
@@ -1076,7 +1174,7 @@ const VendorDashboard = () => {
       console.error('Error loading financial data:', error);
       toast.error("Failed to load financial data: " + (error.message || error));
       // Set default values to prevent undefined errors
-      setWallet(null);
+      // Wallet functionality removed
       setTransactions([]);
     } finally {
       setLoadingFinancials(false);
@@ -1669,7 +1767,6 @@ const VendorDashboard = () => {
   };
 
   const formatTimeAgo = (dateString: string) => {
-    if (!dateString) return 'N/A';
     const date = new Date(dateString);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
@@ -1677,9 +1774,69 @@ const VendorDashboard = () => {
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
+    if (diffMins < 1) return 'Just now';
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
     return `${diffDays}d ago`;
+  };
+
+  // Slot-based utility functions for vendor dashboard
+  const formatSlotTime = (timeString: string | null) => {
+    if (!timeString) return 'N/A';
+    try {
+      const time = new Date(`2000-01-01T${timeString}`);
+      return time.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch {
+      return timeString;
+    }
+  };
+
+  const getSlotPriorityMessage = (slotStartTime: string | null, deliveryDate: string | null) => {
+    if (!slotStartTime || !deliveryDate) return null;
+
+    const slotHour = parseInt(slotStartTime.split(':')[0]);
+    const isToday = deliveryDate === new Date().toISOString().split('T')[0];
+
+    if (slotHour <= 10) {
+      return isToday ? '🌅 Morning slot - Prepare immediately for early pickup!' : '🌅 Morning slot - High priority for tomorrow';
+    } else if (slotHour <= 14) {
+      return isToday ? '☀️ Afternoon slot - Standard preparation timing' : '☀️ Afternoon slot - Prepare by morning';
+    } else {
+      return isToday ? '🌆 Evening slot - Can prepare later today' : '🌆 Evening slot - Standard priority';
+    }
+  };
+
+  const getSlotStatusBadge = (order: ConfirmedOrder) => {
+    if (!order.slot_id) {
+      return <Badge variant="outline" className="text-gray-600">No Slot</Badge>;
+    }
+
+    const slotHour = order.slot_start_time ? parseInt(order.slot_start_time.split(':')[0]) : 0;
+    const isToday = order.delivery_date === new Date().toISOString().split('T')[0];
+
+    if (slotHour <= 10) {
+      return (
+        <Badge className="bg-orange-500 text-white">
+          🌅 Morning • {formatSlotTime(order.slot_start_time)}
+        </Badge>
+      );
+    } else if (slotHour <= 14) {
+      return (
+        <Badge className="bg-blue-500 text-white">
+          ☀️ Afternoon • {formatSlotTime(order.slot_start_time)}
+        </Badge>
+      );
+    } else {
+      return (
+        <Badge className="bg-purple-500 text-white">
+          🌆 Evening • {formatSlotTime(order.slot_start_time)}
+        </Badge>
+      );
+    }
   };
 
   const filteredOrders = pendingOrders.filter(order => {
@@ -1732,34 +1889,20 @@ const VendorDashboard = () => {
       <Header cartItems={0} onCartClick={() => { }} />
 
       <main className="relative container mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        {/* Mobile-First Header */}
+        {/* Mobile-First Header with Enhanced Slot Integration */}
         <div className="mb-6 sm:mb-8">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex flex-col gap-4">
             <div>
               <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 mb-2 leading-tight">
-                {vendor?.business_name}
+                {vendor?.business_name || 'Vendor Dashboard'}
               </h1>
-              <p className="text-gray-600 font-medium">Manage your orders and business settings</p>
+              <p className="text-gray-600 font-medium">Manage orders, track deliveries, and monitor performance</p>
             </div>
-            {/* Mobile-optimized action buttons */}
-            <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-              {/* Mobile: Single row of icon buttons */}
-              <div className="flex sm:hidden justify-between gap-2">
-                {/* Delivery Status Notifications */}
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="relative flex-1 min-h-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
-                >
-                  <div className="flex flex-col items-center gap-1">
-                    <Bell className="h-4 w-4" />
-                    <span className="text-xs">Alerts</span>
-                  </div>
-                  {confirmedOrders.filter(o => ['assigned_to_delivery', 'picked_up', 'out_for_delivery'].includes(o.current_status)).length > 0 && (
-                    <span className="absolute -top-1 -right-1 h-3 w-3 bg-gradient-to-r from-red-500 to-red-600 rounded-full animate-pulse shadow-soft"></span>
-                  )}
-                </Button>
 
+            {/* Mobile-optimized action buttons */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Mobile: Grid layout for better touch */}
+              <div className="grid grid-cols-2 sm:hidden gap-2">
                 <Button
                   variant="outline"
                   onClick={refreshData}
@@ -1773,29 +1916,14 @@ const VendorDashboard = () => {
                 </Button>
 
                 <Button
-                  variant="outline"
-                  className="flex-1 min-h-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
-                  onClick={() => navigate('/vendor/analytics')}
+                  onClick={() => navigate('/vendor/product-management')}
+                  className="flex-1 min-h-12 rounded-xl bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 transition-all duration-200"
                 >
                   <div className="flex flex-col items-center gap-1">
                     <BarChart3 className="h-4 w-4" />
-                    <span className="text-xs">Analytics</span>
+                    <span className="text-xs">Products</span>
                   </div>
                 </Button>
-
-                <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className="flex-1 min-h-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
-                    >
-                      <div className="flex flex-col items-center gap-1">
-                        <Settings className="h-4 w-4" />
-                        <span className="text-xs">Settings</span>
-                      </div>
-                    </Button>
-                  </DialogTrigger>
-                </Dialog>
               </div>
 
               {/* Desktop: Original layout */}
@@ -1824,188 +1952,12 @@ const VendorDashboard = () => {
                   <span>{refreshing ? 'Updating...' : 'Refresh'}</span>
                 </Button>
 
-                {/* Debug Test Button */}
-                <Button
-                  variant="outline"
-                  onClick={testVendorAnalytics}
-                  className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-orange-200 hover:border-orange-300 hover:bg-orange-50 transition-all duration-200 font-medium text-orange-600"
-                >
-                  <BarChart3 className="h-4 w-4" />
-                  <span>Test Analytics</span>
-                </Button>
-
-                {/* Product Management Button */}
                 <Button
                   className="bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 flex items-center gap-2 min-h-12 px-6 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
                   onClick={() => navigate('/vendor/product-management')}
                 >
                   <BarChart3 className="h-4 w-4" />
                   <span>Product Management</span>
-                </Button>
-
-                <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 font-medium"
-                    >
-                      <Settings className="h-4 w-4" />
-                      <span>Settings</span>
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-md mx-4 rounded-xl shadow-strong">
-                    <DialogHeader>
-                      <DialogTitle className="text-xl font-semibold text-gray-900">Order Management Settings</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-6">
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <Label>Auto-approve orders</Label>
-                          <p className="text-sm text-gray-500">Automatically approve eligible orders</p>
-                        </div>
-                        <Switch
-                          checked={vendorSettings.auto_approve_orders}
-                          onCheckedChange={(checked) =>
-                            setVendorSettings(prev => ({ ...prev, auto_approve_orders: checked }))
-                          }
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Confirmation timeout (minutes)</Label>
-                        <Input
-                          type="number"
-                          min="5"
-                          max="60"
-                          value={vendorSettings.order_confirmation_timeout_minutes}
-                          onChange={(e) =>
-                            setVendorSettings(prev => ({
-                              ...prev,
-                              order_confirmation_timeout_minutes: parseInt(e.target.value) || 15
-                            }))
-                          }
-                          className="rounded-xl border-gray-200 focus:border-blue-300 focus:ring-blue-200 min-h-12"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Auto-approve under amount (₹)</Label>
-                        <Input
-                          type="number"
-                          placeholder="Leave empty for no limit"
-                          value={vendorSettings.auto_approve_under_amount || ''}
-                          onChange={(e) =>
-                            setVendorSettings(prev => ({
-                              ...prev,
-                              auto_approve_under_amount: e.target.value ? parseFloat(e.target.value) : null
-                            }))
-                          }
-                        />
-                      </div>
-
-                      <Separator />
-
-                      <div className="space-y-4">
-                        <Label>Business Hours</Label>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label className="text-sm">Start</Label>
-                            <Input
-                              type="time"
-                              value={vendorSettings.business_hours_start}
-                              onChange={(e) =>
-                                setVendorSettings(prev => ({ ...prev, business_hours_start: e.target.value }))
-                              }
-                            />
-                          </div>
-                          <div>
-                            <Label className="text-sm">End</Label>
-                            <Input
-                              type="time"
-                              value={vendorSettings.business_hours_end}
-                              onChange={(e) =>
-                                setVendorSettings(prev => ({ ...prev, business_hours_end: e.target.value }))
-                              }
-                            />
-                          </div>
-                        </div>
-
-
-                        <div className="flex items-center justify-between">
-                          <div className="space-y-0.5">
-                            <Label className="text-sm">Auto-approve only during business hours</Label>
-                            <p className="text-xs text-gray-500">Restrict auto-approval to business hours</p>
-                          </div>
-                          <Switch
-                            checked={vendorSettings.auto_approve_during_business_hours_only}
-                            onCheckedChange={(checked) =>
-                              setVendorSettings(prev => ({ ...prev, auto_approve_during_business_hours_only: checked }))
-                            }
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex gap-2 pt-4">
-                        <Button onClick={updateVendorSettings} className="flex-1">
-                          Save Settings
-                        </Button>
-                        <Button variant="outline" onClick={() => setShowSettingsDialog(false)}>
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </div>
-
-              {/* Mobile Action Buttons */}
-              <div className="sm:hidden w-full space-y-3">
-                <Button
-                  className="w-full bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 flex items-center justify-center gap-2 min-h-12 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
-                  onClick={() => navigate('/vendor/product-management')}
-                >
-                  <BarChart3 className="h-4 w-4" />
-                  <span>Advanced Product Management</span>
-                </Button>
-                <Button
-                  className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 flex items-center justify-center gap-2 min-h-12 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
-                  onClick={() => navigate('/vendor/add-product')}
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>Add Product</span>
-                </Button>
-              </div>
-
-              {/* Advanced Product Management */}
-              <div className="hidden sm:block">
-                <Button
-                  className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 flex items-center gap-2 min-h-12 px-6 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
-                  onClick={() => navigate('/vendor/product-management')}
-                >
-                  <Package className="h-4 w-4" />
-                  <span>Product Management</span>
-                </Button>
-              </div>
-
-              {/* Slot Dashboard Button */}
-              <div className="hidden sm:block">
-                <Button
-                  className="bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 flex items-center gap-2 min-h-12 px-6 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
-                  onClick={() => navigate('/vendor/analytics')}
-                >
-                  <BarChart3 className="h-4 w-4" />
-                  <span>Analytics</span>
-                </Button>
-              </div>
-
-              {/* Desktop Add Product Button */}
-              <div className="hidden sm:block">
-                <Button
-                  className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 flex items-center gap-2 min-h-12 px-6 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
-                  onClick={() => navigate('/vendor/add-product')}
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>Add Product</span>
                 </Button>
               </div>
             </div>
@@ -2079,7 +2031,7 @@ const VendorDashboard = () => {
                 </CardContent>
               </Card>
 
-              <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200 shadow-soft hover:shadow-medium transition-all duration-200">
+              {/* <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200 shadow-soft hover:shadow-medium transition-all duration-200">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-semibold text-green-800">Response Rate</CardTitle>
                   <Target className="h-5 w-5 text-green-600" />
@@ -2090,9 +2042,9 @@ const VendorDashboard = () => {
                     Last 30 days
                   </p>
                 </CardContent>
-              </Card>
+              </Card> */}
 
-              <Card className="bg-gradient-to-br from-blue-50 to-purple-50 border-blue-200 shadow-soft hover:shadow-medium transition-all duration-200">
+              {/* <Card className="bg-gradient-to-br from-blue-50 to-purple-50 border-blue-200 shadow-soft hover:shadow-medium transition-all duration-200">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-semibold text-blue-800">Auto-Approval</CardTitle>
                   {vendor?.auto_approve_orders ? (
@@ -2109,7 +2061,7 @@ const VendorDashboard = () => {
                     {vendor?.auto_approve_orders ? 'Auto-approving orders' : 'Manual approval required'}
                   </p>
                 </CardContent>
-              </Card>
+              </Card> */}
 
               <Card className="bg-gradient-to-br from-purple-50 to-blue-50 border-purple-200 shadow-soft hover:shadow-medium transition-all duration-200">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -2279,6 +2231,17 @@ const VendorDashboard = () => {
                                   <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
                                     <div className="flex-1 min-w-0">
                                       <h4 className="font-semibold text-gray-900 text-lg truncate">{item.product_name}</h4>
+                                      {item.product_description && (
+                                        <p className="text-sm text-gray-600 mt-1 font-medium">{item.product_description}</p>
+                                      )}
+                                      {item.quality_type_name && (
+                                        <div className="mt-2">
+                                          <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 font-bold text-xs px-2 py-1 rounded-full border border-blue-200">
+                                            <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+                                            Quality: {item.quality_type_name}
+                                          </span>
+                                        </div>
+                                      )}
                                       <div className="flex flex-wrap items-center gap-3 mt-2">
                                         <div className="flex items-center gap-2 text-sm text-gray-600">
                                           <span className="font-medium">Qty:</span>
@@ -2391,177 +2354,334 @@ const VendorDashboard = () => {
                     <p className="text-gray-600">Confirmed orders will appear here for processing and fulfillment.</p>
                   </div>
                 ) : (
-                  <div className="space-y-4">
+                  <div className="space-y-6">
+                    {/* Slot-wise Summary Dashboard */}
                     {(() => {
-                      // Group confirmed orders by creation date (delivery date)
-                      const groupedOrders = confirmedOrders
-                        .filter(order => order.current_status !== 'delivered')
-                        .reduce((acc, order) => {
-                          const orderDate = new Date(order.created_at).toDateString();
-                          if (!acc[orderDate]) {
-                            acc[orderDate] = {
-                              date: orderDate,
-                              orders: [],
-                              total_revenue: 0,
-                              total_items: 0,
-                              status: order.current_status === 'confirmed' ? 'preparation' :
-                                order.current_status === 'assigned_to_delivery' ? 'ready' :
-                                  'out_for_delivery',
-                              priority_level: 'medium' as const
-                            };
+                      const activeOrders = confirmedOrders.filter(o => o.current_status !== 'delivered');
+                      const slotSummary = activeOrders.reduce((acc, order) => {
+                        const slotType = order.slot_start_time
+                          ? (parseInt(order.slot_start_time.split(':')[0]) <= 10 ? 'morning' :
+                            parseInt(order.slot_start_time.split(':')[0]) <= 14 ? 'afternoon' : 'evening')
+                          : 'no-slot';
+
+                        acc[slotType] = (acc[slotType] || 0) + 1;
+                        return acc;
+                      }, {} as Record<string, number>);
+
+                      const totalItems = activeOrders.reduce((sum, order) => sum + order.quantity, 0);
+                      const totalRevenue = activeOrders.reduce((sum, order) => sum + order.line_total, 0);
+
+                      return (
+                        <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-4 mb-4">
+                          <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                            📊 Today's Slot Overview
+                          </h3>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="bg-orange-100 rounded-lg p-3 text-center">
+                              <div className="text-2xl font-bold text-orange-800">{slotSummary.morning || 0}</div>
+                              <div className="text-xs text-orange-600">🌅 Morning Slots</div>
+                              <div className="text-xs text-orange-500">High Priority</div>
+                            </div>
+                            <div className="bg-blue-100 rounded-lg p-3 text-center">
+                              <div className="text-2xl font-bold text-blue-800">{slotSummary.afternoon || 0}</div>
+                              <div className="text-xs text-blue-600">☀️ Afternoon Slots</div>
+                              <div className="text-xs text-blue-500">Standard Priority</div>
+                            </div>
+                            <div className="bg-purple-100 rounded-lg p-3 text-center">
+                              <div className="text-2xl font-bold text-purple-800">{slotSummary.evening || 0}</div>
+                              <div className="text-xs text-purple-600">🌆 Evening Slots</div>
+                              <div className="text-xs text-purple-500">Lower Priority</div>
+                            </div>
+                            <div className="bg-green-100 rounded-lg p-3 text-center">
+                              <div className="text-2xl font-bold text-green-800">{totalItems}</div>
+                              <div className="text-xs text-green-600">📦 Total Items</div>
+                              <div className="text-xs text-green-500">₹{totalRevenue.toLocaleString()}</div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Slot-based Orders Display */}
+                    <div className="space-y-4">
+                      {(() => {
+                        // Group confirmed orders by delivery slot (slot-wise management)
+                        const groupedOrders = confirmedOrders
+                          .filter(order => order.current_status !== 'delivered')
+                          .reduce((acc, order) => {
+                            // Create slot key - prioritize slot info, fallback to date for orders without slots
+                            const slotKey = order.slot_id
+                              ? `slot_${order.slot_id}_${order.delivery_date || new Date(order.created_at).toISOString().split('T')[0]}`
+                              : `no-slot_${new Date(order.created_at).toISOString().split('T')[0]}`;
+
+                            if (!acc[slotKey]) {
+                              // Determine slot priority based on timing
+                              let priorityLevel: 'high' | 'medium' | 'low' = 'medium';
+                              if (order.slot_start_time) {
+                                const slotHour = parseInt(order.slot_start_time.split(':')[0]);
+                                if (slotHour <= 10) priorityLevel = 'high'; // Morning slots are high priority
+                                else if (slotHour <= 14) priorityLevel = 'medium'; // Afternoon slots
+                                else priorityLevel = 'low'; // Evening slots
+                              }
+
+                              acc[slotKey] = {
+                                slot_id: order.slot_id,
+                                slot_name: order.slot_name || 'No Slot Assigned',
+                                slot_start_time: order.slot_start_time,
+                                slot_end_time: order.slot_end_time,
+                                slot_cutoff_time: order.slot_cutoff_time,
+                                delivery_date: order.delivery_date || new Date(order.created_at).toISOString().split('T')[0],
+                                sector_name: order.sector_name,
+                                orders: [],
+                                total_revenue: 0,
+                                total_items: 0,
+                                status: order.current_status === 'confirmed' ? 'preparation' :
+                                  order.current_status === 'assigned_to_delivery' ? 'ready' :
+                                    'out_for_delivery',
+                                priority_level: priorityLevel
+                              };
+                            }
+                            acc[slotKey].orders.push(order);
+                            acc[slotKey].total_revenue += order.line_total;
+                            acc[slotKey].total_items += order.quantity;
+                            return acc;
+                          }, {} as Record<string, {
+                            slot_id: string | null;
+                            slot_name: string;
+                            slot_start_time: string | null;
+                            slot_end_time: string | null;
+                            slot_cutoff_time: string | null;
+                            delivery_date: string;
+                            sector_name: string | null;
+                            orders: ConfirmedOrder[];
+                            total_revenue: number;
+                            total_items: number;
+                            status: string;
+                            priority_level: 'high' | 'medium' | 'low';
+                          }>);
+
+                        // Sort slots by priority: morning slots first (by start_time), then by delivery_date
+                        const groupedOrdersArray = Object.values(groupedOrders).sort((a, b) => {
+                          // First, sort by delivery date
+                          const dateCompare = a.delivery_date.localeCompare(b.delivery_date);
+                          if (dateCompare !== 0) return dateCompare;
+
+                          // Then by slot start time (morning slots first)
+                          if (a.slot_start_time && b.slot_start_time) {
+                            return a.slot_start_time.localeCompare(b.slot_start_time);
                           }
-                          acc[orderDate].orders.push(order);
-                          acc[orderDate].total_revenue += order.line_total;
-                          acc[orderDate].total_items += order.quantity;
-                          return acc;
-                        }, {} as Record<string, {
-                          date: string;
-                          orders: ConfirmedOrder[];
-                          total_revenue: number;
-                          total_items: number;
-                          status: string;
-                          priority_level: 'high' | 'medium' | 'low';
-                        }>);
+                          // Orders without slots go to the end
+                          if (!a.slot_start_time && b.slot_start_time) return 1;
+                          if (a.slot_start_time && !b.slot_start_time) return -1;
+                          return 0;
+                        });
 
-                      const groupedOrdersArray = Object.values(groupedOrders);
-
-                      return groupedOrdersArray.map((group) => (
-                        <Card
-                          key={group.date}
-                          className="border-2 transition-all duration-200 hover:shadow-lg border-blue-200"
-                        >
-                          {/* Mobile-First Header */}
-                          <CardHeader className="pb-4">
-                            <div className="space-y-3">
-                              {/* Date and Status */}
-                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                                <div>
-                                  <CardTitle className="text-lg">
-                                    {new Date(group.date).toLocaleDateString('en-US', {
-                                      weekday: 'short',
-                                      month: 'short',
-                                      day: 'numeric'
-                                    })}
-                                  </CardTitle>
-                                  <p className="text-sm text-gray-600">
-                                    {group.orders.length} orders • {group.total_items} items
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Badge className={
-                                    group.status === 'preparation' ? 'bg-orange-500 text-white' :
-                                      group.status === 'ready' ? 'bg-green-500 text-white' :
-                                        'bg-blue-500 text-white'
-                                  }>
-                                    {group.status === 'preparation' && '👨‍🍳 To Prepare'}
-                                    {group.status === 'ready' && '✅ Ready'}
-                                    {group.status === 'out_for_delivery' && '🚚 Out for Delivery'}
-                                  </Badge>
-                                  <div className="text-right">
-                                    <div className="text-lg font-bold text-green-600">₹{group.total_revenue.toLocaleString()}</div>
+                        return groupedOrdersArray.map((group) => (
+                          <Card
+                            key={`${group.slot_id}_${group.delivery_date}`}
+                            className={`border-2 transition-all duration-200 hover:shadow-lg ${group.priority_level === 'high'
+                              ? 'border-orange-300 bg-orange-50'
+                              : group.priority_level === 'medium'
+                                ? 'border-blue-300 bg-blue-50'
+                                : 'border-gray-300 bg-gray-50'
+                              }`}
+                          >
+                            {/* Slot-Based Header */}
+                            <CardHeader className="pb-4">
+                              <div className="space-y-3">
+                                {/* Slot Information and Priority */}
+                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                                  <div>
+                                    <CardTitle className="text-lg flex items-center gap-2">
+                                      <Clock className="h-5 w-5 text-blue-600" />
+                                      {group.slot_name}
+                                      {group.priority_level === 'high' && (
+                                        <Badge className="bg-orange-500 text-white animate-pulse">
+                                          🌅 Priority - Morning Slot
+                                        </Badge>
+                                      )}
+                                    </CardTitle>
+                                    <div className="flex flex-wrap gap-2 mt-2 text-sm text-gray-600">
+                                      <span className="flex items-center gap-1">
+                                        📅 {new Date(group.delivery_date).toLocaleDateString('en-US', {
+                                          weekday: 'short',
+                                          month: 'short',
+                                          day: 'numeric'
+                                        })}
+                                      </span>
+                                      {group.slot_start_time && (
+                                        <span className="flex items-center gap-1">
+                                          ⏰ {group.slot_start_time} - {group.slot_end_time}
+                                        </span>
+                                      )}
+                                      {group.sector_name && (
+                                        <span className="flex items-center gap-1">
+                                          📍 {group.sector_name}
+                                        </span>
+                                      )}
+                                      <span>• {group.orders.length} orders • {group.total_items} items</span>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Badge className={
+                                      group.status === 'preparation' ? 'bg-orange-500 text-white' :
+                                        group.status === 'ready' ? 'bg-green-500 text-white' :
+                                          'bg-blue-500 text-white'
+                                    }>
+                                      {group.status === 'preparation' && '👨‍🍳 To Prepare'}
+                                      {group.status === 'ready' && '✅ Ready'}
+                                      {group.status === 'out_for_delivery' && '🚚 Out for Delivery'}
+                                    </Badge>
+                                    <div className="text-right">
+                                      <div className="text-lg font-bold text-green-600">₹{group.total_revenue.toLocaleString()}</div>
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            </div>
-                          </CardHeader>
 
-                          {/* Products to Prepare Summary - Prominent Display */}
-                          <CardContent className="pt-0 space-y-4">
-                            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                              <h4 className="text-base font-semibold text-orange-800 mb-3 flex items-center">
-                                <ChefHat className="h-5 w-5 mr-2" />
-                                Items to Prepare
-                              </h4>
-                              <div className="grid grid-cols-1 gap-3">
-                                {Object.entries(group.orders.reduce((acc: Record<string, number>, item) => {
-                                  acc[item.product_name || 'Unknown'] = (acc[item.product_name || 'Unknown'] || 0) + item.quantity;
-                                  return acc;
-                                }, {} as Record<string, number>)).map(([name, qty]) => (
-                                  <div key={name} className="bg-white rounded-lg p-3 shadow-sm border border-orange-100">
-                                    <div className="flex justify-between items-center">
-                                      <span className="font-medium text-gray-900 text-sm">{name}</span>
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-xs text-gray-600">Qty:</span>
-                                        <Badge variant="outline" className="bg-orange-100 text-orange-800 border-orange-300 font-bold">
-                                          {qty}
-                                        </Badge>
+                                {/* Slot Timing Priority Indicator */}
+                                {group.slot_start_time && group.slot_cutoff_time && (
+                                  <div className={`rounded-lg p-3 border ${group.priority_level === 'high'
+                                    ? 'bg-orange-100 border-orange-300'
+                                    : 'bg-blue-100 border-blue-300'
+                                    }`}>
+                                    <div className="flex items-center justify-between text-sm">
+                                      <span className="font-medium">
+                                        {group.priority_level === 'high' ? '🚨 Morning Priority Slot' : '📋 Standard Slot'}
+                                      </span>
+                                      <span className="text-gray-600">
+                                        Cutoff: {group.slot_cutoff_time}
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </CardHeader>
+
+                            {/* Products to Prepare Summary - Prominent Display */}
+                            <CardContent className="pt-0 space-y-4">
+                              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                                <h4 className="text-base font-semibold text-orange-800 mb-3 flex items-center">
+                                  <ChefHat className="h-5 w-5 mr-2" />
+                                  Items to Prepare
+                                </h4>
+                                <div className="grid grid-cols-1 gap-3">
+                                  {Object.entries(group.orders.reduce((acc: Record<string, { qty: number; quality: string | null; description: string | null }>, item) => {
+                                    const key = item.product_name || 'Unknown';
+                                    if (!acc[key]) {
+                                      acc[key] = { qty: 0, quality: item.quality_type_name, description: item.product_description };
+                                    }
+                                    acc[key].qty += item.quantity;
+                                    return acc;
+                                  }, {} as Record<string, { qty: number; quality: string | null; description: string | null }>)).map(([name, data]) => (
+                                    <div key={name} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100 hover:border-orange-200 transition-colors">
+                                      <div className="flex justify-between items-start">
+                                        <div className="flex-1 min-w-0">
+                                          <span className="font-bold text-gray-900 text-sm block">{name}</span>
+                                          {data.description && (
+                                            <div className="text-xs text-gray-600 mt-1 font-medium">{data.description}</div>
+                                          )}
+                                          {data.quality && (
+                                            <div className="mt-2">
+                                              <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 font-bold text-xs px-2 py-1 rounded-full border border-blue-200">
+                                                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+                                                Quality: {data.quality}
+                                              </span>
+                                            </div>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center gap-2 ml-3">
+                                          <span className="text-xs text-gray-600">Qty:</span>
+                                          <Badge variant="outline" className="bg-orange-100 text-orange-800 border-orange-300 font-bold">
+                                            {data.qty}
+                                          </Badge>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Order Details - Simplified Mobile View */}
+                              <div className="space-y-3">
+                                <h5 className="text-sm font-semibold text-gray-700 flex items-center">
+                                  <Package className="h-4 w-4 mr-2" />
+                                  Order Details
+                                </h5>
+                                {group.orders.map((order) => (
+                                  <div
+                                    key={order.order_item_id}
+                                    className="bg-gray-50 rounded-lg p-3 border border-gray-200"
+                                  >
+                                    <div className="space-y-2">
+                                      {/* Order Header */}
+                                      <div className="flex justify-between items-start">
+                                        <div>
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="font-medium text-sm">#{order.order_number}</span>
+                                            {getSlotStatusBadge(order)}
+                                            {getDeliveryStatusBadge(order)}
+                                          </div>
+                                                                                      <div className="text-xs text-gray-600 mt-1">
+                                              <div className="font-semibold text-gray-800">{order.product_name} × {order.quantity}</div>
+                                              {order.product_description && (
+                                                <div className="text-xs text-gray-600 mt-1 font-medium">{order.product_description}</div>
+                                              )}
+                                              {order.quality_type_name && (
+                                                <div className="mt-1.5">
+                                                  <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 font-bold text-xs px-2 py-1 rounded-full border border-blue-200">
+                                                    <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+                                                    Quality: {order.quality_type_name}
+                                                  </span>
+                                                </div>
+                                              )}
+                                            </div>
+                                          {/* Slot Priority Message */}
+                                          {getSlotPriorityMessage(order.slot_start_time, order.delivery_date) && (
+                                            <div className="mt-1">
+                                              <p className="text-xs font-medium text-orange-700 bg-orange-100 px-2 py-1 rounded">
+                                                {getSlotPriorityMessage(order.slot_start_time, order.delivery_date)}
+                                              </p>
+                                            </div>
+                                          )}
+                                        </div>
+                                        <div className="text-right">
+                                          <div className="font-bold text-green-600">₹{order.line_total.toLocaleString()}</div>
+                                          <div className="text-xs text-gray-500">
+                                            {formatTimeAgo(order.created_at)}
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* Customer Info - Compact */}
+                                      <div className="flex items-center gap-4 text-xs text-gray-600 bg-white rounded p-2">
+                                        <div className="flex items-center gap-1">
+                                          <User className="h-3 w-3" />
+                                          <span>{order.customer_name || 'N/A'}</span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                          <Phone className="h-3 w-3" />
+                                          <span>{order.customer_phone || 'N/A'}</span>
+                                        </div>
+                                      </div>
+
+                                      {/* Action Buttons - Simplified */}
+                                      <div className="flex gap-2 pt-2">
+                                        {order.delivery_partner_id && (
+                                          <div className="flex-1 bg-green-100 text-green-800 rounded px-3 py-2 text-xs font-medium flex items-center justify-center">
+                                            <CheckCircle className="h-3 w-3 mr-1" />
+                                            Delivery Assigned
+                                          </div>
+                                        )}
                                       </div>
                                     </div>
                                   </div>
                                 ))}
                               </div>
-                            </div>
-
-                            {/* Order Details - Simplified Mobile View */}
-                            <div className="space-y-3">
-                              <h5 className="text-sm font-semibold text-gray-700 flex items-center">
-                                <Package className="h-4 w-4 mr-2" />
-                                Order Details
-                              </h5>
-                              {group.orders.map((order) => (
-                                <div
-                                  key={order.order_item_id}
-                                  className="bg-gray-50 rounded-lg p-3 border border-gray-200"
-                                >
-                                  <div className="space-y-2">
-                                    {/* Order Header */}
-                                    <div className="flex justify-between items-start">
-                                      <div>
-                                        <div className="flex items-center gap-2">
-                                          <span className="font-medium text-sm">#{order.order_number}</span>
-                                          {getDeliveryStatusBadge(order)}
-                                        </div>
-                                        <p className="text-xs text-gray-600 mt-1">
-                                          {order.product_name} × {order.quantity}
-                                        </p>
-                                      </div>
-                                      <div className="text-right">
-                                        <div className="font-bold text-green-600">₹{order.line_total.toLocaleString()}</div>
-                                        <div className="text-xs text-gray-500">
-                                          {formatTimeAgo(order.created_at)}
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    {/* Customer Info - Compact */}
-                                    <div className="flex items-center gap-4 text-xs text-gray-600 bg-white rounded p-2">
-                                      <div className="flex items-center gap-1">
-                                        <User className="h-3 w-3" />
-                                        <span>{order.customer_name || 'N/A'}</span>
-                                      </div>
-                                      <div className="flex items-center gap-1">
-                                        <Phone className="h-3 w-3" />
-                                        <span>{order.customer_phone || 'N/A'}</span>
-                                      </div>
-                                    </div>
-
-                                    {/* Action Buttons - Simplified */}
-                                    <div className="flex gap-2 pt-2">
-                                      {!order.delivery_partner_id && order.current_status === 'confirmed' && (
-                                        <Button
-                                          size="sm"
-                                          onClick={() => handleAssignToDelivery(order)}
-                                          className="flex-1 bg-blue-600 hover:bg-blue-700 text-xs"
-                                        >
-                                          <Truck className="h-3 w-3 mr-1" />
-                                          Assign Delivery
-                                        </Button>
-                                      )}
-                                      {order.delivery_partner_id && (
-                                        <div className="flex-1 bg-green-100 text-green-800 rounded px-3 py-2 text-xs font-medium flex items-center justify-center">
-                                          <CheckCircle className="h-3 w-3 mr-1" />
-                                          Delivery Assigned
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ));
-                    })()}
+                            </CardContent>
+                          </Card>
+                        ));
+                      })()}
+                    </div>
                   </div>
                 )}
               </CardContent>
@@ -2585,12 +2705,24 @@ const VendorDashboard = () => {
                 ) : (
                   <div className="space-y-4">
                     {deliveredOrders.map((order) => (
-                      <Card key={order.order_item_id} className="overflow-hidden">
+                      <Card key={order.order_item_id} className="overflow-hidden"
+                      >
                         <div className="p-4">
                           <div className="flex justify-between items-start">
                             <div>
-                              <h4 className="font-semibold text-lg">{order.product_name}</h4>
-                              <p className="text-sm text-gray-500">Order #{order.order_number}</p>
+                              <h4 className="font-semibold text-lg text-gray-900">{order.product_name}</h4>
+                              {order.product_description && (
+                                <p className="text-sm text-gray-600 mt-1 font-medium">{order.product_description}</p>
+                              )}
+                              {order.quality_type_name && (
+                                <div className="mt-2">
+                                  <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 font-bold text-sm px-3 py-1 rounded-full border border-blue-200">
+                                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                                    Quality: {order.quality_type_name}
+                                  </span>
+                                </div>
+                              )}
+                              <p className="text-sm text-gray-500 mt-2">Order #{order.order_number}</p>
                               <p className="text-sm text-gray-500">
                                 Delivered: {formatTimeAgo(order.created_at)}
                               </p>
@@ -2600,115 +2732,6 @@ const VendorDashboard = () => {
                             </div>
                           </div>
                         </div>
-                        <div className="border-t p-4 space-y-4">
-                          {/* Delivered Status */}
-                          <div className="bg-green-50 rounded-lg p-4">
-                            <div className="flex items-center justify-center">
-                              <div className="flex items-center gap-2 text-green-700">
-                                <CheckCircle className="h-5 w-5" />
-                                <span className="font-semibold">Order Successfully Delivered!</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {/* <div>
-                              <h5 className="font-semibold text-gray-800 mb-2 flex items-center"><User className="w-4 h-4 mr-2" /> Customer Details</h5>
-                              <div className="space-y-1 text-sm">
-                                <p><span className="font-medium">Name:</span> {order.customer_name || 'N/A'}</p>
-                                <p><span className="font-medium">Phone:</span> {order.customer_phone || 'N/A'}</p>
-                                <p><span className="font-medium">Address:</span> {
-                                  order.delivery_address
-                                    ? `${order.delivery_address.street_address || ''}, ${order.delivery_address.city || ''}, ${order.delivery_address.state || ''} - ${order.delivery_address.pincode || ''}`
-                                    : 'Address not available'
-                                }</p>
-                              </div>
-                            </div> */}
-
-                            <div>
-                              <h5 className="font-semibold text-gray-800 mb-2 flex items-center"><Truck className="w-4 h-4 mr-2" /> Delivery Details</h5>
-                              <div className="space-y-2">
-                                <div className="text-sm space-y-1">
-                                  <p><span className="font-medium">Status:</span> <span className="text-green-600 font-semibold">Delivered</span></p>
-                                  {order.delivery_partner_name && (
-                                    <p><span className="font-medium">Delivered by:</span> {order.delivery_partner_name}</p>
-                                  )}
-                                  {order.delivered_at && (
-                                    <p><span className="font-medium">Delivered on:</span> {new Date(order.delivered_at).toLocaleString()}</p>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Order Timeline */}
-                            <div>
-                              <h5 className="font-semibold text-gray-800 mb-2 flex items-center"><Calendar className="w-4 h-4 mr-2" /> Timeline</h5>
-                              <div className="space-y-2 text-sm">
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">Order Confirmed:</span>
-                                  <span className="font-medium">{formatTimeAgo(order.created_at)}</span>
-                                </div>
-                                {order.delivery_assigned_at && (
-                                  <div className="flex justify-between">
-                                    <span className="text-gray-600">Assigned for Delivery:</span>
-                                    <span className="font-medium">{formatTimeAgo(order.delivery_assigned_at)}</span>
-                                  </div>
-                                )}
-                                {order.picked_up_at && (
-                                  <div className="flex justify-between">
-                                    <span className="text-gray-600">Picked Up:</span>
-                                    <span className="font-medium">{formatTimeAgo(order.picked_up_at)}</span>
-                                  </div>
-                                )}
-                                {order.out_for_delivery_at && (
-                                  <div className="flex justify-between">
-                                    <span className="text-gray-600">Out for Delivery:</span>
-                                    <span className="font-medium">{formatTimeAgo(order.out_for_delivery_at)}</span>
-                                  </div>
-                                )}
-                                {order.delivered_at && (
-                                  <div className="flex justify-between">
-                                    <span className="text-gray-600">Delivered:</span>
-                                    <span className="font-medium text-green-600">{formatTimeAgo(order.delivered_at)}</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          <Separator />
-
-                          <div className="flex justify-between items-center">
-                            <div className="flex space-x-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => { setSelectedOrderItem(order.order_item_id); setVendorNotes(order.vendor_notes || ''); }}
-                              >
-                                <Edit className="mr-2 h-4" /> View/Edit Notes
-                              </Button>
-                            </div>
-                            <p className="text-xs text-gray-500">Delivered on: {order.delivered_at ? new Date(order.delivered_at).toLocaleDateString() : 'N/A'}</p>
-                          </div>
-
-                        </div>
-
-                        {selectedOrderItem === order.order_item_id && (
-                          <div className="p-4 border-t bg-gray-50">
-                            <Label htmlFor="vendor-notes">Vendor Notes</Label>
-                            <Textarea
-                              id="vendor-notes"
-                              value={vendorNotes}
-                              onChange={(e) => setVendorNotes(e.target.value)}
-                              placeholder="Add internal notes for this order..."
-                              className="mb-2"
-                            />
-                            <Button size="sm" onClick={() => handleOrderStatusUpdate(order.order_item_id, order.item_status, undefined, vendorNotes)}>
-                              Save Notes
-                            </Button>
-                          </div>
-                        )}
-
                       </Card>
                     ))}
                   </div>

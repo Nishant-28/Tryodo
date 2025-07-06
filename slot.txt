@@ -1,0 +1,61 @@
+Now, let me explain how the slot-based delivery system works in detail:
+
+1. **Geographical Organization (Sectors)**:
+   - The city/delivery area is divided into sectors (`delivery_sectors` table)
+   - Each sector has:
+     - A defined geographical boundary (stored as a polygon)
+     - Active/inactive status
+     - Capacity and operational parameters
+
+2. **Time Management (Slots)**:
+   - Each sector has multiple delivery slots (`delivery_slots` table)
+   - Slots define:
+     - Time window (start_time and end_time)
+     - Day of week
+     - Maximum order capacity
+     - Sector association
+
+3. **Order Flow**:
+   a. **Order Creation**:
+      - Customer selects a delivery slot during checkout
+      - System checks slot availability using `check_slot_availability` function
+      - Order is created with slot_id and sector_id
+
+   b. **Order Assignment**:
+      - `assign_slot_based_delivery` function runs periodically
+      - Groups orders by sector and delivery date
+      - Finds available delivery partners in each sector
+      - Assigns orders optimizing for:
+        - Delivery partner location
+        - Slot timing
+        - Order volume
+
+   c. **Pickup Process**:
+      - Delivery partner receives assigned orders
+      - `mark_order_picked_up` function:
+        - Updates order status
+        - Records pickup time
+        - Calculates estimated delivery time based on slot
+        - Updates delivery partner status
+
+   d. **Delivery Process**:
+      - System tracks:
+        - Order status
+        - Delivery partner location
+        - Time compliance with slots
+        - Successful deliveries
+
+4. **Optimization Features**:
+   - Slot capacity management
+   - Geographical clustering of orders
+   - Delivery partner allocation based on:
+     - Current location
+     - Workload
+     - Performance metrics
+
+5. **Key Benefits**:
+   - Predictable delivery windows
+   - Optimized resource allocation
+   - Better customer experience
+   - Efficient route planning
+   - Load balancing across time slots

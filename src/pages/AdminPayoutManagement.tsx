@@ -17,7 +17,9 @@ import {
   CheckCircle,
   AlertTriangle,
   Clock,
-  XCircle
+  XCircle,
+  Check,
+  X
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -32,33 +34,85 @@ import { useToast } from '../hooks/use-toast';
 import { supabase } from '../lib/supabase';
 import { PayoutAPI } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import { Alert } from '@/components/ui/alert';
+import { Loader2, BarChart3, PieChart, ArrowUpDown, FileText, Zap } from 'lucide-react';
 
 interface Payout {
   id: string;
   payout_number: string;
   recipient_type: 'vendor' | 'delivery_partner';
   recipient_id: string;
+  recipient_name?: string;
+  recipient_email?: string;
+  recipient_phone?: string;
   payout_amount: number;
   payout_method: 'bank_transfer' | 'upi' | 'cash' | 'cheque';
   payout_status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
   period_start: string;
   period_end: string;
-  included_transactions: string[];
+  included_transactions?: string[];
   transaction_count: number;
-  processed_by: string | null;
-  payment_reference: string | null;
-  bank_details: any | null;
-  scheduled_date: string | null;
-  processed_date: string | null;
-  completed_date: string | null;
-  notes: string | null;
+  processed_by?: string;
+  processed_by_name?: string;
+  payment_reference?: string;
+  bank_details?: any;
+  scheduled_date?: string;
+  processed_date?: string;
+  completed_date?: string;
+  notes?: string;
+  metadata?: any;
   created_at: string;
   updated_at: string;
-  recipient?: {
-    name: string;
-    email: string;
-    phone?: string;
+}
+
+interface PayoutAnalytics {
+  totalPayouts: number;
+  totalAmount: number;
+  statusBreakdown: {
+    pending: number;
+    processing: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
   };
+  amountBreakdown: {
+    pending: number;
+    processing: number;
+    completed: number;
+    failed: number;
+  };
+  methodBreakdown: {
+    bank_transfer: number;
+    upi: number;
+    cash: number;
+    cheque: number;
+  };
+  recipientTypeBreakdown: {
+    vendor: number;
+    delivery_partner: number;
+  };
+  successRate: string;
+  averageAmount: string;
+  monthlyTrend: Array<{
+    month: string;
+    totalPayouts: number;
+    totalAmount: number;
+    completedPayouts: number;
+    completedAmount: number;
+  }>;
+}
+
+interface PayoutFilters {
+  recipientType?: 'vendor' | 'delivery_partner';
+  status?: string;
+  payoutMethod?: string;
+  search?: string;
+  startDate?: string;
+  endDate?: string;
+  minAmount?: number;
+  maxAmount?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }
 
 interface PayoutForm {
@@ -68,6 +122,8 @@ interface PayoutForm {
   payoutMethod: 'bank_transfer' | 'upi' | 'cash' | 'cheque';
   scheduledDate: string;
   notes: string;
+  periodStart: string;
+  periodEnd: string;
 }
 
 const AdminPayoutManagement: React.FC = () => {
@@ -82,12 +138,22 @@ const AdminPayoutManagement: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [createLoading, setCreateLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [recipientsLoading, setRecipientsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [selectedPayout, setSelectedPayout] = useState<Payout | null>(null);
   const [showPayoutDetails, setShowPayoutDetails] = useState(false);
+  const [analytics, setAnalytics] = useState<PayoutAnalytics | null>(null);
+  const [selectedPayouts, setSelectedPayouts] = useState<Set<string>>(new Set());
+  const [filters, setFilters] = useState<PayoutFilters>({});
+  const [activeTab, setActiveTab] = useState('overview');
+  const [showBulkDialog, setShowBulkDialog] = useState(false);
+  const [showApprovalDialog, setShowApprovalDialog] = useState(false);
+  const [approvalAction, setApprovalAction] = useState<'approve' | 'reject'>('approve');
+  const [approvalComments, setApprovalComments] = useState('');
+  const [bulkActionType, setBulkActionType] = useState<'approve' | 'reject'>('approve');
   
   // Form state
   const [payoutForm, setPayoutForm] = useState<PayoutForm>({
@@ -97,13 +163,15 @@ const AdminPayoutManagement: React.FC = () => {
     payoutMethod: 'bank_transfer',
     scheduledDate: new Date().toISOString().split('T')[0],
     notes: '',
+    periodStart: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    periodEnd: new Date().toISOString().split('T')[0],
   });
 
   // Filtered payouts
   const filteredPayouts = payouts.filter(payout => {
     const matchesSearch = searchTerm === '' || 
       payout.payout_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      payout.recipient?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      payout.recipient_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       payout.payment_reference?.toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesStatus = statusFilter === 'all' || payout.payout_status === statusFilter;
@@ -125,13 +193,18 @@ const AdminPayoutManagement: React.FC = () => {
   useEffect(() => {
     loadPayouts();
     loadRecipients();
-  }, []);
+    loadAnalytics();
+  }, [filters]);
 
   const loadPayouts = async () => {
     try {
       setLoading(true);
       
-      const response = await PayoutAPI.getPayouts();
+      const response = await PayoutAPI.getPayouts({
+        ...filters,
+        limit: 100,
+        offset: 0
+      });
       if (response.success && response.data) {
         setPayouts(response.data);
       }
@@ -149,6 +222,9 @@ const AdminPayoutManagement: React.FC = () => {
 
   const loadRecipients = async () => {
     try {
+      setRecipientsLoading(true);
+      console.log('Loading recipients...');
+      
       // Load vendors
       const { data: vendorData, error: vendorError } = await supabase
         .from('vendors')
@@ -156,30 +232,65 @@ const AdminPayoutManagement: React.FC = () => {
           id,
           business_name,
           business_email,
-          contact_phone,
           is_active
         `)
         .eq('is_active', true)
         .order('business_name');
 
-      if (vendorError) throw vendorError;
+      if (vendorError) {
+        console.error('Error loading vendors:', vendorError);
+        throw vendorError;
+      }
+      console.log('Loaded vendors:', vendorData);
       setVendors(vendorData || []);
 
-      // Load delivery partners
+      // Load delivery partners with profiles
       const { data: partnerData, error: partnerError } = await supabase
         .from('delivery_partners')
         .select(`
           id,
-          profile:profiles(full_name, email, phone),
-          is_active
+          profile_id,
+          is_active,
+          profiles (
+            id,
+            full_name,
+            email,
+            phone
+          )
         `)
-        .eq('is_active', true)
-        .order('profile(full_name)');
+        .eq('is_active', true);
 
-      if (partnerError) throw partnerError;
+      if (partnerError) {
+        console.error('Error loading delivery partners:', partnerError);
+        throw partnerError;
+      }
+      console.log('Loaded delivery partners:', partnerData);
       setDeliveryPartners(partnerData || []);
     } catch (error) {
       console.error('Error loading recipients:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load recipients. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setRecipientsLoading(false);
+    }
+  };
+
+  const loadAnalytics = async () => {
+    try {
+      const response = await PayoutAPI.getPayoutAnalytics({
+        recipientType: filters.recipientType,
+        startDate: filters.startDate,
+        endDate: filters.endDate,
+      });
+
+      if (response.success) {
+        setAnalytics(response.data);
+      }
+    } catch (error) {
+      console.error('Error loading analytics:', error);
     }
   };
 
@@ -201,6 +312,8 @@ const AdminPayoutManagement: React.FC = () => {
         recipientId: payoutForm.recipientId,
         payoutAmount: parseFloat(payoutForm.payoutAmount),
         payoutMethod: payoutForm.payoutMethod,
+        periodStart: payoutForm.periodStart,
+        periodEnd: payoutForm.periodEnd,
         scheduledDate: payoutForm.scheduledDate,
         notes: payoutForm.notes,
         processedBy: currentProfile?.id || ''
@@ -220,6 +333,8 @@ const AdminPayoutManagement: React.FC = () => {
           payoutMethod: 'bank_transfer',
           scheduledDate: new Date().toISOString().split('T')[0],
           notes: '',
+          periodStart: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          periodEnd: new Date().toISOString().split('T')[0],
         });
         
         setShowCreateDialog(false);
@@ -238,9 +353,9 @@ const AdminPayoutManagement: React.FC = () => {
     }
   };
 
-  const handleUpdatePayoutStatus = async (payoutId: string, newStatus: string) => {
+  const handleUpdatePayoutStatus = async (payoutId: string, newStatus: 'processing' | 'completed' | 'failed' | 'cancelled') => {
     try {
-      const result = await PayoutAPI.updatePayoutStatus(payoutId, newStatus, currentProfile?.id || '');
+      const result = await PayoutAPI.updatePayoutStatus(payoutId, newStatus, undefined, currentProfile?.id || '');
       
       if (result.success) {
         toast({
@@ -302,6 +417,117 @@ const AdminPayoutManagement: React.FC = () => {
     );
   };
 
+  const handleFilterChange = (key: string, value: any) => {
+    setFilters(prev => ({
+      ...prev,
+      [key]: value || undefined
+    }));
+  };
+
+  const handleApproveReject = async (payout: Payout, action: 'approve' | 'reject') => {
+    setSelectedPayout(payout);
+    setApprovalAction(action);
+    setApprovalComments('');
+    setShowApprovalDialog(true);
+  };
+
+
+
+  const confirmApproveReject = async () => {
+    if (!selectedPayout || !currentProfile) return;
+
+    try {
+      const response = await PayoutAPI.approveRejectPayout(
+        selectedPayout.id,
+        approvalAction,
+        currentProfile.id,
+        approvalComments
+      );
+
+      if (response.success) {
+        toast({
+          title: "Success",
+          description: `Payout ${approvalAction}d successfully`
+        });
+        setShowApprovalDialog(false);
+        loadPayouts();
+      } else {
+        throw new Error(response.error);
+      }
+    } catch (error) {
+      console.error(`Error ${approvalAction}ing payout:`, error);
+      toast({
+        title: "Error",
+        description: `Failed to ${approvalAction} payout`,
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleBulkApproveReject = async () => {
+    if (selectedPayouts.size === 0 || !currentProfile) return;
+
+    try {
+      const promises = Array.from(selectedPayouts).map(payoutId => {
+        const payout = payouts.find(p => p.id === payoutId);
+        if (payout?.payout_status === 'pending') {
+          return PayoutAPI.approveRejectPayout(payoutId, bulkActionType, currentProfile.id, approvalComments);
+        }
+        return Promise.resolve({ success: false, error: 'Invalid payout status' });
+      });
+
+      const results = await Promise.all(promises);
+      const successful = results.filter(r => r.success).length;
+      const failed = results.length - successful;
+
+      if (successful > 0) {
+        toast({
+          title: "Success",
+          description: `${successful} payouts ${bulkActionType}d successfully`
+        });
+                 if (failed > 0) {
+           toast({
+             title: "Warning",
+             description: `${failed} payouts failed to ${bulkActionType}`,
+             variant: "destructive"
+           });
+         }
+        setShowBulkDialog(false);
+        setSelectedPayouts(new Set());
+        loadPayouts();
+      } else {
+        throw new Error('Failed to approve/reject payouts');
+      }
+    } catch (error) {
+      console.error(`Error bulk ${bulkActionType}ing payouts:`, error);
+      toast({
+        title: "Error",
+        description: `Failed to ${bulkActionType} payouts`,
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleSelectPayout = (payoutId: string) => {
+    setSelectedPayouts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(payoutId)) {
+        newSet.delete(payoutId);
+      } else {
+        newSet.add(payoutId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedPayouts.size === payouts.length) {
+      setSelectedPayouts(new Set());
+    } else {
+      setSelectedPayouts(new Set(payouts.map(p => p.id)));
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -329,7 +555,13 @@ const AdminPayoutManagement: React.FC = () => {
             <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
-          <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+          <Dialog open={showCreateDialog} onOpenChange={(open) => {
+            setShowCreateDialog(open);
+            if (open) {
+              // Load recipients when dialog opens
+              loadRecipients();
+            }
+          }}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="h-4 w-4 mr-2" />
@@ -348,9 +580,11 @@ const AdminPayoutManagement: React.FC = () => {
                   <Label>Recipient Type *</Label>
                   <Select
                     value={payoutForm.recipientType}
-                    onValueChange={(value: 'vendor' | 'delivery_partner') => 
-                      setPayoutForm(prev => ({ ...prev, recipientType: value, recipientId: '' }))
-                    }
+                    onValueChange={(value: 'vendor' | 'delivery_partner') => {
+                      setPayoutForm(prev => ({ ...prev, recipientType: value, recipientId: '' }));
+                      // Reload recipients when type changes
+                      loadRecipients();
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -367,23 +601,41 @@ const AdminPayoutManagement: React.FC = () => {
                   <Select
                     value={payoutForm.recipientId}
                     onValueChange={(value) => setPayoutForm(prev => ({ ...prev, recipientId: value }))}
+                    disabled={recipientsLoading}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select recipient" />
+                      <SelectValue placeholder={recipientsLoading ? "Loading..." : "Select recipient"} />
                     </SelectTrigger>
                     <SelectContent>
-                      {payoutForm.recipientType === 'vendor' 
-                        ? vendors.map((vendor) => (
+                      {recipientsLoading ? (
+                        <SelectItem value="loading" disabled>
+                          Loading recipients...
+                        </SelectItem>
+                      ) : payoutForm.recipientType === 'vendor' ? (
+                        vendors.length > 0 ? (
+                          vendors.map((vendor) => (
                             <SelectItem key={vendor.id} value={vendor.id}>
                               {vendor.business_name} ({vendor.business_email})
                             </SelectItem>
                           ))
-                        : deliveryPartners.map((partner) => (
+                        ) : (
+                          <SelectItem value="no-vendors" disabled>
+                            No active vendors found
+                          </SelectItem>
+                        )
+                      ) : (
+                        deliveryPartners.length > 0 ? (
+                          deliveryPartners.map((partner) => (
                             <SelectItem key={partner.id} value={partner.id}>
-                              {partner.profile?.full_name} ({partner.profile?.phone})
+                              {partner.profiles?.full_name || 'Unknown'} ({partner.profiles?.email || partner.profiles?.phone || 'No contact'})
                             </SelectItem>
                           ))
-                      }
+                        ) : (
+                          <SelectItem value="no-partners" disabled>
+                            No active delivery partners found
+                          </SelectItem>
+                        )
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -510,6 +762,37 @@ const AdminPayoutManagement: React.FC = () => {
         </Card>
       </div>
 
+      {/* Analytics Cards */}
+      {analytics && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{analytics.successRate}%</div>
+              <p className="text-xs text-muted-foreground">
+                {analytics.statusBreakdown.completed} completed
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Average Amount</CardTitle>
+              <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{formatCurrency(Number(analytics.averageAmount))}</div>
+              <p className="text-xs text-muted-foreground">
+                Per payout
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Filters and Search */}
       <Card>
         <CardHeader>
@@ -573,7 +856,7 @@ const AdminPayoutManagement: React.FC = () => {
                     </div>
                     <div>
                       <h3 className="font-semibold">{payout.payout_number}</h3>
-                      <p className="text-sm text-gray-600">{payout.recipient?.name}</p>
+                      <p className="text-sm text-gray-600">{payout.recipient_name}</p>
                       <div className="flex items-center space-x-2 mt-1">
                         {getStatusBadge(payout.payout_status)}
                         <Badge variant="outline">
@@ -625,9 +908,18 @@ const AdminPayoutManagement: React.FC = () => {
                     <Button
                       variant="default"
                       size="sm"
-                      onClick={() => handleUpdatePayoutStatus(payout.id, 'processing')}
+                      onClick={() => handleApproveReject(payout, 'approve')}
                     >
-                      Process
+                      Approve
+                    </Button>
+                  )}
+                  {payout.payout_status === 'processing' && (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => handleApproveReject(payout, 'reject')}
+                    >
+                      Reject
                     </Button>
                   )}
                   {payout.payout_status === 'processing' && (
@@ -733,6 +1025,96 @@ const AdminPayoutManagement: React.FC = () => {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Approval Dialog */}
+      <Dialog open={showApprovalDialog} onOpenChange={setShowApprovalDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {approvalAction === 'approve' ? 'Approve Payout' : 'Reject Payout'}
+            </DialogTitle>
+            <DialogDescription>
+              {approvalAction === 'approve' 
+                ? 'Are you sure you want to approve this payout? This action will move it to processing status.'
+                : 'Are you sure you want to reject this payout? This action cannot be undone.'
+              }
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedPayout && (
+            <div className="space-y-4">
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h4 className="font-semibold">{selectedPayout.payout_number}</h4>
+                <p className="text-sm text-gray-600">
+                  {selectedPayout.recipient_name} • {formatCurrency(selectedPayout.payout_amount)}
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="approvalComments">Comments {approvalAction === 'reject' ? '(Required)' : '(Optional)'}</Label>
+                <Textarea
+                  id="approvalComments"
+                  placeholder={`Enter ${approvalAction} comments...`}
+                  value={approvalComments}
+                  onChange={(e) => setApprovalComments(e.target.value)}
+                  required={approvalAction === 'reject'}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setShowApprovalDialog(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={confirmApproveReject}
+                  disabled={approvalAction === 'reject' && !approvalComments.trim()}
+                  variant={approvalAction === 'approve' ? 'default' : 'destructive'}
+                >
+                  {approvalAction === 'approve' ? 'Approve' : 'Reject'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Action Dialog */}
+      <Dialog open={showBulkDialog} onOpenChange={setShowBulkDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Bulk {bulkActionType === 'approve' ? 'Approve' : 'Reject'} Payouts
+            </DialogTitle>
+            <DialogDescription>
+              You are about to {bulkActionType} {selectedPayouts.size} payouts. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="bulkComments">Comments</Label>
+              <Textarea
+                id="bulkComments"
+                placeholder={`Enter ${bulkActionType} comments...`}
+                value={approvalComments}
+                onChange={(e) => setApprovalComments(e.target.value)}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowBulkDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleBulkApproveReject}
+                variant={bulkActionType === 'approve' ? 'default' : 'destructive'}
+              >
+                {bulkActionType === 'approve' ? 'Approve All' : 'Reject All'}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

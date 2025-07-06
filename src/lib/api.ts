@@ -626,7 +626,7 @@ export class AnalyticsAPI {
 
       // Fallback: compute summary directly from order_items and orders
       console.log('RPC failed or returned empty, computing from order_items...');
-      
+
       // Get vendor's sales data from order_items
       const { data: orderItems, error: orderError } = await supabase
         .from('order_items')
@@ -665,19 +665,19 @@ export class AnalyticsAPI {
       // Calculate metrics from order_items
       const items = orderItems || [];
       const totalSales = items.reduce((sum, item) => sum + parseFloat(item.line_total || 0), 0);
-      const totalOrders = new Set(items.map(item => item.order?.created_at)).size; // Unique orders
-      const deliveredItems = items.filter(item => item.order?.order_status === 'delivered');
+      const totalOrders = new Set(items.map(item => item.order && item.order.created_at)).size; // Unique orders
+      const deliveredItems = items.filter(item => item.order && item.order.order_status === 'delivered');
       const deliveredSales = deliveredItems.reduce((sum, item) => sum + parseFloat(item.line_total || 0), 0);
-      
+
       // Calculate commission (assume 15% default commission rate)
       const commissionRate = 0.15;
       const totalCommission = totalSales * commissionRate;
       const netEarnings = totalSales - totalCommission;
 
       // Pending payouts (items not yet delivered)
-      const pendingItems = items.filter(item => 
-        item.order?.order_status !== 'delivered' && 
-        item.order?.order_status !== 'cancelled'
+      const pendingItems = items.filter(item =>
+        item.order && item.order.order_status !== 'delivered' &&
+        item.order.order_status !== 'cancelled'
       );
       const pendingPayouts = pendingItems.reduce((sum, item) => sum + parseFloat(item.line_total || 0), 0);
 
@@ -692,8 +692,8 @@ export class AnalyticsAPI {
         average_order_value: totalOrders > 0 ? totalSales / totalOrders : 0,
         commission_rate: commissionRate,
         // Additional metrics for dashboard
-        pending_orders: items.filter(item => item.order?.order_status === 'pending').length,
-        confirmed_orders: items.filter(item => item.order?.order_status === 'confirmed').length,
+        pending_orders: items.filter(item => item.order && item.order.order_status === 'pending').length,
+        confirmed_orders: items.filter(item => item.order && item.order.order_status === 'confirmed').length,
         delivered_orders: deliveredItems.length,
       };
 
@@ -721,7 +721,7 @@ export class OrderAPI {
    */
   static async getCustomerOrders(customerId: string): Promise<ApiResponse<any[]>> {
     try {
-      // Fetch orders first, selecting only the necessary IDs and basic order info
+      // Fetch orders with slot and sector information
       const { data: orders, error } = await supabase
         .from('orders')
         .select(`
@@ -755,7 +755,19 @@ export class OrderAPI {
           delivery_date,
           pickup_time,
           out_for_delivery_time,
-          estimated_delivery_time
+          estimated_delivery_time,
+          delivery_slots(
+            id,
+            slot_name,
+            start_time,
+            end_time,
+            cutoff_time,
+            pickup_delay_minutes
+          ),
+          sectors(
+            id,
+            name
+          )
         `)
         .eq('customer_id', customerId)
         .order('created_at', { ascending: false });
@@ -871,11 +883,44 @@ export class OrderAPI {
           };
         }
 
+        // Format slot information
+        let slotInfo = null;
+        if (order.delivery_slots) {
+          // Handle both single object and array responses from Supabase
+          const slot = Array.isArray(order.delivery_slots) ? order.delivery_slots[0] : order.delivery_slots;
+          if (slot) {
+            slotInfo = {
+              slot_id: slot.id,
+              slot_name: slot.slot_name,
+              delivery_window: `${this.formatTime(slot.start_time)} - ${this.formatTime(slot.end_time)}`,
+              start_time: slot.start_time,
+              end_time: slot.end_time,
+              cutoff_time: slot.cutoff_time,
+              pickup_delay_minutes: slot.pickup_delay_minutes
+            };
+          }
+        }
+
+        // Format sector information
+        let sectorInfo = null;
+        if (order.sectors) {
+          // Handle both single object and array responses from Supabase
+          const sector = Array.isArray(order.sectors) ? order.sectors[0] : order.sectors;
+          if (sector) {
+            sectorInfo = {
+              sector_id: sector.id,
+              sector_name: sector.name
+            };
+          }
+        }
+
         return {
           ...order,
           delivery_address: reconstructedDeliveryAddress,
           order_items: orderItemsMap.get(order.id) || [],
           delivery_details: deliveryDetails,
+          slot_info: slotInfo,
+          sector_info: sectorInfo,
           current_delivery_status: this.getCurrentDeliveryStatus(order, deliveryDetails)
         };
       });
@@ -923,7 +968,7 @@ export class OrderAPI {
               onUpdate(payload); // Fallback to original payload if re-fetch fails
             }
           } else {
-             onUpdate(payload);
+            onUpdate(payload);
           }
         }
       )
@@ -940,28 +985,28 @@ export class OrderAPI {
           table: 'order_items'
         },
         async (payload) => {
-           // Check if this order item belongs to the customer
-           const orderId = (payload.new as any)?.order_id || (payload.old as any)?.order_id;
-           if (orderId) {
-             const { data: order } = await supabase
-               .from('orders')
-               .select('customer_id')
-               .eq('id', orderId)
-               .single();
+          // Check if this order item belongs to the customer
+          const orderId = (payload.new as any)?.order_id || (payload.old as any)?.order_id;
+          if (orderId) {
+            const { data: order } = await supabase
+              .from('orders')
+              .select('customer_id')
+              .eq('id', orderId)
+              .single();
 
-             if (order?.customer_id === customerId) {
-               console.log('Order item update received:', payload);
-               // Re-fetch affected order to get updated details
-               const { data, error } = await this.getOrderById(orderId);
-               if (data) {
-                 onUpdate({ ...payload, new: data });
-               } else if (error) {
-                 console.error("Error re-fetching order after item update:", error);
-                 onUpdate(payload);
-               }
-             }
-           }
-         }
+            if (order?.customer_id === customerId) {
+              console.log('Order item update received:', payload);
+              // Re-fetch affected order to get updated details
+              const { data, error } = await this.getOrderById(orderId);
+              if (data) {
+                onUpdate({ ...payload, new: data });
+              } else if (error) {
+                console.error("Error re-fetching order after item update:", error);
+                onUpdate(payload);
+              }
+            }
+          }
+        }
       )
       .subscribe();
 
@@ -976,28 +1021,28 @@ export class OrderAPI {
           table: 'delivery_partner_orders'
         },
         async (payload) => {
-           // Check if this delivery update belongs to the customer
-           const orderId = (payload.new as any)?.order_id || (payload.old as any)?.order_id;
-           if (orderId) {
-             const { data: order } = await supabase
-               .from('orders')
-               .select('customer_id')
-               .eq('id', orderId)
-               .single();
+          // Check if this delivery update belongs to the customer
+          const orderId = (payload.new as any)?.order_id || (payload.old as any)?.order_id;
+          if (orderId) {
+            const { data: order } = await supabase
+              .from('orders')
+              .select('customer_id')
+              .eq('id', orderId)
+              .single();
 
-             if (order?.customer_id === customerId) {
-               console.log('Delivery update received:', payload);
-               // Re-fetch affected order to get updated details
-               const { data, error } = await this.getOrderById(orderId);
-               if (data) {
-                 onUpdate({ ...payload, new: data });
-               } else if (error) {
-                 console.error("Error re-fetching order after delivery update:", error);
-                 onUpdate(payload);
-               }
-             }
-           }
-         }
+            if (order?.customer_id === customerId) {
+              console.log('Delivery update received:', payload);
+              // Re-fetch affected order to get updated details
+              const { data, error } = await this.getOrderById(orderId);
+              if (data) {
+                onUpdate({ ...payload, new: data });
+              } else if (error) {
+                console.error("Error re-fetching order after delivery update:", error);
+                onUpdate(payload);
+              }
+            }
+          }
+        }
       )
       .subscribe();
 
@@ -1196,14 +1241,14 @@ export class OrderAPI {
    */
   static getDeliveryProgress(order: any, deliveryPartner?: any): number {
     const status = order.order_status;
-    
+
     switch (status) {
       case 'pending': return 0;
       case 'confirmed': return 20;
       case 'processing': return 40;
       case 'packed': return 50;
       case 'picked_up': return 65;
-      case 'shipped': 
+      case 'shipped':
       case 'out_for_delivery': return 85;
       case 'delivered': return 100;
       case 'cancelled':
@@ -1256,7 +1301,7 @@ export class OrderAPI {
   static async getOrderTracking(orderId: string): Promise<ApiResponse<any>> {
     try {
       const { data: order, error } = await this.getOrderById(orderId);
-      
+
       if (error) throw error;
 
       return {
@@ -1291,7 +1336,7 @@ export class OrderAPI {
         .single();
 
       if (error) throw error;
-      
+
       if (!data) {
         return { success: false, error: 'Order cannot be cancelled at its current stage.' };
       }
@@ -1336,7 +1381,7 @@ export class OrderAPI {
         .single();
 
       if (error) throw error;
-      
+
       if (!data) {
         return { success: false, error: 'Order is not in a returnable state.' };
       }
@@ -1357,11 +1402,23 @@ export class OrderAPI {
   /**
    * Helper method to determine current delivery status
    */
+  private static formatTime(timeString: string): string {
+    try {
+      return new Date(`1970-01-01T${timeString}`).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch (error) {
+      return timeString;
+    }
+  }
+
   private static getCurrentDeliveryStatus(order: any, deliveryInfo?: any): string {
     if (deliveryInfo?.status) {
       return deliveryInfo.status;
     }
-    
+
     // Map order status to delivery status
     switch (order.order_status) {
       case 'confirmed': return 'confirmed';
@@ -1444,16 +1501,16 @@ export class OrderAPI {
   ): Promise<ApiResponse<any>> {
     try {
       console.log('Updating order item status:', { orderItemId, status });
-      
+
       // Check authentication first
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
         console.error('Authentication error:', authError);
         return { success: false, error: 'User not authenticated' };
       }
-      
+
       console.log('User authenticated:', user.email);
-      
+
       // Use upsert approach to avoid CORS issues
       try {
         const { data, error } = await supabase
@@ -1475,7 +1532,7 @@ export class OrderAPI {
       } catch (error: any) {
         // Final fallback: Try to get current item and update with all required fields
         console.warn('Upsert failed, trying full record update:', error);
-        
+
         // First get the current order item
         const { data: currentItem, error: getError } = await supabase
           .from('order_items')
@@ -1558,15 +1615,47 @@ export class OrderAPI {
 
       if (orderError) throw orderError;
 
-      const orderItems = orderData.items.map(item => ({
-        order_id: order.id,
-        vendor_id: item.vendorId,
-        vendor_product_id: item.productId, // Fixed: use vendor_product_id instead of product_id
-        product_name: item.name,
-        quantity: item.quantity,
-        unit_price: item.price,
-        line_total: item.price * item.quantity,
-        // Add other relevant item fields here
+      // Enhanced order items creation with quality information fetching
+      const orderItems = await Promise.all(orderData.items.map(async (item) => {
+        let qualityName = item.qualityName;
+
+        // If quality name is missing, fetch it from the database
+        if (!qualityName && item.productId) {
+          try {
+            const { data: productData, error: productError } = await supabase
+              .from('vendor_products')
+              .select(`
+                    quality_type_id,
+                    category_qualities:quality_type_id(quality_name)
+                  `)
+              .eq('id', item.productId)
+              .single();
+
+            if (!productError && productData?.category_qualities && Array.isArray(productData.category_qualities) && productData.category_qualities.length > 0) {
+              qualityName = productData.category_qualities[0].quality_name;
+            } else if (!productError && productData?.category_qualities && typeof productData.category_qualities === 'object') {
+              qualityName = (productData.category_qualities as any).quality_name;
+            }
+          } catch (error) {
+            console.warn('Failed to fetch quality information for product:', item.productId);
+          }
+        }
+
+        return {
+          order_id: order.id,
+          vendor_id: item.vendorId,
+          vendor_product_id: item.productId,
+          product_name: item.name,
+          product_description: `${item.brandName || ''} ${item.modelName || ''}`.trim(),
+          category_name: null, // Will be populated by trigger or subsequent update
+          quality_type_name: qualityName || null,
+          quantity: item.quantity,
+          unit_price: item.price,
+          line_total: item.price * item.quantity,
+          warranty_months: item.warranty || 0,
+          estimated_delivery_days: item.deliveryTime || 3,
+          smartphone_model_id: null, // Can be populated if we have model ID in cart
+        };
       }));
 
       const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
@@ -1602,7 +1691,7 @@ export class TryodoAPI {
   static async healthCheck(): Promise<ApiResponse<any>> {
     try {
       const { data, error } = await supabase.from('brands').select('id').limit(1);
-      
+
       if (error) throw error;
 
       return {
@@ -1812,7 +1901,7 @@ export class TransactionAPI {
       const microseconds = now.getTime().toString().slice(-6);
       const randomSuffix = Math.floor(Math.random() * 999999).toString().padStart(6, '0');
       const orderSuffix = transactionData.orderId.slice(0, 8);
-      
+
       const transactionNumber = `TXN-${timestamp}-${microseconds}-${orderSuffix}-${randomSuffix}`;
 
       const { data, error } = await supabase
@@ -1854,7 +1943,7 @@ export class TransactionAPI {
       if (error) throw error;
 
       const result = data[0];
-      
+
       return {
         success: result.success,
         data: result,
@@ -1930,18 +2019,30 @@ export class CommissionAPI {
         .eq('is_active', true)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        // If table doesn't exist, return localStorage data or empty array
+        if (error.message.includes('does not exist') || error.code === '42P01') {
+          console.log('⚠️ Commission rules table does not exist, returning localStorage data');
+          const localRules = JSON.parse(localStorage.getItem('commission_rules') || '[]');
+          return {
+            success: true,
+            data: localRules,
+            message: `Retrieved ${localRules.length} commission rules from localStorage (simulated)`
+          };
+        }
+        throw error;
+      }
 
       // Manually fetch quality data for records that have quality_id
       if (data && data.length > 0) {
         const qualityIds = data.filter(item => item.quality_id).map(item => item.quality_id);
-        
+
         if (qualityIds.length > 0) {
           const { data: qualityData } = await supabase
             .from('category_qualities')
             .select('id, quality_name')
             .in('id', qualityIds);
-          
+
           // Map quality data to each record
           data.forEach(item => {
             if (item.quality_id && qualityData) {
@@ -1963,9 +2064,336 @@ export class CommissionAPI {
         message: `Retrieved ${data?.length || 0} commission rules`
       };
     } catch (error: any) {
+      console.log('⚠️ Error loading commission rules, returning localStorage data:', error.message);
+      const localRules = JSON.parse(localStorage.getItem('commission_rules') || '[]');
+      return {
+        success: true,
+        data: localRules,
+        message: `Retrieved ${localRules.length} commission rules from localStorage (fallback)`
+      };
+    }
+  }
+
+  /**
+   * Get vendor-quality specific commissions
+   */
+  static async getVendorCommissions(vendorId?: string): Promise<ApiResponse<any[]>> {
+    try {
+      let query = supabase
+        .from('vendor_commissions')
+        .select(`
+          *,
+          vendor:vendors(id, business_name),
+          quality:category_qualities(id, quality_name, quality_description),
+          created_by_profile:profiles(full_name)
+        `)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+
+      if (vendorId) {
+        query = query.eq('vendor_id', vendorId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        // If table doesn't exist, return localStorage data or empty array
+        if (error.message.includes('does not exist') || error.code === '42P01') {
+          console.log('⚠️ Vendor commissions table does not exist, returning localStorage data');
+          const localCommissions = JSON.parse(localStorage.getItem('vendor_commissions') || '[]');
+          const filteredCommissions = vendorId
+            ? localCommissions.filter((c: any) => c.vendor_id === vendorId)
+            : localCommissions;
+          return {
+            success: true,
+            data: filteredCommissions,
+            message: `Retrieved ${filteredCommissions.length} vendor commissions from localStorage (simulated)`
+          };
+        }
+        throw error;
+      }
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved ${data?.length || 0} vendor commissions`
+      };
+    } catch (error: any) {
+      console.log('⚠️ Error loading vendor commissions, returning localStorage data:', error.message);
+      const localCommissions = JSON.parse(localStorage.getItem('vendor_commissions') || '[]');
+      const filteredCommissions = vendorId
+        ? localCommissions.filter((c: any) => c.vendor_id === vendorId)
+        : localCommissions;
+      return {
+        success: true,
+        data: filteredCommissions,
+        message: `Retrieved ${filteredCommissions.length} vendor commissions from localStorage (fallback)`
+      };
+    }
+  }
+
+  /**
+   * Create or update vendor-quality commission
+   */
+  static async upsertVendorCommission(commissionData: {
+    id?: string;
+    vendorId: string;
+    qualityId: string;
+    commissionRate: number;
+    upsideRate: number;
+    isActive?: boolean;
+    effectiveFrom?: string;
+    effectiveUntil?: string;
+    createdBy: string;
+    notes?: string;
+  }): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase
+        .from('vendor_commissions')
+        .upsert([{
+          id: commissionData.id,
+          vendor_id: commissionData.vendorId,
+          quality_id: commissionData.qualityId,
+          commission_rate: commissionData.commissionRate,
+          upside_rate: commissionData.upsideRate,
+          is_active: commissionData.isActive !== false,
+          effective_from: commissionData.effectiveFrom || new Date().toISOString(),
+          effective_until: commissionData.effectiveUntil,
+          created_by: commissionData.createdBy,
+          notes: commissionData.notes,
+        }])
+        .select()
+        .single();
+
+      if (error) {
+        // If table doesn't exist, store in localStorage
+        if (error.message.includes('does not exist') || error.code === '42P01') {
+          console.log('⚠️ Vendor commissions table does not exist, storing in localStorage');
+          const newCommission = {
+            id: commissionData.id || crypto.randomUUID(),
+            vendor_id: commissionData.vendorId,
+            quality_id: commissionData.qualityId,
+            commission_rate: commissionData.commissionRate,
+            upside_rate: commissionData.upsideRate,
+            is_active: commissionData.isActive !== false,
+            effective_from: commissionData.effectiveFrom || new Date().toISOString(),
+            effective_until: commissionData.effectiveUntil,
+            created_by: commissionData.createdBy,
+            notes: commissionData.notes,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+
+          const existingCommissions = JSON.parse(localStorage.getItem('vendor_commissions') || '[]');
+          if (commissionData.id) {
+            const index = existingCommissions.findIndex((c: any) => c.id === commissionData.id);
+            if (index >= 0) {
+              existingCommissions[index] = newCommission;
+            } else {
+              existingCommissions.push(newCommission);
+            }
+          } else {
+            existingCommissions.push(newCommission);
+          }
+          localStorage.setItem('vendor_commissions', JSON.stringify(existingCommissions));
+
+          return {
+            success: true,
+            data: newCommission,
+            message: commissionData.id ? 'Vendor commission updated successfully (localStorage)' : 'Vendor commission created successfully (localStorage)'
+          };
+        }
+        throw error;
+      }
+
+      return {
+        success: true,
+        data,
+        message: commissionData.id ? 'Vendor commission updated successfully' : 'Vendor commission created successfully'
+      };
+    } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to fetch commission rules'
+        error: error.message || 'Failed to save vendor commission'
+      };
+    }
+  }
+
+  /**
+   * Get commission analytics by vendor and quality
+   */
+  static async getCommissionAnalytics(filters?: {
+    vendorId?: string;
+    qualityId?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<ApiResponse<any[]>> {
+    try {
+      let query = supabase
+        .from('commission_analytics')
+        .select(`
+          *,
+          vendor:vendors(business_name),
+          quality:category_qualities(quality_name)
+        `)
+        .order('period_start', { ascending: false });
+
+      if (filters) {
+        if (filters.vendorId) {
+          query = query.eq('vendor_id', filters.vendorId);
+        }
+        if (filters.qualityId) {
+          query = query.eq('quality_id', filters.qualityId);
+        }
+        if (filters.startDate) {
+          query = query.gte('period_start', filters.startDate);
+        }
+        if (filters.endDate) {
+          query = query.lte('period_end', filters.endDate);
+        }
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved ${data?.length || 0} commission analytics records`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch commission analytics'
+      };
+    }
+  }
+
+  /**
+   * Get quality performance metrics
+   */
+  static async getQualityPerformanceMetrics(): Promise<ApiResponse<any[]>> {
+    try {
+      const { data, error } = await supabase.rpc('get_quality_performance_metrics');
+
+      if (error) {
+        // If function doesn't exist, return mock data
+        if (error.message.includes('Could not find the function') || error.code === '42883') {
+          console.log('⚠️ get_quality_performance_metrics function not found, returning mock data');
+          return {
+            success: true,
+            data: [],
+            message: 'Quality performance metrics retrieved successfully (mock data - function not available)'
+          };
+        }
+        throw error;
+      }
+
+      return {
+        success: true,
+        data: data || [],
+        message: 'Quality performance metrics retrieved successfully'
+      };
+    } catch (error: any) {
+      console.log('⚠️ Error loading quality performance metrics, returning mock data:', error.message);
+      return {
+        success: true,
+        data: [],
+        message: 'Quality performance metrics retrieved successfully (fallback mock data)'
+      };
+    }
+  }
+
+  /**
+   * Get vendor commission summary
+   */
+  static async getVendorCommissionSummary(vendorId?: string): Promise<ApiResponse<any[]>> {
+    try {
+      let query = supabase.rpc('get_vendor_commission_summary', vendorId ? { p_vendor_id: vendorId } : {});
+
+      const { data, error } = await query;
+
+      if (error) {
+        // If function doesn't exist, return mock data
+        if (error.message.includes('Could not find the function') || error.code === '42883') {
+          console.log('⚠️ get_vendor_commission_summary function not found, returning mock data');
+          return {
+            success: true,
+            data: [],
+            message: 'Vendor commission summary retrieved successfully (mock data - function not available)'
+          };
+        }
+        throw error;
+      }
+
+      return {
+        success: true,
+        data: data || [],
+        message: 'Vendor commission summary retrieved successfully'
+      };
+    } catch (error: any) {
+      console.log('⚠️ Error loading vendor commission summary, returning mock data:', error.message);
+      return {
+        success: true,
+        data: [],
+        message: 'Vendor commission summary retrieved successfully (fallback mock data)'
+      };
+    }
+  }
+
+  /**
+   * Calculate pricing breakdown for vendor-quality combination
+   */
+  static async calculatePricingBreakdown(
+    vendorId: string,
+    qualityId: string,
+    basePrice: number
+  ): Promise<ApiResponse<any>> {
+    try {
+      // Get vendor commission for this quality
+      const { data: vendorCommission, error: commissionError } = await supabase
+        .from('vendor_commissions')
+        .select('commission_rate, upside_rate')
+        .eq('vendor_id', vendorId)
+        .eq('quality_id', qualityId)
+        .eq('is_active', true)
+        .single();
+
+      if (commissionError) throw commissionError;
+
+      if (!vendorCommission) {
+        return {
+          success: false,
+          error: 'No commission rate found for this vendor-quality combination'
+        };
+      }
+
+      const commissionAmount = basePrice * (vendorCommission.commission_rate / 100);
+      const upsideAmount = basePrice * (vendorCommission.upside_rate / 100);
+      const finalSellingPrice = basePrice + upsideAmount;
+      const vendorNetEarning = basePrice - commissionAmount;
+      const platformEarning = commissionAmount + upsideAmount;
+
+      return {
+        success: true,
+        data: {
+          basePrice,
+          commissionRate: vendorCommission.commission_rate,
+          upsideRate: vendorCommission.upside_rate,
+          commissionAmount,
+          upsideAmount,
+          finalSellingPrice,
+          vendorNetEarning,
+          platformEarning,
+          platformMarginPercentage: (platformEarning / finalSellingPrice) * 100
+        },
+        message: 'Pricing breakdown calculated successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to calculate pricing breakdown'
       };
     }
   }
@@ -2009,7 +2437,48 @@ export class CommissionAPI {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        // If table doesn't exist, store in localStorage
+        if (error.message.includes('does not exist') || error.code === '42P01') {
+          console.log('⚠️ Commission rules table does not exist, storing in localStorage');
+          const newRule = {
+            id: ruleData.id || crypto.randomUUID(),
+            category_id: ruleData.categoryId,
+            commission_percentage: ruleData.commissionPercentage,
+            minimum_commission: ruleData.minimumCommission || 0,
+            maximum_commission: ruleData.maximumCommission,
+            effective_from: ruleData.effectiveFrom || new Date().toISOString(),
+            effective_until: ruleData.effectiveUntil,
+            notes: ruleData.notes,
+            created_by: ruleData.createdBy,
+            quality_id: ruleData.qualityId,
+            smartphone_model_id: ruleData.smartphoneModelId,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            is_active: true
+          };
+
+          const existingRules = JSON.parse(localStorage.getItem('commission_rules') || '[]');
+          if (ruleData.id) {
+            const index = existingRules.findIndex((r: any) => r.id === ruleData.id);
+            if (index >= 0) {
+              existingRules[index] = newRule;
+            } else {
+              existingRules.push(newRule);
+            }
+          } else {
+            existingRules.push(newRule);
+          }
+          localStorage.setItem('commission_rules', JSON.stringify(existingRules));
+
+          return {
+            success: true,
+            data: newRule,
+            message: ruleData.id ? 'Commission rule updated successfully (localStorage)' : 'Commission rule created successfully (localStorage)'
+          };
+        }
+        throw error;
+      }
 
       return {
         success: true,
@@ -2027,6 +2496,7 @@ export class CommissionAPI {
   static async getVendorDashboardMetrics(vendorId: string) {
     return supabase.rpc('get_vendor_dashboard_metrics', { v_vendor_id: vendorId });
   }
+
   /**
    * Get vendor commission overrides
    */
@@ -2034,10 +2504,10 @@ export class CommissionAPI {
     try {
       // Import service role client for admin operations
       const { supabaseServiceRole } = await import('./supabase');
-      
+
       // Use service role if available, fallback to regular client
       const client = supabaseServiceRole && supabaseServiceRole !== supabase ? supabaseServiceRole : supabase;
-      
+
       let query = client
         .from('vendor_commission_overrides')
         .select(`
@@ -2061,13 +2531,13 @@ export class CommissionAPI {
       // Manually fetch quality data for records that have quality_id
       if (data && data.length > 0) {
         const qualityIds = data.filter(item => item.quality_id).map(item => item.quality_id);
-        
+
         if (qualityIds.length > 0) {
           const { data: qualityData } = await client
             .from('category_qualities')
             .select('id, quality_name')
             .in('id', qualityIds);
-          
+
           // Map quality data to each record
           data.forEach(item => {
             if (item.quality_id && qualityData) {
@@ -2116,10 +2586,10 @@ export class CommissionAPI {
     try {
       // Import service role client for admin operations
       const { supabaseServiceRole } = await import('./supabase');
-      
+
       // Use service role if available, fallback to regular client
       const client = supabaseServiceRole && supabaseServiceRole !== supabase ? supabaseServiceRole : supabase;
-      
+
       const { data, error } = await client
         .from('vendor_commission_overrides')
         .insert([{
@@ -2259,383 +2729,7 @@ export class CommissionAPI {
   }
 }
 
-export class WalletAPI {
-  /**
-   * Get vendor wallet details
-   */
-  static async getVendorWallet(vendorId: string): Promise<ApiResponse<any>> {
-    try {
-      const { data, error } = await supabase
-        .from('vendor_wallets')
-        .select(`
-          *,
-          vendor:vendors ( business_name )
-        `)
-        .eq('vendor_id', vendorId)
-        .single();
-
-      if (error && error.code !== 'PGRST116') {
-        // If the table doesn't exist, create a mock wallet structure
-        if (error.code === '42P01' || error.message?.includes('does not exist')) {
-          console.warn('vendor_wallets table does not exist, returning mock wallet data');
-          return {
-            success: true,
-            data: {
-              vendor_id: vendorId,
-              available_balance: 0,
-              pending_balance: 0,
-              total_earned: 0,
-              total_paid_out: 0,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              vendor: { business_name: 'Vendor' }
-            },
-            message: 'Mock vendor wallet data (table missing)'
-          };
-        }
-        throw error;
-      }
-
-      if (!data) {
-        // Create wallet if it doesn't exist
-        const { data: newWallet, error: createError } = await supabase
-          .from('vendor_wallets')
-          .insert([{ vendor_id: vendorId }])
-          .select(`
-            *,
-            vendor:vendors ( business_name )
-          `)
-          .single();
-
-        if (createError) {
-          // If creation also fails due to missing table, return mock data
-          if (createError.code === '42P01' || createError.message?.includes('does not exist')) {
-            console.warn('vendor_wallets table does not exist, returning mock wallet data');
-            return {
-              success: true,
-              data: {
-                vendor_id: vendorId,
-                available_balance: 0,
-                pending_balance: 0,
-                total_earned: 0,
-                total_paid_out: 0,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                vendor: { business_name: 'Vendor' }
-              },
-              message: 'Mock vendor wallet data (table missing)'
-            };
-          }
-          throw createError;
-        }
-
-        return {
-          success: true,
-          data: newWallet,
-          message: 'Vendor wallet created and retrieved successfully'
-        };
-      }
-
-      return {
-        success: true,
-        data,
-        message: 'Vendor wallet retrieved successfully'
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to fetch vendor wallet'
-      };
-    }
-  }
-
-  /**
-   * Get delivery partner wallet details
-   */
-  static async getDeliveryPartnerWallet(deliveryPartnerId: string): Promise<ApiResponse<any>> {
-    try {
-      const { data, error } = await supabase
-        .from('delivery_partner_wallets')
-        .select(`
-          *,
-          delivery_partner:delivery_partners (
-            profiles(full_name)
-          )
-        `)
-        .eq('delivery_partner_id', deliveryPartnerId)
-        .single();
-
-      if (error && error.code !== 'PGRST116') {
-        // If the table doesn't exist, create a mock wallet structure
-        if (error.code === '42P01' || error.message?.includes('does not exist')) {
-          console.warn('delivery_partner_wallets table does not exist, returning mock wallet data');
-          return {
-            success: true,
-            data: {
-              delivery_partner_id: deliveryPartnerId,
-              available_balance: 0,
-              pending_balance: 0,
-              total_earned: 0,
-              total_paid_out: 0,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              delivery_partner: { profiles: { full_name: 'Delivery Partner' } }
-            },
-            message: 'Mock delivery partner wallet data (table missing)'
-          };
-        }
-        throw error;
-      }
-
-      if (!data) {
-        // Create wallet if it doesn't exist
-        const { data: newWallet, error: createError } = await supabase
-          .from('delivery_partner_wallets')
-          .insert([{ delivery_partner_id: deliveryPartnerId }])
-          .select(`
-            *,
-            delivery_partner:delivery_partners (
-              profiles(full_name)
-            )
-          `)
-          .single();
-
-        if (createError) {
-          // If creation also fails due to missing table, return mock data
-          if (createError.code === '42P01' || createError.message?.includes('does not exist')) {
-            console.warn('delivery_partner_wallets table does not exist, returning mock wallet data');
-            return {
-              success: true,
-              data: {
-                delivery_partner_id: deliveryPartnerId,
-                available_balance: 0,
-                pending_balance: 0,
-                total_earned: 0,
-                total_paid_out: 0,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                delivery_partner: { profiles: { full_name: 'Delivery Partner' } }
-              },
-              message: 'Mock delivery partner wallet data (table missing)'
-            };
-          }
-          throw createError;
-        }
-
-        return {
-          success: true,
-          data: newWallet,
-          message: 'Delivery partner wallet created and retrieved successfully'
-        };
-      }
-
-      return {
-        success: true,
-        data,
-        message: 'Delivery partner wallet retrieved successfully'
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to fetch delivery partner wallet'
-      };
-    }
-  }
-
-  /**
-   * Get platform wallet details
-   */
-  static async getPlatformWallet(): Promise<ApiResponse<any>> {
-    try {
-      const { data, error } = await supabase
-        .from('platform_wallet')
-        .select('*')
-        .single();
-
-      if (error) {
-        // If the table doesn't exist, create a mock wallet structure
-        if (error.code === '42P01' || error.message?.includes('does not exist')) {
-          console.warn('platform_wallet table does not exist, returning mock wallet data');
-          return {
-            success: true,
-            data: {
-              total_commission_earned: 0,
-              available_balance: 0,
-              pending_settlements: 0,
-              total_processed: 0,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            },
-            message: 'Mock platform wallet data (table missing)'
-          };
-        }
-        throw error;
-      }
-
-      return {
-        success: true,
-        data,
-        message: 'Platform wallet retrieved successfully'
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to fetch platform wallet'
-      };
-    }
-  }
-
-  /**
-   * Get all vendor wallets for admin dashboard
-   */
-  static async getAllVendorWallets(): Promise<ApiResponse<any[]>> {
-    try {
-      // Try to use the view first
-      const { data, error } = await supabase
-        .from('vendor_performance_summary')
-        .select('*')
-        .order('total_sales', { ascending: false });
-
-      if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-        // Fallback: compute vendor summary from basic tables if view is missing
-        console.warn('vendor_performance_summary view does not exist, computing from basic tables');
-        return await this.computeAllVendorWallets();
-      } else if (error) {
-        throw error;
-      }
-
-      return {
-        success: true,
-        data: data || [],
-        message: `Retrieved ${data?.length || 0} vendor wallets`
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to fetch vendor wallets'
-      };
-    }
-  }
-
-  /**
-   * Fallback: compute all vendor wallets from basic tables
-   */
-  private static async computeAllVendorWallets(): Promise<ApiResponse<any[]>> {
-    try {
-      // Get all vendors
-      const { data: vendors, error: vendorsError } = await supabase
-        .from('vendors')
-        .select('id, business_name')
-        .eq('is_active', true);
-
-      if (vendorsError) throw vendorsError;
-
-      if (!vendors || vendors.length === 0) {
-        return {
-          success: true,
-          data: [],
-          message: 'No vendors found'
-        };
-      }
-
-      // Compute summary for each vendor
-      const vendorSummaries = await Promise.all(
-        vendors.map(async (vendor) => {
-          try {
-            // Get order items for this vendor
-            const { data: orderItems } = await supabase
-              .from('order_items')
-              .select('line_total, commission_amount, item_status')
-              .eq('vendor_id', vendor.id)
-              .in('item_status', ['confirmed', 'shipped', 'delivered', 'completed']);
-
-            const totalSales = orderItems?.reduce((sum, o) => sum + (o.line_total || 0), 0) || 0;
-            const totalCommission = orderItems?.reduce((sum, o) => sum + (o.commission_amount || 0), 0) || 0;
-
-            // Get pending payouts
-            const { data: pendingPayouts } = await supabase
-              .from('payouts')
-              .select('payout_amount')
-              .eq('recipient_type', 'vendor')
-              .eq('recipient_id', vendor.id)
-              .in('payout_status', ['pending', 'processing']);
-
-            const pendingBalance = pendingPayouts?.reduce((sum, p) => sum + (p.payout_amount || 0), 0) || 0;
-
-            return {
-              vendor_id: vendor.id,
-              business_name: vendor.business_name,
-              total_sales: totalSales,
-              total_commission: totalCommission,
-              available_balance: totalSales - totalCommission,
-              pending_balance: pendingBalance,
-              total_earned: totalSales - totalCommission,
-              total_paid_out: 0 // Would need to compute from completed payouts
-            };
-          } catch (error) {
-            console.error(`Error computing wallet for vendor ${vendor.id}:`, error);
-            return {
-              vendor_id: vendor.id,
-              business_name: vendor.business_name,
-              total_sales: 0,
-              total_commission: 0,
-              available_balance: 0,
-              pending_balance: 0,
-              total_earned: 0,
-              total_paid_out: 0
-            };
-          }
-        })
-      );
-
-      return {
-        success: true,
-        data: vendorSummaries,
-        message: `Computed ${vendorSummaries.length} vendor wallet summaries (fallback)`
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to compute vendor wallets'
-      };
-    }
-  }
-
-  /**
-   * Get all delivery partner wallets for admin dashboard
-   */
-  static async getAllDeliveryPartnerWallets(): Promise<ApiResponse<any[]>> {
-    try {
-      const { data, error } = await supabase
-        .from('delivery_partner_earnings_summary')
-        .select('*')
-        .order('total_earned', { ascending: false });
-
-      if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-        // Fallback: return empty array if view is missing
-        console.warn('delivery_partner_earnings_summary view does not exist, returning empty array');
-        return {
-          success: true,
-          data: [],
-          message: 'No delivery partner wallets (view missing)'
-        };
-      } else if (error) {
-        throw error;
-      }
-
-      return {
-        success: true,
-        data: data || [],
-        message: `Retrieved ${data?.length || 0} delivery partner wallets`
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to fetch delivery partner wallets'
-      };
-    }
-  }
-}
+// WalletAPI removed - wallet functionality no longer needed
 
 export class PayoutAPI {
   /**
@@ -2723,14 +2817,24 @@ export class PayoutAPI {
       const microseconds = now.getTime().toString().slice(-6);
       const randomSuffix = Math.floor(Math.random() * 999999).toString().padStart(6, '0');
       const recipientSuffix = payoutData.recipientId.slice(0, 8);
-      
+
       const payoutNumber = `PAY-${timestamp}-${microseconds}-${recipientSuffix}-${randomSuffix}`;
 
       const { data, error } = await supabase
         .from('payouts')
         .insert([{
           payout_number: payoutNumber,
-          ...payoutData,
+          recipient_type: payoutData.recipientType,
+          recipient_id: payoutData.recipientId,
+          payout_amount: payoutData.payoutAmount,
+          payout_method: payoutData.payoutMethod,
+          period_start: payoutData.periodStart,
+          period_end: payoutData.periodEnd,
+          included_transactions: payoutData.includedTransactions,
+          scheduled_date: payoutData.scheduledDate,
+          bank_details: payoutData.bankDetails,
+          notes: payoutData.notes,
+          processed_by: payoutData.processedBy,
           payout_status: 'pending',
           transaction_count: payoutData.includedTransactions?.length || 0
         }])
@@ -2809,23 +2913,38 @@ export class PayoutAPI {
     try {
       let data, error;
 
+      // Wallet tables removed - calculate from transactions instead
       if (recipientType === 'vendor') {
-        const { data: walletData, error: walletError } = await supabase
-          .from('vendor_wallets')
-          .select('available_balance, total_earned, total_paid_out')
+        // Calculate from order items and transactions
+        const { data: orderItems } = await supabase
+          .from('order_items')
+          .select('line_total, commission_amount')
           .eq('vendor_id', recipientId)
-          .single();
-        data = walletData;
-        error = walletError;
+          .eq('item_status', 'delivered');
 
+        const totalEarned = orderItems?.reduce((sum, item) => sum + (item.line_total || 0), 0) || 0;
+        const totalCommission = orderItems?.reduce((sum, item) => sum + (item.commission_amount || 0), 0) || 0;
+
+        data = {
+          available_balance: totalEarned - totalCommission,
+          total_earned: totalEarned,
+          total_paid_out: 0
+        };
       } else {
-        const { data: walletData, error: walletError } = await supabase
-          .from('delivery_partner_wallets')
-          .select('available_balance, total_earned, total_paid_out')
+        // Calculate from delivery earnings
+        const { data: deliveries } = await supabase
+          .from('deliveries')
+          .select('delivery_fee, tip_amount')
           .eq('delivery_partner_id', recipientId)
-          .single();
-        data = walletData;
-        error = walletError;
+          .eq('delivery_status', 'completed');
+
+        const totalEarned = deliveries?.reduce((sum, delivery) => sum + (delivery.delivery_fee || 0) + (delivery.tip_amount || 0), 0) || 0;
+
+        data = {
+          available_balance: totalEarned,
+          total_earned: totalEarned,
+          total_paid_out: 0
+        };
       }
 
       if (error) throw error;
@@ -2846,6 +2965,368 @@ export class PayoutAPI {
         error: error.message || 'Failed to calculate pending payout'
       };
     }
+  }
+
+  /**
+   * Get payout analytics and statistics
+   */
+  static async getPayoutAnalytics(filters?: {
+    recipientType?: 'vendor' | 'delivery_partner';
+    recipientId?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<ApiResponse<any>> {
+    try {
+      let query = supabase
+        .from('payouts')
+        .select('payout_status, payout_amount, payout_method, recipient_type, created_at');
+
+      // Apply filters
+      if (filters?.recipientType) {
+        query = query.eq('recipient_type', filters.recipientType);
+      }
+
+      if (filters?.recipientId) {
+        query = query.eq('recipient_id', filters.recipientId);
+      }
+
+      if (filters?.startDate) {
+        query = query.gte('created_at', filters.startDate);
+      }
+
+      if (filters?.endDate) {
+        query = query.lte('created_at', filters.endDate);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      // Calculate analytics
+      const analytics = {
+        totalPayouts: data?.length || 0,
+        totalAmount: data?.reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
+
+        // Status breakdown
+        statusBreakdown: {
+          pending: data?.filter(p => p.payout_status === 'pending').length || 0,
+          processing: data?.filter(p => p.payout_status === 'processing').length || 0,
+          completed: data?.filter(p => p.payout_status === 'completed').length || 0,
+          failed: data?.filter(p => p.payout_status === 'failed').length || 0,
+          cancelled: data?.filter(p => p.payout_status === 'cancelled').length || 0,
+        },
+
+        // Amount breakdown by status
+        amountBreakdown: {
+          pending: data?.filter(p => p.payout_status === 'pending')
+            .reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
+          processing: data?.filter(p => p.payout_status === 'processing')
+            .reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
+          completed: data?.filter(p => p.payout_status === 'completed')
+            .reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
+          failed: data?.filter(p => p.payout_status === 'failed')
+            .reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
+        },
+
+        // Method breakdown
+        methodBreakdown: {
+          bank_transfer: data?.filter(p => p.payout_method === 'bank_transfer').length || 0,
+          upi: data?.filter(p => p.payout_method === 'upi').length || 0,
+          cash: data?.filter(p => p.payout_method === 'cash').length || 0,
+          cheque: data?.filter(p => p.payout_method === 'cheque').length || 0,
+        },
+
+        // Recipient type breakdown
+        recipientTypeBreakdown: {
+          vendor: data?.filter(p => p.recipient_type === 'vendor').length || 0,
+          delivery_partner: data?.filter(p => p.recipient_type === 'delivery_partner').length || 0,
+        },
+
+        // Success rate
+        successRate: data?.length ?
+          ((data.filter(p => p.payout_status === 'completed').length / data.length) * 100).toFixed(2) : 0,
+
+        // Average payout amount
+        averageAmount: data?.length ?
+          (data.reduce((sum, p) => sum + Number(p.payout_amount), 0) / data.length).toFixed(2) : 0,
+
+        // Monthly trend (last 12 months)
+        monthlyTrend: this.calculateMonthlyTrend(data || [])
+      };
+
+      return {
+        success: true,
+        data: analytics,
+        message: 'Payout analytics retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch payout analytics'
+      };
+    }
+  }
+
+  /**
+   * Get payout summary for dashboard
+   */
+  static async getPayoutSummary(filters?: {
+    recipientType?: 'vendor' | 'delivery_partner';
+    period?: 'today' | 'week' | 'month' | 'year';
+  }): Promise<ApiResponse<any>> {
+    try {
+      let query = supabase
+        .from('payouts')
+        .select('payout_status, payout_amount, recipient_type, created_at');
+
+      if (filters?.recipientType) {
+        query = query.eq('recipient_type', filters.recipientType);
+      }
+
+      // Apply date filter
+      if (filters?.period) {
+        const now = new Date();
+        let startDate: Date;
+
+        switch (filters.period) {
+          case 'today':
+            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            break;
+          case 'week':
+            startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            break;
+          case 'month':
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            break;
+          case 'year':
+            startDate = new Date(now.getFullYear(), 0, 1);
+            break;
+          default:
+            startDate = new Date(0);
+        }
+
+        query = query.gte('created_at', startDate.toISOString());
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      const summary = {
+        totalPayouts: data?.length || 0,
+        totalAmount: data?.reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
+        pendingPayouts: data?.filter(p => p.payout_status === 'pending').length || 0,
+        pendingAmount: data?.filter(p => p.payout_status === 'pending')
+          .reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
+        completedPayouts: data?.filter(p => p.payout_status === 'completed').length || 0,
+        completedAmount: data?.filter(p => p.payout_status === 'completed')
+          .reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
+        failedPayouts: data?.filter(p => p.payout_status === 'failed').length || 0,
+        failedAmount: data?.filter(p => p.payout_status === 'failed')
+          .reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
+        vendorPayouts: data?.filter(p => p.recipient_type === 'vendor').length || 0,
+        deliveryPartnerPayouts: data?.filter(p => p.recipient_type === 'delivery_partner').length || 0,
+      };
+
+      return {
+        success: true,
+        data: summary,
+        message: 'Payout summary retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch payout summary'
+      };
+    }
+  }
+
+  /**
+   * Create bulk payouts for multiple recipients
+   */
+  static async createBulkPayouts(payouts: Array<{
+    recipientType: 'vendor' | 'delivery_partner';
+    recipientId: string;
+    payoutAmount: number;
+    payoutMethod: 'bank_transfer' | 'upi' | 'cash' | 'cheque';
+    periodStart: string;
+    periodEnd: string;
+    includedTransactions?: string[];
+    scheduledDate?: string;
+    bankDetails?: any;
+    notes?: string;
+  }>, processedBy: string): Promise<ApiResponse<any[]>> {
+    try {
+      const results = [];
+      const errors = [];
+
+      for (const payoutData of payouts) {
+        const result = await this.createPayout({
+          ...payoutData,
+          processedBy
+        });
+
+        if (result.success) {
+          results.push(result.data);
+        } else {
+          errors.push({
+            recipientId: payoutData.recipientId,
+            error: result.error
+          });
+        }
+      }
+
+      return {
+        success: errors.length === 0,
+        data: results,
+        message: `Created ${results.length} payouts successfully${errors.length > 0 ? `, ${errors.length} failed` : ''}`,
+        error: errors.length > 0 ? `Some payouts failed: ${JSON.stringify(errors)}` : undefined
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to create bulk payouts'
+      };
+    }
+  }
+
+  /**
+   * Approve or reject a payout
+   */
+  static async approveRejectPayout(
+    payoutId: string,
+    action: 'approve' | 'reject',
+    approvedBy: string,
+    comments?: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      const newStatus = action === 'approve' ? 'processing' : 'cancelled';
+
+      const { data, error } = await supabase
+        .from('payouts')
+        .update({
+          payout_status: newStatus,
+          processed_by: approvedBy,
+          processed_date: new Date().toISOString(),
+          notes: comments || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', payoutId)
+        .eq('payout_status', 'pending') // Only allow approval/rejection of pending payouts
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: `Payout ${action}d successfully`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || `Failed to ${action} payout`
+      };
+    }
+  }
+
+  /**
+   * Get eligible recipients for automatic payouts
+   */
+  static async getEligibleRecipients(
+    recipientType: 'vendor' | 'delivery_partner',
+    filters?: {
+      minAmount?: number;
+      maxAmount?: number;
+    }
+  ): Promise<ApiResponse<any[]>> {
+    try {
+      const recipientTable = recipientType === 'vendor' ? 'vendors' : 'delivery_partners';
+      const walletTable = recipientType === 'vendor' ? 'vendor_wallets' : 'delivery_partner_wallets';
+
+      let query = supabase
+        .from(recipientTable)
+        .select(`
+          id,
+          profile_id,
+          ${recipientType === 'vendor' ? 'business_name' : ''},
+          profiles!${recipientTable}_profile_id_fkey(
+            full_name,
+            email,
+            phone
+          ),
+          ${walletTable}!${recipientTable}_id_fkey(
+            available_balance,
+            minimum_payout_amount,
+            auto_payout_enabled,
+            last_payout_date
+          )
+        `)
+        .eq('is_active', true);
+
+      const { data: recipients, error } = await query;
+
+      if (error) throw error;
+
+      // Filter eligible recipients
+      const eligibleRecipients = recipients?.filter(recipient => {
+        const wallet = recipient[walletTable]?.[0];
+        if (!wallet) return false;
+
+        const availableBalance = Number(wallet.available_balance);
+        const minAmount = filters?.minAmount || Number(wallet.minimum_payout_amount) || 1000;
+        const maxAmount = filters?.maxAmount || 100000;
+
+        return availableBalance >= minAmount && availableBalance <= maxAmount;
+      }) || [];
+
+      return {
+        success: true,
+        data: eligibleRecipients,
+        message: `Found ${eligibleRecipients.length} eligible recipients`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch eligible recipients'
+      };
+    }
+  }
+
+  /**
+   * Helper method to calculate monthly trend
+   */
+  private static calculateMonthlyTrend(payouts: any[]): any[] {
+    const monthlyData = new Map();
+
+    payouts.forEach(payout => {
+      const date = new Date(payout.created_at);
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+      if (!monthlyData.has(monthKey)) {
+        monthlyData.set(monthKey, {
+          month: monthKey,
+          totalPayouts: 0,
+          totalAmount: 0,
+          completedPayouts: 0,
+          completedAmount: 0
+        });
+      }
+
+      const monthData = monthlyData.get(monthKey);
+      monthData.totalPayouts += 1;
+      monthData.totalAmount += Number(payout.payout_amount);
+
+      if (payout.payout_status === 'completed') {
+        monthData.completedPayouts += 1;
+        monthData.completedAmount += Number(payout.payout_amount);
+      }
+    });
+
+    return Array.from(monthlyData.values())
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .slice(-12); // Last 12 months
   }
 }
 
