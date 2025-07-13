@@ -55,12 +55,7 @@ interface VendorProduct {
     model_name: string; 
     brand: { name: string; };
   };
-  generic_product?: { 
-    id: string; 
-    name: string; 
-    description: string; 
-    image_url?: string;
-  };
+
   _sales?: {
     total_sold: number;
     revenue: number;
@@ -451,8 +446,7 @@ const VendorProductManagement = () => {
           product.model?.model_name,
           product.model?.brand?.name,
           product.category?.name,
-          product.quality_type?.name,
-          product.generic_product?.name
+          product.quality_type?.name
         ].filter(Boolean).join(' ').toLowerCase();
         
         return searchFields.includes(searchTerm.toLowerCase());
@@ -524,8 +518,8 @@ const VendorProductManagement = () => {
       
       switch (sortBy) {
         case 'name':
-          aValue = a.model?.model_name || a.generic_product?.name || '';
-          bValue = b.model?.model_name || b.generic_product?.name || '';
+          aValue = a.model?.model_name || '';
+          bValue = b.model?.model_name || '';
           break;
         case 'price':
           aValue = a.price;
@@ -682,7 +676,7 @@ const VendorProductManagement = () => {
     ];
     
     const rows = filteredProducts.map(product => [
-      product.model?.model_name || product.generic_product?.name || '',
+      product.model?.model_name || '',
       product.model?.brand?.name || '',
       product.category?.name || '',
       product.quality_type?.name || '',

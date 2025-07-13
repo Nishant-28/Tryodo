@@ -18,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Header from '@/components/Header';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
-import TryodoAPI, { TransactionAPI, CommissionAPI, PayoutAPI, VendorAPI, CategoryAPI } from '@/lib/api';
+import TryodoAPI, { TransactionAPI, CommissionAPI, PayoutAPI, VendorAPI, CategoryAPI, WalletAPI } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { DeliveryAPI } from '@/lib/deliveryApi';
 import { Input } from '@/components/ui/input';
@@ -141,6 +141,79 @@ interface PlatformStats {
   month_transactions: number;
 }
 
+interface DetailedOrder {
+  id: string;
+  order_number: string;
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email?: string;
+  delivery_address: {
+    address_box: string;
+    area: string;
+    city: string;
+    pincode: string;
+  } | null;
+  total_amount: number;
+  subtotal: number;
+  shipping_charges: number;
+  tax_amount: number;
+  discount_amount: number;
+  order_status: string;
+  payment_status: string;
+  payment_method: string;
+  created_at: string;
+  updated_at: string;
+  estimated_delivery_date?: string;
+  actual_delivery_date?: string;
+  delivery_partner?: {
+    id: string;
+    name: string;
+    phone: string;
+  };
+  slot_info?: {
+    slot_name: string;
+    start_time: string;
+    end_time: string;
+  };
+  sector_info?: {
+    sector_name: string;
+  };
+  order_items: DetailedOrderItem[];
+  tracking_status: string;
+  commission_earned: number;
+  notes?: string;
+  cancellation_reason?: string;
+}
+
+interface DetailedOrderItem {
+  id: string;
+  product_name: string;
+  product_description: string;
+  category_name?: string;
+  quality_type_name?: string;
+  unit_price: number;
+  quantity: number;
+  line_total: number;
+  item_status: string;
+  vendor: {
+    id: string;
+    business_name: string;
+    contact_person?: string;
+    phone: string;
+    email?: string;
+    business_city?: string;
+    business_state?: string;
+    rating?: number;
+    total_reviews?: number;
+  };
+  vendor_confirmed_at?: string;
+  vendor_notes?: string;
+  picked_up_at?: string;
+  warranty_months?: number;
+  delivery_time_days?: number;
+}
+
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -191,6 +264,11 @@ const AdminDashboard = () => {
   const [payouts, setPayouts] = useState<PayoutRecord[]>([]);
   const [platformStats, setPlatformStats] = useState<PlatformStats | null>(null);
   const [dailySummary, setDailySummary] = useState<any[]>([]);
+  const [detailedOrders, setDetailedOrders] = useState<DetailedOrder[]>([]);
+  const [detailedOrdersLoading, setDetailedOrdersLoading] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<DetailedOrder | null>(null);
+  const [showOrderDetails, setShowOrderDetails] = useState(false);
+  const [vendorSalesSummary, setVendorSalesSummary] = useState<VendorSales[]>([]);
 
   // Filter states
   const [transactionFilters, setTransactionFilters] = useState({
@@ -198,6 +276,16 @@ const AdminDashboard = () => {
     endDate: '',
     transactionType: '',
     status: ''
+  });
+
+  const [orderFilters, setOrderFilters] = useState({
+    startDate: '',
+    endDate: '',
+    orderStatus: '',
+    paymentStatus: '',
+    searchTerm: '',
+    vendorFilter: '',
+    limit: 50
   });
 
   // Commission rule form state
@@ -281,6 +369,9 @@ const AdminDashboard = () => {
       // Fetch recent activities
       await fetchRecentActivities();
       
+      // Fetch detailed orders for recent activity tab
+      await fetchDetailedOrders();
+      
       setLastUpdated(new Date());
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -349,16 +440,14 @@ const AdminDashboard = () => {
   const fetchProductsData = async () => {
     const [
       { count: vendorProducts },
-      { count: genericProducts },
       { data: lowStockProducts }
     ] = await Promise.all([
       supabase.from('vendor_products').select('*', { count: 'exact', head: true }),
-      supabase.from('vendor_generic_products').select('*', { count: 'exact', head: true }),
       supabase.from('vendor_products').select('*').lt('stock_quantity', 10)
     ]);
 
     return {
-      totalProducts: (vendorProducts || 0) + (genericProducts || 0),
+      totalProducts: vendorProducts || 0,
       lowStockAlerts: lowStockProducts?.length || 0
     };
   };
@@ -386,6 +475,282 @@ const AdminDashboard = () => {
     })) || [];
 
     setRecentActivities(activities);
+  };
+
+  const fetchDetailedOrders = async () => {
+    try {
+      setDetailedOrdersLoading(true);
+      
+      // Build query based on filters
+      let query = supabase
+        .from('orders')
+        .select(`
+          id,
+          order_number,
+          customer_id,
+          total_amount,
+          subtotal,
+          shipping_charges,
+          tax_amount,
+          discount_amount,
+          order_status,
+          payment_status,
+          payment_method,
+          created_at,
+          updated_at,
+          estimated_delivery_date,
+          actual_delivery_date,
+          notes,
+          cancellation_reason,
+          delivery_address_id,
+          slot_id,
+          sector_id,
+          customers!inner(
+            id,
+            profile_id,
+            profiles!inner(
+              full_name,
+              phone,
+              email
+            )
+          ),
+          customer_addresses(
+            address_box,
+            area,
+            city,
+            pincode
+          ),
+          delivery_slots(
+            slot_name,
+            start_time,
+            end_time
+          ),
+          sectors(
+            name
+          ),
+          delivery_partner_orders(
+            delivery_partner_id,
+            status,
+            delivery_partners(
+              profiles(
+                full_name,
+                phone
+              )
+            )
+          )
+        `)
+        .order('created_at', { ascending: false })
+        .limit(orderFilters.limit);
+
+      // Apply filters
+      // if (orderFilters.startDate) {
+      //   query = query.gte('created_at', orderFilters.startDate);
+      // }
+      // if (orderFilters.endDate) {
+      //   query = query.lte('created_at', orderFilters.endDate + 'T23:59:59');
+      // }
+      // if (orderFilters.orderStatus) {
+      //   query = query.eq('order_status', orderFilters.orderStatus);
+      // }
+      // if (orderFilters.paymentStatus) {
+      //   query = query.eq('payment_status', orderFilters.paymentStatus);
+      // }
+      // if (orderFilters.searchTerm) {
+      //   query = query.or(`order_number.ilike.%${orderFilters.searchTerm}%,customers.profiles.full_name.ilike.%${orderFilters.searchTerm}%`);
+      // }
+
+      const { data: ordersData, error: ordersError } = await query;
+      console.log("Fetched orders data:", ordersData);
+      if (ordersError) {
+        console.error("Error fetching orders:", ordersError);
+        throw ordersError;
+      }
+
+      if (!ordersData || ordersData.length === 0) {
+        setDetailedOrders([]);
+        return;
+      }
+
+      // Fetch order items for all orders
+      const orderIds = ordersData.map(order => order.id);
+      const { data: orderItemsData, error: itemsError } = await supabase
+        .from('order_items')
+        .select(`
+          id,
+          order_id,
+          vendor_id,
+          product_name,
+          product_description,
+          category_name,
+          quality_type_name,
+          unit_price,
+          quantity,
+          line_total,
+          item_status,
+          vendor_confirmed_at,
+          vendor_notes,
+          picked_up_at,
+          warranty_months,
+          estimated_delivery_days,
+          vendors!inner(
+            id,
+            business_name,
+            contact_person,
+            phone,
+            email,
+            business_city,
+            business_state,
+            rating,
+            total_reviews
+          )
+        `)
+        .in('order_id', orderIds);
+
+      if (itemsError) {
+        console.error("Error fetching order items:", itemsError);
+        throw itemsError;
+      }
+      console.log("Fetched order items data:", orderItemsData);
+
+      // Group order items by order_id
+      const itemsByOrder = (orderItemsData || []).reduce((acc: any, item: any) => {
+        if (!acc[item.order_id]) {
+          acc[item.order_id] = [];
+        }
+        acc[item.order_id].push(item);
+        return acc;
+      }, {});
+
+      // Calculate commission for each order (simplified calculation)
+      const processedOrders: DetailedOrder[] = ordersData.map((order: any) => {
+        const customer = order.customers?.[0];
+        const customerProfile = customer?.profiles?.[0];
+        const deliveryAddress = order.customer_addresses?.[0];
+        const slotInfo = order.delivery_slots?.[0];
+        const sectorInfo = order.sectors?.[0];
+        const deliveryPartner = order.delivery_partner_orders?.[0]?.delivery_partners?.profiles?.[0];
+        
+        const orderItems: DetailedOrderItem[] = (itemsByOrder[order.id] || []).map((item: any) => ({
+          id: item.id,
+          product_name: item.product_name,
+          product_description: item.product_description,
+          category_name: item.category_name,
+          quality_type_name: item.quality_type_name,
+          unit_price: item.unit_price,
+          quantity: item.quantity,
+          line_total: item.line_total,
+          item_status: item.item_status,
+          vendor: {
+            id: item.vendors.id,
+            business_name: item.vendors.business_name,
+            contact_person: item.vendors.contact_person,
+            phone: item.vendors.phone,
+            email: item.vendors.email,
+            business_city: item.vendors.business_city,
+            business_state: item.vendors.business_state,
+            rating: item.vendors.rating,
+            total_reviews: item.vendors.total_reviews
+          },
+          vendor_confirmed_at: item.vendor_confirmed_at,
+          vendor_notes: item.vendor_notes,
+          picked_up_at: item.picked_up_at,
+          warranty_months: item.warranty_months,
+          delivery_time_days: item.estimated_delivery_days
+        }));
+
+        // Calculate commission (assuming 10% commission rate)
+        const commissionEarned = order.total_amount * 0.1;
+
+        // Determine tracking status
+        let trackingStatus = 'Order Placed';
+        if (order.order_status === 'confirmed') trackingStatus = 'Confirmed';
+        if (order.order_status === 'processing') trackingStatus = 'Processing';
+        if (order.order_status === 'packed') trackingStatus = 'Packed';
+        if (order.order_status === 'picked_up') trackingStatus = 'Picked Up';
+        if (order.order_status === 'out_for_delivery') trackingStatus = 'Out for Delivery';
+        if (order.order_status === 'delivered') trackingStatus = 'Delivered';
+        if (order.order_status === 'cancelled') trackingStatus = 'Cancelled';
+
+        return {
+          id: order.id,
+          order_number: order.order_number,
+          customer_id: order.customer_id,
+          customer_name: customerProfile?.full_name || 'Unknown Customer',
+          customer_phone: customerProfile?.phone || '',
+          customer_email: customerProfile?.email,
+          delivery_address: deliveryAddress ? {
+            address_box: deliveryAddress.address_box,
+            area: deliveryAddress.area,
+            city: deliveryAddress.city,
+            pincode: deliveryAddress.pincode
+          } : null,
+          total_amount: order.total_amount,
+          subtotal: order.subtotal,
+          shipping_charges: order.shipping_charges || 0,
+          tax_amount: order.tax_amount || 0,
+          discount_amount: order.discount_amount || 0,
+          order_status: order.order_status,
+          payment_status: order.payment_status,
+          payment_method: order.payment_method,
+          created_at: order.created_at,
+          updated_at: order.updated_at,
+          estimated_delivery_date: order.estimated_delivery_date,
+          actual_delivery_date: order.actual_delivery_date,
+          delivery_partner: deliveryPartner ? {
+            id: order.delivery_partner_orders[0].delivery_partner_id,
+            name: deliveryPartner.full_name,
+            phone: deliveryPartner.phone
+          } : undefined,
+          slot_info: slotInfo ? {
+            slot_name: slotInfo.slot_name,
+            start_time: slotInfo.start_time,
+            end_time: slotInfo.end_time
+          } : undefined,
+          sector_info: sectorInfo ? {
+            sector_name: sectorInfo.name
+          } : undefined,
+          order_items: orderItems,
+          tracking_status: trackingStatus,
+          commission_earned: commissionEarned,
+          notes: order.notes,
+          cancellation_reason: order.cancellation_reason
+        };
+      });
+
+      setDetailedOrders(processedOrders);
+
+      // Calculate vendor sales summary
+      const salesByVendor: { [key: string]: VendorSales } = {};
+      processedOrders.forEach(order => {
+        order.order_items.forEach(item => {
+          if (!salesByVendor[item.vendor.id]) {
+            salesByVendor[item.vendor.id] = {
+              vendor_id: item.vendor.id,
+              business_name: item.vendor.business_name,
+              orders: 0,
+              gmv: 0,
+              commission: 0,
+            };
+          }
+          salesByVendor[item.vendor.id].orders += 1;
+          salesByVendor[item.vendor.id].gmv += item.line_total;
+          // Assuming commission is calculated per order, distribute proportionally to item or recalculate
+          // For simplicity, let's say commission is a fixed percentage of line_total for now
+          salesByVendor[item.vendor.id].commission += item.line_total * 0.1; // Example: 10% commission
+        });
+      });
+      setVendorSalesSummary(Object.values(salesByVendor));
+
+    } catch (error) {
+      console.error('Error fetching detailed orders:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch order details",
+        variant: "destructive"
+      });
+    } finally {
+      setDetailedOrdersLoading(false);
+    }
   };
 
   // Database Setup Check
@@ -547,37 +912,24 @@ const AdminDashboard = () => {
 
   const loadFinancialData = async () => {
     try {
-      setLoading(true);
-      
-      // Load all financial data in parallel
-      const [
-        transactionsRes,
-        commissionRulesRes,
-
-        payoutsRes,
-        platformStatsRes,
-        dailySummaryRes
-      ] = await Promise.all([
-        TransactionAPI.getTransactions({ limit: 100 }),
-        CommissionAPI.getCommissionRules(),
-        PayoutAPI.getPayouts({ limit: 50 }),
-        TransactionAPI.getDailyTransactionSummary()
+      const [platformStatsRes, transactionsRes, payoutsRes, dailySummaryRes] = await Promise.all([
+        TryodoAPI.Analytics.getPlatformFinancialSummary(),
+        TransactionAPI.getTransactions(),
+        PayoutAPI.getPayouts(user!.id),
+        TryodoAPI.Analytics.getDailyOrderSummary()
       ]);
 
+      if (platformStatsRes.success) {
+        setPlatformStats(platformStatsRes.data);
+      }
       if (transactionsRes.success) {
         setTransactions(transactionsRes.data);
       }
-
-      if (commissionRulesRes.success) {
-        setCommissionRules(commissionRulesRes.data);
-      }
-
       if (payoutsRes.success) {
         setPayouts(payoutsRes.data);
       }
-
-      if (dailySummaryRes.success) {
-        setDailySummary(dailySummaryRes.data.slice(0, 7)); // Last 7 days
+      if (dailySummaryRes.success && dailySummaryRes.data) { // Add null check for dailySummaryRes.data
+        setDailySummary(dailySummaryRes.data);
       }
     } catch (error) {
       console.error('Error loading financial data:', error);
@@ -586,8 +938,6 @@ const AdminDashboard = () => {
         description: "Failed to load financial data",
         variant: "destructive"
       });
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -709,8 +1059,8 @@ const AdminDashboard = () => {
       const vendorAnalytics = await Promise.all(
         vendors.map(async (vendor) => {
           try {
-                         const response = await TryodoAPI.Analytics.getVendorFinancialSummary(vendor.id);
-            const walletResponse = await WalletAPI.getVendorWallet(vendor.id);
+            const response = await TryodoAPI.Analytics.getVendorFinancialSummary(vendor.id);
+            const walletResponse = await WalletAPI.getVendorWallet(vendor.id); // Corrected WalletAPI call
             
             const analytics = response.success ? response.data : {
               total_sales: 0,
@@ -824,7 +1174,7 @@ const AdminDashboard = () => {
       } else {
         toast({
           title: "Auto-Assignment Failed",
-          description: result.error?.message || "Failed to auto-assign delivery partners",
+          description: result.error?.message || "Failed to auto-assign delivery partners", // Access message property safely
           variant: "destructive"
         });
       }
@@ -860,7 +1210,7 @@ const AdminDashboard = () => {
       } else {
         toast({
           title: "Failed to Remove Assignments",
-          description: result.error?.message || "An error occurred",
+          description: result.error?.message || "An error occurred", // Access message property safely
           variant: "destructive"
         });
       }
@@ -1209,6 +1559,15 @@ const AdminDashboard = () => {
                 </div>
               </TabsTrigger>
               <TabsTrigger 
+                value="recent-activity" 
+                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <Activity className="h-3 w-3" />
+                  <span>Activity</span>
+                </div>
+              </TabsTrigger>
+              <TabsTrigger 
                 value="transactions" 
                 className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
               >
@@ -1258,9 +1617,12 @@ const AdminDashboard = () => {
 
           {/* Desktop tabs */}
           <div className="hidden sm:block">
-            <TabsList className="grid w-full grid-cols-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
+            <TabsList className="grid w-full grid-cols-7 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
               <TabsTrigger value="overview" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Overview
+              </TabsTrigger>
+              <TabsTrigger value="recent-activity" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                Recent Activity
               </TabsTrigger>
               <TabsTrigger value="transactions" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Transactions
@@ -1508,6 +1870,288 @@ const AdminDashboard = () => {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          <TabsContent value="recent-activity" className="space-y-6">
+            {/* Filters and Controls */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Activity className="h-5 w-5 text-blue-600" />
+                  Recent Order Activity
+                </CardTitle>
+                <CardDescription>
+                  Comprehensive view of all orders with detailed vendor, customer, and product information
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                  <div>
+                    <Label htmlFor="orderStartDate">Start Date</Label>
+                    <Input
+                      id="orderStartDate"
+                      type="date"
+                      value={orderFilters.startDate}
+                      onChange={(e) => setOrderFilters(prev => ({ ...prev, startDate: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="orderEndDate">End Date</Label>
+                    <Input
+                      id="orderEndDate"
+                      type="date"
+                      value={orderFilters.endDate}
+                      onChange={(e) => setOrderFilters(prev => ({ ...prev, endDate: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="orderStatus">Order Status</Label>
+                    <Select value={orderFilters.orderStatus || "all"} onValueChange={(value) => setOrderFilters(prev => ({ ...prev, orderStatus: value === "all" ? "" : value }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="All Statuses" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Statuses</SelectItem>
+                        <SelectItem value="pending">Pending</SelectItem>
+                        <SelectItem value="confirmed">Confirmed</SelectItem>
+                        <SelectItem value="processing">Processing</SelectItem>
+                        <SelectItem value="packed">Packed</SelectItem>
+                        <SelectItem value="picked_up">Picked Up</SelectItem>
+                        <SelectItem value="out_for_delivery">Out for Delivery</SelectItem>
+                        <SelectItem value="delivered">Delivered</SelectItem>
+                        <SelectItem value="cancelled">Cancelled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label htmlFor="searchOrders">Search</Label>
+                    <Input
+                      id="searchOrders"
+                      placeholder="Order number or customer name"
+                      value={orderFilters.searchTerm}
+                      onChange={(e) => setOrderFilters(prev => ({ ...prev, searchTerm: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={fetchDetailedOrders} disabled={detailedOrdersLoading}>
+                    {detailedOrdersLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                    Refresh Orders
+                  </Button>
+                  <Button variant="outline" onClick={() => setOrderFilters({
+                    startDate: '',
+                    endDate: '',
+                    orderStatus: '',
+                    paymentStatus: '',
+                    searchTerm: '',
+                    vendorFilter: '',
+                    limit: 50
+                  })}>
+                    Clear Filters
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Orders List */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <span>Orders ({detailedOrders.length})</span>
+                  <Badge variant="secondary">
+                    Total Revenue: ₹{detailedOrders.reduce((sum, order) => sum + order.total_amount, 0).toLocaleString()}
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {detailedOrdersLoading ? (
+                  <div className="flex justify-center items-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                    <span className="ml-2">Loading orders...</span>
+                  </div>
+                ) : detailedOrders.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500">
+                    <Package className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                    <p>No orders found</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {detailedOrders.map((order) => (
+                      <Card key={order.id} className="border-l-4 border-l-blue-500 hover:shadow-md transition-shadow">
+                        <CardContent className="p-6">
+                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* Order Info */}
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <h3 className="font-semibold text-lg">{order.order_number}</h3>
+                                <Badge variant={
+                                  order.order_status === 'delivered' ? 'default' :
+                                  order.order_status === 'cancelled' ? 'destructive' :
+                                  order.order_status === 'pending' ? 'secondary' : 'outline'
+                                }>
+                                  {order.tracking_status}
+                                </Badge>
+                              </div>
+                              
+                              <div className="space-y-2 text-sm">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600">Total Amount:</span>
+                                  <span className="font-semibold">₹{order.total_amount.toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600">Payment:</span>
+                                  <Badge variant={order.payment_status === 'paid' ? 'default' : 'secondary'}>
+                                    {order.payment_status} • {order.payment_method}
+                                  </Badge>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600">Commission:</span>
+                                  <span className="font-semibold text-green-600">₹{order.commission_earned.toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600">Created:</span>
+                                  <span>{new Date(order.created_at).toLocaleString()}</span>
+                                </div>
+                                {order.slot_info && (
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600">Delivery Slot:</span>
+                                    <span className="text-xs">{order.slot_info.slot_name}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Customer Info */}
+                            <div className="space-y-3">
+                              <h4 className="font-semibold text-md flex items-center gap-2">
+                                <Users className="h-4 w-4 text-blue-600" />
+                                Customer Details
+                              </h4>
+                              <div className="space-y-2 text-sm">
+                                <div>
+                                  <span className="text-gray-600">Name:</span>
+                                  <p className="font-medium">{order.customer_name}</p>
+                                </div>
+                                <div>
+                                  <span className="text-gray-600">Phone:</span>
+                                  <p className="font-medium">{order.customer_phone}</p>
+                                </div>
+                                {order.customer_email && (
+                                  <div>
+                                    <span className="text-gray-600">Email:</span>
+                                    <p className="font-medium">{order.customer_email}</p>
+                                  </div>
+                                )}
+                                {order.delivery_address && (
+                                  <div>
+                                    <span className="text-gray-600">Address:</span>
+                                    <p className="text-xs leading-relaxed">
+                                      {order.delivery_address.address_box}, {order.delivery_address.area}<br />
+                                      {order.delivery_address.city} - {order.delivery_address.pincode}
+                                    </p>
+                                  </div>
+                                )}
+                                {order.delivery_partner && (
+                                  <div>
+                                    <span className="text-gray-600">Delivery Partner:</span>
+                                    <p className="font-medium">{order.delivery_partner.name}</p>
+                                    <p className="text-xs">{order.delivery_partner.phone}</p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Products & Vendors */}
+                            <div className="space-y-3">
+                              <h4 className="font-semibold text-md flex items-center gap-2">
+                                <Store className="h-4 w-4 text-green-600" />
+                                Products & Vendors ({order.order_items.length})
+                              </h4>
+                              <div className="space-y-3 max-h-48 overflow-y-auto">
+                                {order.order_items.map((item) => (
+                                  <div key={item.id} className="border rounded-lg p-3 bg-gray-50">
+                                    <div className="space-y-2">
+                                      <div className="flex justify-between items-start">
+                                        <div className="flex-1">
+                                          <p className="font-medium text-sm">{item.product_name}</p>
+                                          {item.product_description && (
+                                            <p className="text-xs text-gray-600 line-clamp-2">{item.product_description}</p>
+                                          )}
+                                          {item.quality_type_name && (
+                                            <Badge variant="outline" className="text-xs mt-1">
+                                              {item.quality_type_name}
+                                            </Badge>
+                                          )}
+                                        </div>
+                                        <div className="text-right">
+                                          <p className="font-semibold text-sm">₹{item.line_total.toLocaleString()}</p>
+                                          <p className="text-xs text-gray-600">{item.quantity}x ₹{item.unit_price}</p>
+                                        </div>
+                                      </div>
+                                      
+                                      <div className="border-t pt-2">
+                                        <div className="flex items-center justify-between">
+                                          <div>
+                                            <p className="font-medium text-xs text-blue-600">{item.vendor.business_name}</p>
+                                            <p className="text-xs text-gray-600">{item.vendor.phone}</p>
+                                            {item.vendor.business_city && (
+                                              <p className="text-xs text-gray-500">{item.vendor.business_city}, {item.vendor.business_state}</p>
+                                            )}
+                                          </div>
+                                          <div className="text-right">
+                                            <Badge variant={
+                                              item.item_status === 'delivered' ? 'default' :
+                                              item.item_status === 'confirmed' ? 'secondary' :
+                                              item.item_status === 'pending' ? 'outline' : 'secondary'
+                                            } className="text-xs">
+                                              {item.item_status}
+                                            </Badge>
+                                            {item.vendor.rating && (
+                                              <div className="flex items-center mt-1">
+                                                <Star className="h-3 w-3 text-yellow-500 mr-1" />
+                                                <span className="text-xs">{item.vendor.rating}</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                        
+                                        {item.vendor_confirmed_at && (
+                                          <p className="text-xs text-green-600 mt-1">
+                                            ✓ Confirmed: {new Date(item.vendor_confirmed_at).toLocaleString()}
+                                          </p>
+                                        )}
+                                        {item.vendor_notes && (
+                                          <p className="text-xs text-gray-600 mt-1 italic">
+                                            Note: {item.vendor_notes}
+                                          </p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => {
+                                  setSelectedOrder(order);
+                                  setShowOrderDetails(true);
+                                }}
+                                className="w-full"
+                              >
+                                <Eye className="h-4 w-4 mr-2" />
+                                View Full Details
+                              </Button>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="transactions" className="space-y-6">
@@ -2842,6 +3486,324 @@ const AdminDashboard = () => {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Detailed Order Modal */}
+      <Dialog open={showOrderDetails} onOpenChange={setShowOrderDetails}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Order Details - {selectedOrder?.order_number}
+            </DialogTitle>
+          </DialogHeader>
+          
+          {selectedOrder && (
+            <div className="space-y-6">
+              {/* Order Summary */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Order Summary</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-3">
+                      <div className="flex justify-between">
+                        <span className="font-medium">Order ID:</span>
+                        <span>{selectedOrder.id}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="font-medium">Order Number:</span>
+                        <span>{selectedOrder.order_number}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="font-medium">Status:</span>
+                        <Badge variant={selectedOrder.order_status === 'delivered' ? 'default' : 'secondary'}>
+                          {selectedOrder.tracking_status}
+                        </Badge>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="font-medium">Created:</span>
+                        <span>{new Date(selectedOrder.created_at).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="font-medium">Updated:</span>
+                        <span>{new Date(selectedOrder.updated_at).toLocaleString()}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <div className="flex justify-between">
+                        <span className="font-medium">Subtotal:</span>
+                        <span>₹{selectedOrder.subtotal.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="font-medium">Shipping:</span>
+                        <span>₹{selectedOrder.shipping_charges.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="font-medium">Tax:</span>
+                        <span>₹{selectedOrder.tax_amount.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="font-medium">Discount:</span>
+                        <span>-₹{selectedOrder.discount_amount.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-lg font-bold border-t pt-2">
+                        <span>Total:</span>
+                        <span>₹{selectedOrder.total_amount.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Customer Information */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Users className="h-5 w-5" />
+                    Customer Information
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-3">
+                      <div>
+                        <span className="font-medium">Name:</span>
+                        <p>{selectedOrder.customer_name}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium">Phone:</span>
+                        <p>{selectedOrder.customer_phone}</p>
+                      </div>
+                      {selectedOrder.customer_email && (
+                        <div>
+                          <span className="font-medium">Email:</span>
+                          <p>{selectedOrder.customer_email}</p>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {selectedOrder.delivery_address && (
+                      <div>
+                        <span className="font-medium">Delivery Address:</span>
+                        <div className="mt-2 p-3 bg-gray-50 rounded-lg">
+                          <p>{selectedOrder.delivery_address.address_box}</p>
+                          <p>{selectedOrder.delivery_address.area}</p>
+                          <p>{selectedOrder.delivery_address.city} - {selectedOrder.delivery_address.pincode}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Order Items */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Package className="h-5 w-5" />
+                    Order Items ({selectedOrder.order_items.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {selectedOrder.order_items.map((item) => (
+                      <Card key={item.id} className="border">
+                        <CardContent className="p-4">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="md:col-span-2">
+                              <h4 className="font-semibold">{item.product_name}</h4>
+                              {item.product_description && (
+                                <p className="text-sm text-gray-600 mt-1">{item.product_description}</p>
+                              )}
+                              <div className="flex gap-2 mt-2">
+                                {item.category_name && (
+                                  <Badge variant="outline">{item.category_name}</Badge>
+                                )}
+                                {item.quality_type_name && (
+                                  <Badge variant="outline">{item.quality_type_name}</Badge>
+                                )}
+                                <Badge variant={
+                                  item.item_status === 'delivered' ? 'default' :
+                                  item.item_status === 'confirmed' ? 'secondary' : 'outline'
+                                }>
+                                  {item.item_status}
+                                </Badge>
+                              </div>
+                            </div>
+                            
+                            <div className="text-right">
+                              <p className="text-lg font-semibold">₹{item.line_total.toLocaleString()}</p>
+                              <p className="text-sm text-gray-600">{item.quantity} × ₹{item.unit_price.toLocaleString()}</p>
+                              {item.warranty_months && (
+                                <p className="text-xs text-green-600 mt-1">
+                                  {item.warranty_months} months warranty
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Vendor Details */}
+                          <div className="border-t mt-4 pt-4">
+                            <h5 className="font-medium text-sm text-blue-600 mb-2">Vendor Details</h5>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <div>
+                                  <span className="text-xs text-gray-600">Business Name:</span>
+                                  <p className="font-medium">{item.vendor.business_name}</p>
+                                </div>
+                                {item.vendor.contact_person && (
+                                  <div>
+                                    <span className="text-xs text-gray-600">Contact Person:</span>
+                                    <p>{item.vendor.contact_person}</p>
+                                  </div>
+                                )}
+                                <div>
+                                  <span className="text-xs text-gray-600">Phone:</span>
+                                  <p>{item.vendor.phone}</p>
+                                </div>
+                                {item.vendor.email && (
+                                  <div>
+                                    <span className="text-xs text-gray-600">Email:</span>
+                                    <p>{item.vendor.email}</p>
+                                  </div>
+                                )}
+                              </div>
+                              
+                              <div className="space-y-2">
+                                {item.vendor.business_city && (
+                                  <div>
+                                    <span className="text-xs text-gray-600">Location:</span>
+                                    <p>{item.vendor.business_city}, {item.vendor.business_state}</p>
+                                  </div>
+                                )}
+                                {item.vendor.rating && (
+                                  <div>
+                                    <span className="text-xs text-gray-600">Rating:</span>
+                                    <div className="flex items-center">
+                                      <Star className="h-4 w-4 text-yellow-500 mr-1" />
+                                      <span>{item.vendor.rating}</span>
+                                      {item.vendor.total_reviews && (
+                                        <span className="text-xs text-gray-600 ml-1">({item.vendor.total_reviews} reviews)</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                                {item.vendor_confirmed_at && (
+                                  <div>
+                                    <span className="text-xs text-gray-600">Confirmed At:</span>
+                                    <p className="text-xs text-green-600">{new Date(item.vendor_confirmed_at).toLocaleString()}</p>
+                                  </div>
+                                )}
+                                {item.picked_up_at && (
+                                  <div>
+                                    <span className="text-xs text-gray-600">Picked Up At:</span>
+                                    <p className="text-xs text-blue-600">{new Date(item.picked_up_at).toLocaleString()}</p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            
+                            {item.vendor_notes && (
+                              <div className="mt-3 p-2 bg-yellow-50 rounded border-l-4 border-yellow-400">
+                                <span className="text-xs font-medium text-yellow-800">Vendor Notes:</span>
+                                <p className="text-sm text-yellow-700">{item.vendor_notes}</p>
+                              </div>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Delivery Information */}
+              {(selectedOrder.delivery_partner || selectedOrder.slot_info || selectedOrder.sector_info) && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Truck className="h-5 w-5" />
+                      Delivery Information
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {selectedOrder.delivery_partner && (
+                        <div>
+                          <span className="font-medium">Delivery Partner:</span>
+                          <div className="mt-2">
+                            <p className="font-medium">{selectedOrder.delivery_partner.name}</p>
+                            <p className="text-sm text-gray-600">{selectedOrder.delivery_partner.phone}</p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {selectedOrder.slot_info && (
+                        <div>
+                          <span className="font-medium">Delivery Slot:</span>
+                          <div className="mt-2">
+                            <p className="font-medium">{selectedOrder.slot_info.slot_name}</p>
+                            <p className="text-sm text-gray-600">
+                              {selectedOrder.slot_info.start_time} - {selectedOrder.slot_info.end_time}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {selectedOrder.sector_info && (
+                        <div>
+                          <span className="font-medium">Delivery Sector:</span>
+                          <p className="mt-2">{selectedOrder.sector_info.sector_name}</p>
+                        </div>
+                      )}
+                      
+                      {selectedOrder.estimated_delivery_date && (
+                        <div>
+                          <span className="font-medium">Estimated Delivery:</span>
+                          <p className="mt-2">{new Date(selectedOrder.estimated_delivery_date).toLocaleDateString()}</p>
+                        </div>
+                      )}
+                      
+                      {selectedOrder.actual_delivery_date && (
+                        <div>
+                          <span className="font-medium">Actual Delivery:</span>
+                          <p className="mt-2 text-green-600">{new Date(selectedOrder.actual_delivery_date).toLocaleString()}</p>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Additional Information */}
+              {(selectedOrder.notes || selectedOrder.cancellation_reason) && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Additional Information</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {selectedOrder.notes && (
+                      <div className="mb-4">
+                        <span className="font-medium">Notes:</span>
+                        <p className="mt-1 p-3 bg-blue-50 rounded-lg">{selectedOrder.notes}</p>
+                      </div>
+                    )}
+                    
+                    {selectedOrder.cancellation_reason && (
+                      <div>
+                        <span className="font-medium">Cancellation Reason:</span>
+                        <p className="mt-1 p-3 bg-red-50 rounded-lg text-red-700">{selectedOrder.cancellation_reason}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

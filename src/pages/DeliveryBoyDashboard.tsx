@@ -89,8 +89,13 @@ const DeliveryBoyDashboard = () => {
   const handlePickupStatusUpdate = async (pickupId: string, status: OrderPickup['pickup_status'], notes?: string) => {
     try {
       await orderPickupAPI.updateStatus(pickupId, status, notes);
-      await loadDashboardData(); // Refresh data
       
+      setPickups(prevPickups => 
+        prevPickups.map(p => 
+          p.id === pickupId ? { ...p, pickup_status: status } : p
+        )
+      );
+
       toast({
         title: "Success",
         description: `Pickup status updated to ${status}`,
@@ -108,8 +113,13 @@ const DeliveryBoyDashboard = () => {
   const handleDeliveryStatusUpdate = async (deliveryId: string, status: OrderDelivery['delivery_status'], notes?: string) => {
     try {
       await orderDeliveryAPI.updateStatus(deliveryId, status, notes);
-      await loadDashboardData(); // Refresh data
       
+      setDeliveries(prevDeliveries => 
+        prevDeliveries.map(d => 
+          d.id === deliveryId ? { ...d, delivery_status: status } : d
+        )
+      );
+
       toast({
         title: "Success",
         description: `Delivery status updated to ${status}`,
@@ -144,6 +154,9 @@ const DeliveryBoyDashboard = () => {
       }
       
       setShowStatusModal(false);
+      // We don't need to refresh the whole dashboard, 
+      // as the state is updated optimistically.
+      // The individual handler will update the specific item.
     } catch (error) {
       // Error handling is done in the individual functions
     }

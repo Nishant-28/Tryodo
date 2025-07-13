@@ -1,19 +1,40 @@
-import React, { useState, useEffect } from 'react';
-import { Search, ShoppingCart, Star, Verified, Clock, Package, ChevronRight, ArrowLeft, Filter, SortAsc, Shield, Truck, Tag, Heart, MessageCircle, ShieldCheck } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
+import { 
+  Package, 
+  Search, 
+  ArrowLeft, 
+  ShoppingCart, 
+  Star, 
+  Clock, 
+  Shield,
+  Zap,
+  Filter,
+  TrendingUp,
+  Award,
+  Phone,
+  ChevronRight,
+  SortAsc,
+  Truck,
+  Tag,
+  Heart,
+  MessageCircle,
+  ShieldCheck,
+  Verified
+} from 'lucide-react';
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useCart } from '@/contexts/CartContext';
 import Header from '@/components/Header';
-// import Footer from '@/components/Footer'; // Commented out Footer import
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
-import { useCart } from '@/contexts/CartContext';
 import { useLocation } from 'react-router-dom';
+import { TryodoAPI } from '@/lib/api';
 
 // Types
 interface Category {
@@ -77,6 +98,11 @@ interface VendorProduct {
   product_images: string[] | null;
   vendor: Vendor;
   quality: QualityCategory;
+  
+  // Upside pricing fields (added by enrichProductsWithFinalPrices)
+  final_price?: number;
+  price_markup?: number;
+  has_upside?: boolean;
 }
 
 

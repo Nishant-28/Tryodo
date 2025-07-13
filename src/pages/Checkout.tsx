@@ -370,16 +370,30 @@ const Checkout = () => {
     setIsPlacingOrder(true);
 
     try {
-      const { subtotal, total } = calculateTotals();
+      const { subtotal, shippingCharges, taxAmount, total } = calculateTotals();
       
+      // Transform cart items to the correct format for order creation
+      const transformedItems = cart.items.map(item => ({
+        vendor_product_id: item.productId,
+        vendor_id: item.vendorId,
+        product_name: item.name,
+        product_description: `${item.brandName || ''} ${item.modelName || ''}`.trim() || item.name,
+        quality_type_name: item.qualityName || 'Standard',
+        quantity: item.quantity,
+        unit_price: item.price,
+        line_total: item.price * item.quantity,
+        warranty_months: item.warranty || 0,
+        estimated_delivery_days: item.deliveryTime || 3
+      }));
+
       const orderData = {
         customerId: customerId,
         delivery_address_id: selectedAddress,
-        items: cart.items,
+        items: transformedItems,
         subtotal: subtotal,
-        shipping_charges: 50, // Example shipping charges
-        tax_amount: 0, // Assuming tax is included or not applicable for now
-        discount_amount: 0, // Example discount
+        shipping_charges: shippingCharges,
+        tax_amount: taxAmount,
+        discount_amount: 0,
         total_amount: total,
         payment_method: selectedPayment,
         payment_status: selectedPayment === 'cod' ? 'pending' : 'awaiting_payment',

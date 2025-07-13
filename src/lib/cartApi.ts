@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { TryodoAPI } from './api';
 
 export interface CartItem {
   id: string;
@@ -139,7 +140,7 @@ export class CartAPI {
         };
       }
 
-      // OPTIMIZED: Single query with all necessary joins
+      // OPTIMIZED: Single query with all necessary joins (using left joins to handle missing data)
       const { data: cartItems, error: itemsError } = await supabase
         .from('cart_items')
         .select(`
@@ -160,7 +161,7 @@ export class CartAPI {
             category_id,
             quality_type_id,
             model_id,
-            vendors:vendor_id!inner(
+            vendors:vendor_id(
               id,
               business_name,
               rating,
@@ -171,12 +172,12 @@ export class CartAPI {
               quality_name,
               quality_description
             ),
-            smartphone_models:model_id!inner(
+            smartphone_models:model_id(
               id,
               model_name,
               specifications,
               official_images,
-              brands:brand_id!inner(
+              brands:brand_id(
                 id,
                 name,
                 logo_url
@@ -200,43 +201,77 @@ export class CartAPI {
         };
       }
 
-      // Transform the optimized query results
-      const enrichedItems: CartItem[] = cartItems.map((item: any) => {
-        const product = item.vendor_products;
-        const vendor = product.vendors;
-        const quality = product.category_qualities;
-        const model = product.smartphone_models;
-        const brand = model?.brands;
+      // Transform the optimized query results with robust error handling
+      const enrichedItems: CartItem[] = await Promise.all(
+        cartItems.map(async (item: any) => {
+          console.log('🔍 Processing cart item:', item.id, 'for product:', item.product_id);
+          
+          const product = item.vendor_products;
+          if (!product) {
+            console.log('❌ No product data found for cart item:', item.id);
+            return null;
+          }
+          
+          const vendor = product.vendors;
+          const quality = product.category_qualities;
+          const model = product.smartphone_models;
+          const brand = model?.brands;
 
-        // Handle cases where joins might fail due to data issues
-        const vendorName = vendor?.business_name || 'Unknown Vendor';
-        const modelName = model?.model_name || 'Unknown Model';
-        const brandName = brand?.name || 'Unknown Brand';
+          // Handle cases where joins might fail due to data issues
+          const vendorName = vendor?.business_name || 'Unknown Vendor';
+          const modelName = model?.model_name || `Product ${product.id}`;
+          const brandName = brand?.name || 'Unknown Brand';
+          const qualityName = quality?.quality_name || 'Standard';
 
-        return {
-          id: item.id,
-          productId: product.id,
-          name: `${brandName} ${modelName}`,
-          vendor: vendorName,
-          vendorId: product.vendor_id,
-          price: parseFloat(product.price || 0),
-          originalPrice: product.original_price ? parseFloat(product.original_price) : undefined,
-          quantity: item.quantity,
-          image: model?.official_images?.[0],
-          deliveryTime: product.delivery_time_days || 0,
-          warranty: product.warranty_months || 0,
-          modelName: modelName,
-          brandName: brandName,
-          qualityName: quality?.quality_name,
-          addedAt: item.added_at
-        };
-      });
+          console.log('✅ Processing:', { brandName, modelName, vendorName, qualityName });
 
-      const totalItems = enrichedItems.reduce((sum, item) => sum + item.quantity, 0);
-      const totalPrice = enrichedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+          // Calculate final price with upside markup
+          let finalPrice = parseFloat(product.price || 0);
+          try {
+            if (product.vendor_id && product.quality_type_id) {
+              const calculatedPrice = await TryodoAPI.calculateCustomerPrice(
+                product.vendor_id,
+                product.quality_type_id,
+                finalPrice
+              );
+              if (calculatedPrice > finalPrice) {
+                console.log(`💰 Upside pricing applied: ₹${finalPrice} → ₹${calculatedPrice}`);
+                finalPrice = calculatedPrice;
+              }
+            }
+          } catch (error) {
+            console.warn('❌ Failed to calculate upside pricing for cart item:', error);
+            // Fall back to base price if upside calculation fails
+          }
+
+          return {
+            id: item.id,
+            productId: product.id,
+            name: `${brandName} ${modelName}`,
+            vendor: vendorName,
+            vendorId: product.vendor_id,
+            price: finalPrice,
+            originalPrice: product.original_price ? parseFloat(product.original_price) : undefined,
+            quantity: item.quantity,
+            image: model?.official_images?.[0],
+            deliveryTime: product.delivery_time_days || 0,
+            warranty: product.warranty_months || 0,
+            modelName: modelName,
+            brandName: brandName,
+            qualityName: qualityName,
+            addedAt: item.added_at
+          };
+        })
+      );
+
+      // Filter out any null items
+      const validItems = enrichedItems.filter(Boolean) as CartItem[];
+
+      const totalItems = validItems.reduce((sum, item) => sum + item.quantity, 0);
+      const totalPrice = validItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
       return {
-        items: enrichedItems,
+        items: validItems,
         totalItems,
         totalPrice,
         cartId: cart.id

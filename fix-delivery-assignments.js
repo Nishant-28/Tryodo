@@ -1,16 +1,29 @@
+#!/usr/bin/env node
+
 // Fix script for delivery partner assignment issues
 // This script addresses the main bugs in the slot-based delivery system
 
 import { DeliveryAPI } from './src/lib/deliveryApi.ts';
+import { createClient } from '@supabase/supabase-js';
 
+const supabaseUrl = 'https://kjuiyjpkjkogwjacgpjm.supabase.co';
+const supabaseServiceRoleKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtqdWl5anBranMrZ3dqYWNncGptIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczMjY0NTA4MSwiZXhwIjoyMDQ4MjIxMDgxfQ.5Lv2LlnzRzEu7Zy4W9SbKhM2MZR1z7K3w2NkU5R7u1Y';
+
+const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+
+// Set global supabase for the API
+global.supabase = supabase;
+
+const TARGET_DATE = new Date().toISOString().split('T')[0];
 const DELIVERY_PARTNER_ID = '747c1649-8331-4956-9fbe-bd19765e30a3'; // Test delivery partner
-const TARGET_DATE = new Date().toISOString().split('T')[0]; // Today
+
+console.log('🔧 Delivery Assignment Fix Script');
+console.log('='.repeat(60));
+console.log(`📅 Target Date: ${TARGET_DATE}`);
+console.log(`🚚 Test Delivery Partner: ${DELIVERY_PARTNER_ID}`);
 
 async function fixDeliverySystemBugs() {
-  console.log('🔧 Starting Delivery System Bug Fixes');
-  console.log('='.repeat(60));
-  console.log(`Target Date: ${TARGET_DATE}`);
-  console.log(`Delivery Partner: ${DELIVERY_PARTNER_ID}`);
+  console.log('\n🚀 Starting delivery system fixes...');
   
   try {
     // Step 1: Fix missing delivery partner order assignments
@@ -53,6 +66,10 @@ async function fixDeliverySystemBugs() {
       console.error('❌ Dashboard test failed:', dashboardTest.error);
     }
 
+    // Step 5: Run additional fixes
+    console.log('\n5. Running additional assignment fixes...');
+    await fixMissingAssignments();
+
     console.log('\n🎉 All fixes completed!');
     console.log('='.repeat(60));
 
@@ -64,13 +81,6 @@ async function fixDeliverySystemBugs() {
 async function testDeliveryPartnerDashboard(deliveryPartnerId) {
   try {
     // This simulates the exact query from the dashboard
-    const { createClient } = await import('@supabase/supabase-js');
-    const supabase = createClient(
-      process.env.VITE_SUPABASE_URL || 'your-supabase-url',
-      process.env.VITE_SUPABASE_ANON_KEY || 'your-supabase-key'
-    );
-
-    // Get slot assignments
     const { data: slotData, error: slotError } = await supabase
       .from('delivery_assignments')
       .select(`
@@ -124,9 +134,141 @@ async function testDeliveryPartnerDashboard(deliveryPartnerId) {
   }
 }
 
-// Run the fixes if this script is executed directly
-if (typeof window === 'undefined') {
-  fixDeliverySystemBugs();
+async function fixMissingAssignments() {
+  try {
+    console.log('🔧 Creating missing delivery partner order assignments...');
+    
+    // Get all delivery partner sector assignments for today
+    const today = new Date().toISOString().split('T')[0];
+    
+    const { data: assignments, error: assignError } = await supabase
+      .from('delivery_partner_sector_assignments')
+      .select(`
+        delivery_partner_id,
+        slot_id,
+        assigned_date,
+        sector_id
+      `)
+      .eq('assigned_date', today)
+      .eq('is_active', true);
+    
+    if (assignError) {
+      console.error('❌ Error fetching assignments:', assignError);
+      return;
+    }
+    
+    console.log(`📋 Found ${assignments?.length || 0} delivery partner assignments for today`);
+    
+    if (!assignments || assignments.length === 0) {
+      console.log('No assignments to process');
+      return;
+    }
+    
+    let totalFixed = 0;
+    let pickupRecordsCreated = 0;
+    
+    for (const assignment of assignments) {
+      console.log(`\n🎯 Processing assignment for slot ${assignment.slot_id}...`);
+      
+      // Get orders for this slot
+      const { data: orders, error: ordersError } = await supabase
+        .from('orders')
+        .select(`
+          id, 
+          order_number, 
+          order_status,
+          order_items(vendor_id)
+        `)
+        .eq('slot_id', assignment.slot_id)
+        .eq('delivery_date', assignment.assigned_date);
+        
+      if (ordersError) {
+        console.error('❌ Error fetching orders:', ordersError);
+        continue;
+      }
+      
+      console.log(`📦 Found ${orders?.length || 0} orders in slot`);
+      
+      if (!orders || orders.length === 0) {
+        console.log('No orders in this slot');
+        continue;
+      }
+      
+      for (const order of orders) {
+        // Check if delivery_partner_orders record already exists
+        const { data: existing } = await supabase
+          .from('delivery_partner_orders')
+          .select('id')
+          .eq('order_id', order.id)
+          .eq('delivery_partner_id', assignment.delivery_partner_id)
+          .maybeSingle();
+          
+        if (!existing) {
+          // Create the delivery partner order assignment
+          const { error: insertError } = await supabase
+            .from('delivery_partner_orders')
+            .insert({
+              delivery_partner_id: assignment.delivery_partner_id,
+              order_id: order.id,
+              status: 'assigned',
+              assigned_at: new Date().toISOString(),
+              accepted_at: new Date().toISOString()
+            });
+            
+          if (insertError) {
+            console.error(`❌ Error creating assignment for ${order.order_number}:`, insertError.message);
+          } else {
+            console.log(`✅ Created assignment for order ${order.order_number}`);
+            totalFixed++;
+          }
+        } else {
+          console.log(`✅ Assignment already exists for order ${order.order_number}`);
+        }
+
+        // Also ensure pickup records exist for each vendor in this order
+        if (order.order_items && order.order_items.length > 0) {
+          const uniqueVendors = [...new Set(order.order_items.map(item => item.vendor_id))];
+          
+          for (const vendorId of uniqueVendors) {
+            if (vendorId) {
+              // Check if order_pickups record exists
+              const { data: existingPickup } = await supabase
+                .from('order_pickups')
+                .select('id')
+                .eq('order_id', order.id)
+                .eq('vendor_id', vendorId)
+                .maybeSingle();
+                
+              if (!existingPickup) {
+                // Create order pickup record
+                const { error: pickupError } = await supabase
+                  .from('order_pickups')
+                  .insert({
+                    order_id: order.id,
+                    vendor_id: vendorId,
+                    delivery_partner_id: assignment.delivery_partner_id,
+                    pickup_status: 'pending'
+                  });
+                  
+                if (pickupError) {
+                  console.error(`❌ Error creating pickup record for order ${order.order_number}:`, pickupError.message);
+                } else {
+                  console.log(`✅ Created pickup record for order ${order.order_number}, vendor ${vendorId}`);
+                  pickupRecordsCreated++;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    console.log(`\n🎉 Assignment fix completed! Created ${totalFixed} assignments and ${pickupRecordsCreated} pickup records.`);
+    
+  } catch (error) {
+    console.error('💥 Error in fixMissingAssignments:', error);
+  }
 }
 
-export { fixDeliverySystemBugs }; 
+// Run the fixes
+fixDeliverySystemBugs(); 

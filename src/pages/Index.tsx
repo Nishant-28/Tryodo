@@ -10,15 +10,52 @@ import { motion } from 'framer-motion';
 import { ShoppingBag, TrendingUp } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { DeliveryAPI } from '@/lib/deliveryApi';
+import { TryodoAPI } from '@/lib/api';
 
 interface Product {
   id: string;
-  name: string;
+  vendor_id: string;
+  model_id: string;
+  category_id: string;
+  quality_type_id: string;
   price: number;
-  image: string;
-  rating: number;
-  reviews: number;
-  category: string;
+  original_price: number | null;
+  warranty_months: number;
+  stock_quantity: number;
+  is_in_stock: boolean;
+  delivery_time_days: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  
+  // Upside pricing fields
+  final_price?: number;
+  price_markup?: number;
+  has_upside?: boolean;
+  
+  // Joined data
+  category?: {
+    id: string;
+    name: string;
+  };
+  quality_type?: {
+    id: string;
+    name: string;
+  };
+  model?: {
+    id: string;
+    model_name: string;
+    brand?: {
+      name: string;
+    };
+  };
+  vendor?: {
+    id: string;
+    business_name: string;
+    rating: number;
+    total_reviews: number;
+    is_verified: boolean;
+  };
 }
 
 const Index = () => {
@@ -90,86 +127,90 @@ const Index = () => {
     try {
       setLoading(true);
 
-      // Predefined trending products
-      const trendingProducts: Product[] = [
-        {
-          id: '1',
-          name: 'iPhone 14 Pro Max Display',
-          price: 12999,
-          image: '/placeholder.svg',
-          rating: 4.9,
-          reviews: 2456,
-          category: 'Display'
-        },
-        {
-          id: '2',
-          name: 'Samsung S23 Ultra Battery',
-          price: 3499,
-          image: '/placeholder.svg',
-          rating: 4.8,
-          reviews: 1890,
-          category: 'Battery'
-        },
-        {
-          id: '3',
-          name: 'OnePlus 11 Back Cover',
-          price: 1299,
-          image: '/placeholder.svg',
-          rating: 4.7,
-          reviews: 654,
-          category: 'Cover'
-        },
-        {
-          id: '4',
-          name: 'iPhone 13 Camera Module',
-          price: 8999,
-          image: '/placeholder.svg',
-          rating: 4.9,
-          reviews: 1432,
-          category: 'Camera'
-        },
-        {
-          id: '5',
-          name: 'Xiaomi 12 Charging Port',
-          price: 899,
-          image: '/placeholder.svg',
-          rating: 4.6,
-          reviews: 876,
-          category: 'Charging'
-        },
-        {
-          id: '6',
-          name: 'Samsung A54 Speaker',
-          price: 699,
-          image: '/placeholder.svg',
-          rating: 4.5,
-          reviews: 543,
-          category: 'Audio'
-        },
-        {
-          id: '7',
-          name: 'iPhone 12 Home Button',
-          price: 2499,
-          image: '/placeholder.svg',
-          rating: 4.8,
-          reviews: 1234,
-          category: 'Button'
-        },
-        {
-          id: '8',
-          name: 'Realme GT Screen Guard',
-          price: 299,
-          image: '/placeholder.svg',
-          rating: 4.4,
-          reviews: 789,
-          category: 'Protection'
-        }
-      ];
+      // Fetch real products from database
+      const { data: products, error } = await supabase
+        .from('vendor_products')
+        .select(`
+          *,
+          categories!category_id (
+            id,
+            name
+          ),
+          category_qualities!quality_type_id (
+            id,
+            quality_name
+          ),
+          smartphone_models!model_id (
+            id,
+            model_name,
+            brands!brand_id (
+              name
+            )
+          ),
+          vendors!vendor_id (
+            id,
+            business_name,
+            rating,
+            total_reviews,
+            is_verified
+          )
+        `)
+        .eq('is_active', true)
+        .eq('is_in_stock', true)
+        .gt('stock_quantity', 0)
+        .order('created_at', { ascending: false })
+        .limit(8);
 
-      setFeaturedProducts(trendingProducts);
+      if (error) {
+        console.error('Error fetching products:', error);
+        // If there's an error or no products, show demo products with a note
+        setFeaturedProducts([]);
+        toast.error('No products available at the moment');
+        return;
+      }
+
+      if (!products || products.length === 0) {
+        console.log('No products found in database');
+        setFeaturedProducts([]);
+        return;
+      }
+
+      // Transform the data to match our interface
+      const transformedProducts: Product[] = products.map(product => ({
+        ...product,
+        category: product.categories ? {
+          id: product.categories.id,
+          name: product.categories.name
+        } : undefined,
+        quality_type: product.category_qualities ? {
+          id: product.category_qualities.id,
+          name: product.category_qualities.quality_name
+        } : undefined,
+        model: product.smartphone_models ? {
+          id: product.smartphone_models.id,
+          model_name: product.smartphone_models.model_name,
+          brand: product.smartphone_models.brands ? {
+            name: product.smartphone_models.brands.name
+          } : undefined
+        } : undefined,
+        vendor: product.vendors ? {
+          id: product.vendors.id,
+          business_name: product.vendors.business_name,
+          rating: product.vendors.rating || 4.5,
+          total_reviews: product.vendors.total_reviews || 0,
+          is_verified: product.vendors.is_verified || false
+        } : undefined
+      }));
+
+      // Add upside pricing to products
+      const productsWithUpside = await TryodoAPI.enrichProductsWithFinalPrices(transformedProducts);
+
+      console.log('✅ Loaded real products with upside pricing:', productsWithUpside.length);
+      setFeaturedProducts(productsWithUpside);
     } catch (error) {
       console.error('Error loading featured products:', error);
       toast.error('Failed to load featured products');
+      setFeaturedProducts([]);
     } finally {
       setLoading(false);
     }
@@ -211,10 +252,20 @@ const Index = () => {
   }, []);
 
   const handleAddToCart = async (product: Product) => {
+    console.log('🛒 Index: handleAddToCart called with product:', product);
+    console.log('🛒 Index: Product ID:', product.id);
+    console.log('🛒 Index: Product Name:', product.model?.model_name);
+    console.log('🛒 Index: Product Stock:', product.stock_quantity);
+    console.log('🛒 Index: Product Active:', product.is_active);
+    console.log('🛒 Index: Product In Stock:', product.is_in_stock);
+    
     try {
+      console.log('🛒 Index: Calling addToCart function...');
       await addToCart(product.id, 1);
+      console.log('✅ Index: addToCart completed successfully');
     } catch (error) {
-      console.error('Error adding to cart:', error);
+      console.error('❌ Index: Error adding to cart:', error);
+      toast.error('Failed to add product to cart. Please try again.');
     }
   };
 
@@ -354,6 +405,35 @@ const Index = () => {
               <div className="w-10 h-10 sm:w-12 sm:h-12 border-4 border-orange-200 border-t-orange-600 rounded-full animate-spin mx-auto mb-4"></div>
               <div className="text-base sm:text-lg text-gray-600 font-medium">Loading products...</div>
             </div>
+          ) : featuredProducts.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="text-6xl mb-4">📱</div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">No Products Available Yet</h3>
+              <p className="text-gray-600 mb-6 max-w-md mx-auto">
+                Our marketplace is ready for amazing mobile parts! Vendors can add products, and customers can start shopping.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <Button 
+                  onClick={() => navigate('/order')} 
+                  className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-2"
+                >
+                  Browse Categories
+                </Button>
+                <Button 
+                  variant="outline"
+                  onClick={() => {
+                    toast.info('Check the browser console and run debugCart.runAllTests() to test cart functionality');
+                  }}
+                  className="border-orange-500 text-orange-600 hover:bg-orange-50 px-6 py-2"
+                >
+                  Debug Cart 🔧
+                </Button>
+              </div>
+              <div className="mt-6 text-sm text-gray-500">
+                <p className="mb-2">🔧 <strong>For Developers:</strong> Open browser console and run <code className="bg-gray-100 px-2 py-1 rounded">debugCart.runAllTests()</code></p>
+                <p>🏪 <strong>For Vendors:</strong> Go to Vendor Dashboard → Add Products to populate the marketplace</p>
+              </div>
+            </div>
           ) : (
             <div className="relative">
               {/* Horizontal Scroll Container */}
@@ -369,8 +449,15 @@ const Index = () => {
                         <div className="absolute inset-0 flex items-center justify-center">
                           {/* Category Badge */}
                           <div className="absolute top-3 left-3 bg-orange-100 text-orange-800 px-2 py-1 rounded-full text-xs font-medium z-10">
-                            {product.category}
+                            {product.category?.name || 'Mobile Part'}
                           </div>
+
+                          {/* Stock Badge */}
+                          {product.stock_quantity <= 5 && (
+                            <div className="absolute top-3 right-3 bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs font-medium z-10">
+                              Only {product.stock_quantity} left
+                            </div>
+                          )}
 
                           {/* Product Icon/Image */}
                           <div className="text-6xl group-hover:scale-110 transition-transform duration-300">
@@ -378,14 +465,14 @@ const Index = () => {
                               const categoryIcons: { [key: string]: string } = {
                                 'Display': '📱',
                                 'Battery': '🔋',
-                                'Cover': '📲',
+                                'Back Cover': '📲',
                                 'Camera': '📷',
-                                'Charging': '🔌',
-                                'Audio': '🔊',
+                                'Charging Port': '🔌',
+                                'Speaker': '🔊',
                                 'Button': '⚫',
-                                'Protection': '🛡️'
+                                'Screen Protector': '🛡️'
                               };
-                              return categoryIcons[product.category] || '📱';
+                              return categoryIcons[product.category?.name || ''] || '📱';
                             })()}
                           </div>
                         </div>
@@ -397,8 +484,15 @@ const Index = () => {
                       {/* Product Info */}
                       <div className="p-5">
                         <h3 className="text-lg font-semibold text-gray-900 mb-2 line-clamp-2 leading-snug group-hover:text-orange-600 transition-colors duration-200">
-                          {product.name}
+                          {product.model?.brand?.name && product.model?.model_name 
+                            ? `${product.model.brand.name} ${product.model.model_name}` 
+                            : product.model?.model_name || 'Mobile Part'}
                         </h3>
+
+                        {/* Vendor name */}
+                        <p className="text-sm text-gray-600 mb-3">
+                          by {product.vendor?.business_name || 'Verified Vendor'}
+                        </p>
 
                         {/* Rating and Reviews */}
                         <div className="flex items-center space-x-2 mb-3">
@@ -406,20 +500,47 @@ const Index = () => {
                             {[...Array(5)].map((_, i) => (
                               <Star
                                 key={i}
-                                className={`h-4 w-4 ${i < Math.floor(product.rating) ? 'text-orange-400 fill-current' : 'text-gray-200'}`}
+                                className={`h-4 w-4 ${i < Math.floor(product.vendor?.rating || 4.5) ? 'text-orange-400 fill-current' : 'text-gray-200'}`}
                               />
                             ))}
                           </div>
                           <span className="text-sm text-gray-500 font-medium">
-                            {product.rating} ({product.reviews.toLocaleString()})
+                            {(product.vendor?.rating || 4.5).toFixed(1)} ({(product.vendor?.total_reviews || 0).toLocaleString()})
                           </span>
                         </div>
+
+                        {/* Quality badge */}
+                        {product.quality_type?.name && (
+                          <div className="mb-3">
+                            <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
+                              {product.quality_type.name}
+                            </span>
+                          </div>
+                        )}
 
                         {/* Price */}
                         <div className="flex items-center justify-between mb-4">
                           <div className="flex items-center space-x-2">
-                            <span className="text-2xl font-bold text-gray-900">₹{product.price.toLocaleString()}</span>
-                            {index < 3 && (
+                            <span className="text-2xl font-bold text-gray-900">
+                              ₹{(product.final_price || product.price).toLocaleString()}
+                            </span>
+                            {product.has_upside && product.price_markup && product.price_markup > 0 && (
+                              <div className="flex flex-col">
+                                <span className="text-sm text-gray-500 line-through">₹{product.price.toLocaleString()}</span>
+                                <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
+                                  +₹{product.price_markup.toFixed(0)} upside
+                                </span>
+                              </div>
+                            )}
+                            {product.original_price && product.original_price > product.price && !product.has_upside && (
+                              <div className="flex flex-col">
+                                <span className="text-sm text-gray-500 line-through">₹{product.original_price.toLocaleString()}</span>
+                                <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-medium">
+                                  {Math.round(((product.original_price - product.price) / product.original_price) * 100)}% OFF
+                                </span>
+                              </div>
+                            )}
+                            {index < 3 && !product.original_price && !product.has_upside && (
                               <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-medium">
                                 Hot
                               </span>
@@ -427,17 +548,33 @@ const Index = () => {
                           </div>
                         </div>
 
+                        {/* Warranty info */}
+                        {product.warranty_months > 0 && (
+                          <div className="text-sm text-gray-600 mb-3">
+                            ⚡ {product.warranty_months} months warranty
+                          </div>
+                        )}
+
                         {/* Add to Cart Button */}
                         <Button
                           onClick={() => handleAddToCart(product)}
-                          className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-semibold py-3 rounded-xl shadow-soft hover:shadow-medium transform hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 touch-manipulation"
+                          disabled={!product.is_in_stock || product.stock_quantity === 0}
+                          className={`w-full font-semibold py-3 rounded-xl shadow-soft hover:shadow-medium transform hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 touch-manipulation ${
+                            product.is_in_stock && product.stock_quantity > 0
+                              ? 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white'
+                              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                          }`}
                         >
-                          <span className="flex items-center justify-center space-x-2">
-                            <span>Add to Cart</span>
-                            <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center">
-                              <ArrowRight className="h-3 w-3" />
-                            </div>
-                          </span>
+                          {product.is_in_stock && product.stock_quantity > 0 ? (
+                            <span className="flex items-center justify-center space-x-2">
+                              <span>Add to Cart</span>
+                              <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center">
+                                <ArrowRight className="h-3 w-3" />
+                              </div>
+                            </span>
+                          ) : (
+                            'Out of Stock'
+                          )}
                         </Button>
                       </div>
                     </div>

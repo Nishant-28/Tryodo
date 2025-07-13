@@ -111,30 +111,113 @@ const AdminDeliveryPartnerManagement = () => {
   const loadDeliveryPartners = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      console.log('🔄 Loading delivery partners...');
+      
+      // Debug: Check current user context
+      const { data: userData } = await supabase.auth.getUser();
+      console.log('👤 Current user:', userData?.user?.email, 'Role:', userData?.user?.user_metadata?.role);
+      
+      // First get delivery partners
+      console.log('📋 Fetching delivery partners...');
+      let { data: partnersData, error: partnersError } = await supabase
         .from('delivery_partners')
-        .select(`
-          *,
-          profiles:profile_id (
-            full_name,
-            email,
-            phone
-          )
-        `);
+        .select('*');
 
-      if (error) throw error;
+      if (partnersError) {
+        console.error('❌ Error loading delivery partners:', partnersError);
+        // Try alternative query with explicit auth context
+        console.log('🔄 Trying alternative query...');
+        
+        const { data: altPartnersData, error: altPartnersError } = await supabase
+          .from('delivery_partners')
+          .select(`
+            id,
+            profile_id,
+            license_number,
+            vehicle_type,
+            vehicle_number,
+            is_active,
+            is_verified,
+            rating,
+            total_deliveries,
+            successful_deliveries,
+            assigned_pincodes
+          `);
+        
+        if (altPartnersError) {
+          console.error('❌ Alternative query also failed:', altPartnersError);
+          throw new Error(`Database query failed: ${partnersError.message}`);
+        }
+        
+        console.log('✅ Alternative query succeeded');
+        // Use alternative data
+        partnersData = altPartnersData;
+      }
 
-      const formattedPartners = data.map(partner => ({
-        ...partner,
-        full_name: partner.profiles.full_name,
-        email: partner.profiles.email,
-        phone: partner.profiles.phone
-      }));
+      console.log('📊 Raw delivery partners data:', partnersData);
 
+      if (!partnersData || partnersData.length === 0) {
+        console.log('ℹ️ No delivery partners found in database');
+        setPartners([]);
+        return;
+      }
+
+      // Get profile IDs
+      const profileIds = partnersData.map(partner => partner.profile_id);
+      console.log('👥 Fetching profiles for IDs:', profileIds);
+
+      // Get profiles separately
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, full_name, email, phone')
+        .in('id', profileIds);
+
+      if (profilesError) {
+        console.error('❌ Error loading profiles:', profilesError);
+        console.log('⚠️ Continuing without profile data');
+      }
+
+      console.log('👤 Profiles data:', profilesData);
+
+      // Create a map of profile data for easier lookup
+      const profilesMap = new Map();
+      if (profilesData) {
+        profilesData.forEach(profile => {
+          profilesMap.set(profile.id, profile);
+        });
+      }
+
+      const formattedPartners = partnersData.map(partner => {
+        console.log('Processing partner:', partner.id, 'Profile ID:', partner.profile_id);
+        
+        // Get profile data from map
+        const profile = profilesMap.get(partner.profile_id);
+        console.log('Found profile for partner:', profile);
+        
+        return {
+          ...partner,
+          full_name: profile?.full_name || `Delivery Partner ${partner.id.slice(0, 8)}`,
+          email: profile?.email || 'No Email',
+          phone: profile?.phone || 'No Phone',
+          // Ensure default values for required fields
+          rating: partner.rating || 0,
+          total_deliveries: partner.total_deliveries || 0,
+          successful_deliveries: partner.successful_deliveries || 0,
+          assigned_pincodes: partner.assigned_pincodes || [],
+          wallet_balance: partner.wallet_balance || 0
+        };
+      });
+
+      console.log('✅ Formatted delivery partners:', formattedPartners);
       setPartners(formattedPartners);
+      
+      if (formattedPartners.length > 0) {
+        toast.success(`Loaded ${formattedPartners.length} delivery partners`);
+      }
     } catch (error) {
-      console.error('Error loading delivery partners:', error);
-      toast.error('Failed to load delivery partners');
+      console.error('💥 Error loading delivery partners:', error);
+      toast.error(`Failed to load delivery partners: ${error.message || 'Unknown error'}`);
+      setPartners([]); // Set empty array on error
     } finally {
       setLoading(false);
     }
@@ -212,6 +295,7 @@ const AdminDeliveryPartnerManagement = () => {
       if (profileError) throw profileError;
 
       // Then create the delivery partner record
+      const timestamp = Date.now();
       const { error: partnerError } = await supabase
         .from('delivery_partners')
         .insert({
@@ -219,6 +303,7 @@ const AdminDeliveryPartnerManagement = () => {
           license_number: newPartner.license_number,
           vehicle_type: newPartner.vehicle_type,
           vehicle_number: newPartner.vehicle_number,
+          aadhar_number: `TEMP-${timestamp}`, // Required field - can be updated later
           assigned_pincodes: newPartner.assigned_pincodes,
           is_active: true,
           is_verified: false

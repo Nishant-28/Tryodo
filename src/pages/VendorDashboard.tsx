@@ -22,7 +22,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import { TryodoAPI, TransactionAPI, CommissionAPI, AnalyticsAPI } from '@/lib/api';
+import { TryodoAPI, TransactionAPI, CommissionAPI, AnalyticsAPI, WalletAPI } from '@/lib/api';
 import { DeliveryAPI } from '@/lib/deliveryApi';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
@@ -68,8 +68,6 @@ type SupabaseOrderData = {
     delivery_partner_orders: {
       delivery_partner_id: string;
       status: string;
-      pickup_otp: string | null;
-      delivery_otp: string | null;
       accepted_at: string | null;
       picked_up_at: string | null;
       delivered_at: string | null;
@@ -115,11 +113,7 @@ interface VendorProduct {
       name: string;
     };
   };
-  generic_product?: {
-    id: string;
-    name: string;
-    description: string;
-  };
+
 }
 
 interface PendingOrder {
@@ -179,8 +173,6 @@ interface ConfirmedOrder {
   delivery_partner_id: string | null | undefined;
   delivery_partner_name: string | null | undefined;
   delivery_partner_phone: string | null | undefined;
-  pickup_otp: string | null | undefined;
-  delivery_otp: string | null | undefined;
   delivered_at: string | null | undefined;
   delivery_assigned_at: string | null | undefined;
   out_for_delivery_at: string | null | undefined;
@@ -333,6 +325,8 @@ const VendorDashboard = () => {
   // Wallet functionality removed
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loadingFinancials, setLoadingFinancials] = useState(false);
+  const [dailyEarnings, setDailyEarnings] = useState<number>(0);
+  const [loadingDailyEarnings, setLoadingDailyEarnings] = useState(false);
 
   // Add new state for products
   const [vendorProducts, setVendorProducts] = useState<VendorProduct[]>([]);
@@ -399,7 +393,8 @@ const VendorDashboard = () => {
         loadDeliveredOrders(vendorData.id),
         loadVendorProducts(vendorData.id),
         loadFinancialData(vendorData.id),
-        loadEnhancedAnalytics(vendorData.id)
+        loadEnhancedAnalytics(vendorData.id),
+        loadDailyEarnings(vendorData.id)
       ]);
 
       console.log('VendorDashboard: Data loading results:', results);
@@ -749,7 +744,7 @@ const VendorDashboard = () => {
       // doesn't include slot information. Use the full query instead.
       // ---------------------------------------------
 
-      // 1) fetch confirmed order items with nested order, customers, and slot information
+      // 1) fetch confirmed order items with basic order information
       const { data, error } = await supabase
         .from('order_items')
         .select(`
@@ -778,26 +773,15 @@ const VendorDashboard = () => {
             delivery_address_id,
             delivery_date,
             slot_id,
+            sector_id,
             created_at,
             customers(
               id,
               profile_id
             ),
-            delivery_slots(
-              id,
-              slot_name,
-              start_time,
-              end_time,
-              cutoff_time,
-              sectors(
-                name
-              )
-            ),
             delivery_partner_orders(
               delivery_partner_id,
               status,
-              pickup_otp,
-              delivery_otp,
               accepted_at,
               picked_up_at,
               delivered_at,
@@ -820,9 +804,11 @@ const VendorDashboard = () => {
         return;
       }
 
-      // 2) collect unique customer profile_ids to fetch names/phones
+      // 2) collect unique IDs for batch fetching
       const profileIds: string[] = [];
       const deliveryAddressIds: string[] = [];
+      const slotIds: string[] = [];
+      const sectorIds: string[] = [];
 
       data.forEach((item: any) => {
         const pId = item.orders?.customers?.profile_id;
@@ -830,10 +816,18 @@ const VendorDashboard = () => {
 
         const daId = item.orders?.delivery_address_id;
         if (daId) deliveryAddressIds.push(daId);
+
+        const slotId = item.orders?.slot_id;
+        if (slotId) slotIds.push(slotId);
+
+        const sectorId = item.orders?.sector_id;
+        if (sectorId) sectorIds.push(sectorId);
       });
 
       const uniqueProfileIds = Array.from(new Set(profileIds));
       const uniqueDeliveryAddressIds = Array.from(new Set(deliveryAddressIds));
+      const uniqueSlotIds = Array.from(new Set(slotIds));
+      const uniqueSectorIds = Array.from(new Set(sectorIds));
 
       let profilesMap: Record<string, { full_name: string | null; phone: string | null }> = {};
       if (uniqueProfileIds.length) {
@@ -862,13 +856,41 @@ const VendorDashboard = () => {
         }
       }
 
-      const processed: ConfirmedOrder[] = data.map((item: any) => {
+      let slotsMap: Record<string, any> = {};
+      if (uniqueSlotIds.length) {
+        const { data: slotsData, error: slotsErr } = await supabase
+          .from('delivery_slots')
+          .select('id, slot_name, start_time, end_time, cutoff_time, sector_id')
+          .in('id', uniqueSlotIds);
+
+        if (!slotsErr && slotsData) {
+          slotsData.forEach((slot: any) => {
+            slotsMap[slot.id] = slot;
+          });
+        }
+      }
+
+      let sectorsMap: Record<string, any> = {};
+      if (uniqueSectorIds.length) {
+        const { data: sectorsData, error: sectorsErr } = await supabase
+          .from('sectors')
+          .select('id, name, city_name')
+          .in('id', uniqueSectorIds);
+
+        if (!sectorsErr && sectorsData) {
+          sectorsData.forEach((sector: any) => {
+            sectorsMap[sector.id] = sector;
+          });
+        }
+      }
+
+              const processed: ConfirmedOrder[] = data.map((item: any) => {
         const order = item.orders;
         const customer = order?.customers || null;
         const profileInfo = customer?.profile_id ? profilesMap[customer.profile_id] : undefined;
         const customerAddress = order?.delivery_address_id ? customerAddressesMap[order.delivery_address_id] : null;
-        const slot = order?.delivery_slots || null;
-        const sector = slot?.sectors || null;
+        const slot = order?.slot_id ? slotsMap[order.slot_id] : null;
+        const sector = order?.sector_id ? sectorsMap[order.sector_id] : null;
 
         const deliveryRecord = order?.delivery_partner_orders?.[0] || null;
         const deliveryPartnerProfile = Array.isArray(deliveryRecord?.delivery_partners?.profiles)
@@ -925,8 +947,6 @@ const VendorDashboard = () => {
           delivery_partner_id: deliveryRecord?.delivery_partner_id || null,
           delivery_partner_name: deliveryPartnerProfile?.full_name || null,
           delivery_partner_phone: deliveryPartnerProfile?.phone || null,
-          pickup_otp: deliveryRecord?.pickup_otp || null,
-          delivery_otp: deliveryRecord?.delivery_otp || null,
           delivered_at: deliveryRecord?.delivered_at || null,
           delivery_assigned_at: deliveryRecord?.accepted_at || null,
           out_for_delivery_at: deliveryRecord?.picked_up_at || null,
@@ -956,9 +976,20 @@ const VendorDashboard = () => {
       });
 
       setConfirmedOrders(filteredProcessed);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error loading confirmed orders:', err);
-      toast.error(`Failed to load confirmed orders: ${err.message || err}`);
+      
+      // Provide more specific error messages
+      let errorMessage = 'Failed to load confirmed orders';
+      if (err?.message) {
+        errorMessage += `: ${err.message}`;
+      } else if (err?.code) {
+        errorMessage += `: Error code ${err.code}`;
+      } else if (typeof err === 'string') {
+        errorMessage += `: ${err}`;
+      }
+      
+      toast.error(errorMessage);
       setConfirmedOrders([]);
     } finally {
       setConfirmedOrdersLoading(false);
@@ -1085,12 +1116,7 @@ const VendorDashboard = () => {
 
       console.log('VendorDashboard: vendor_products count:', productCount);
 
-      const { count: genericProductCount } = await supabase
-        .from('vendor_generic_products')
-        .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', vendorId);
 
-      console.log('VendorDashboard: vendor_generic_products count:', genericProductCount);
 
       // Get order statistics
       const { data: orderStats } = await supabase
@@ -1100,7 +1126,7 @@ const VendorDashboard = () => {
 
       console.log('VendorDashboard: order_items data:', orderStats);
 
-      const totalProducts = (productCount || 0) + (genericProductCount || 0);
+      const totalProducts = productCount || 0;
       const totalOrders = orderStats?.length || 0;
       const pendingOrdersCount = orderStats?.filter(o => o.item_status === 'pending').length || 0;
       const confirmedOrders = orderStats?.filter(o => o.item_status === 'confirmed').length || 0;
@@ -1181,6 +1207,26 @@ const VendorDashboard = () => {
     }
   };
 
+  // Load daily earnings
+  const loadDailyEarnings = async (vendorId: string) => {
+    try {
+      setLoadingDailyEarnings(true);
+      const walletResponse = await WalletAPI.getVendorWalletData(vendorId);
+      
+      if (walletResponse.success && walletResponse.data) {
+        setDailyEarnings(walletResponse.data.today_earnings || 0);
+      } else {
+        console.error('Failed to load daily earnings:', walletResponse.error);
+        setDailyEarnings(0);
+      }
+    } catch (error: any) {
+      console.error('Error loading daily earnings:', error);
+      setDailyEarnings(0);
+    } finally {
+      setLoadingDailyEarnings(false);
+    }
+  };
+
   // Add new function to load vendor products
   const loadVendorProducts = async (vendorId: string) => {
     try {
@@ -1230,11 +1276,7 @@ const VendorDashboard = () => {
               name
             )
           ),
-          vendor_generic_products (
-            categories (
-              name
-            )
-          )
+
         `)
         .eq('vendor_id', vendorId)
         .eq('item_status', 'confirmed');
@@ -1287,7 +1329,7 @@ const VendorDashboard = () => {
 
     data.forEach(item => {
       const categoryName = item.vendor_products?.categories?.name ||
-        item.vendor_generic_products?.categories?.name ||
+        
         'Other';
 
       if (!categoryMap.has(categoryName)) {
@@ -1375,7 +1417,8 @@ const VendorDashboard = () => {
         loadAnalytics(vendor.id),
         loadFinancialData(vendor.id),
         loadVendorProducts(vendor.id),
-        loadEnhancedAnalytics(vendor.id)
+        loadEnhancedAnalytics(vendor.id),
+        loadDailyEarnings(vendor.id)
       ]);
     } finally {
       setRefreshing(false);
@@ -1964,6 +2007,146 @@ const VendorDashboard = () => {
           </div>
         </div>
 
+        {/* Financial Summary Cards - Add this section */}
+        <div className="mb-6">
+          <Card className="bg-gradient-to-br from-green-50 via-blue-50 to-purple-50 border-0 shadow-lg">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <DollarSign className="h-6 w-6 text-green-600" />
+                Financial Overview
+              </CardTitle>
+              <CardDescription className="text-gray-600">
+                Your earnings and financial performance summary
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                {/* Daily Earnings */}
+                <Card className="bg-gradient-to-br from-emerald-50 to-green-100 border-emerald-200">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium text-emerald-800">Total Sales</CardTitle>
+                    <Calendar className="h-4 w-4 text-emerald-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-emerald-700">
+                      {loadingDailyEarnings ? (
+                        <div className="animate-pulse bg-emerald-200 h-6 w-16 rounded"></div>
+                      ) : (
+                        `₹${dailyEarnings.toLocaleString('en-IN')}`
+                      )}
+                    </div>
+                    <p className="text-xs text-emerald-600 mt-1">Today's Sales</p>
+                  </CardContent>
+                </Card>
+
+                {/* Total Sales */}
+                <Card className="bg-gradient-to-br from-green-50 to-emerald-100 border-green-200">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium text-green-800">Total Sales</CardTitle>
+                    <TrendingUp className="h-4 w-4 text-green-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-green-700">
+                      ₹{(financialSummary?.total_sales || 0).toLocaleString('en-IN')}
+                    </div>
+                    <p className="text-xs text-green-600 mt-1">Gross revenue</p>
+                  </CardContent>
+                </Card>
+
+                {/* Net Earnings */}
+                <Card className="bg-gradient-to-br from-blue-50 to-cyan-100 border-blue-200">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium text-blue-800">Daily Earnings</CardTitle>
+                    <DollarSign className="h-4 w-4 text-blue-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-blue-700">
+                      ₹{(financialSummary?.net_earnings || 0).toLocaleString('en-IN')}
+                    </div>
+                    <p className="text-xs text-blue-600 mt-1">After commission</p>
+                  </CardContent>
+                </Card>
+
+                {/* Commission Paid */}
+                {/* <Card className="bg-gradient-to-br from-purple-50 to-violet-100 border-purple-200">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium text-purple-800">Commission</CardTitle>
+                    <Users className="h-4 w-4 text-purple-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-purple-700">
+                      ₹{(financialSummary?.total_commission || 0).toLocaleString('en-IN')}
+                    </div>
+                    <p className="text-xs text-purple-600 mt-1">Platform fee</p>
+                  </CardContent>
+                </Card> */}
+
+                {/* Pending Payouts */}
+                {/* <Card className="bg-gradient-to-br from-orange-50 to-amber-100 border-orange-200">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium text-orange-800">Pending</CardTitle>
+                    <Clock className="h-4 w-4 text-orange-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-orange-700">
+                      ₹{(financialSummary?.pending_payouts || 0).toLocaleString('en-IN')}
+                    </div>
+                    <p className="text-xs text-orange-600 mt-1">Awaiting delivery</p>
+                  </CardContent>
+                </Card> */}
+
+                {/* Total Orders */}
+                {/* <Card className="bg-gradient-to-br from-indigo-50 to-blue-100 border-indigo-200">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium text-indigo-800">Orders</CardTitle>
+                    <ShoppingCart className="h-4 w-4 text-indigo-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-indigo-700">
+                      {financialSummary?.total_orders || 0}
+                    </div>
+                    <p className="text-xs text-indigo-600 mt-1">Total completed</p>
+                  </CardContent>
+                </Card> */}
+
+                {/* Products */}
+                <Card className="bg-gradient-to-br from-pink-50 to-rose-100 border-pink-200">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium text-pink-800">Products</CardTitle>
+                    <Package className="h-4 w-4 text-pink-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-pink-700">
+                      {financialSummary?.total_products || 0}
+                    </div>
+                    <p className="text-xs text-pink-600 mt-1">Active listings</p>
+                  </CardContent>
+                </Card>
+              </div> 
+
+              {/* Quick Actions */}
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Button
+                  onClick={() => navigate('/vendor/analytics')}
+                  className="bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 text-white"
+                >
+                  <BarChart3 className="h-4 w-4 mr-2" />
+                  View Analytics
+                </Button>
+                {/* <Button
+                  variant="outline"
+                  onClick={() => window.open('/vendor/analytics', '_blank')}
+                  className="border-gray-300 hover:border-blue-300"
+                >
+                  <DollarSign className="h-4 w-4 mr-2" />
+                  Financial Details
+                </Button> */}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Mobile-first tabs with improved layout */}
         <Tabs defaultValue="pending" className="w-full">
           {/* Mobile-first tabs with improved layout */}
           <div className="block sm:hidden mb-4">

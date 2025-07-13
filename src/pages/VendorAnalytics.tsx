@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Package, TrendingUp, ShoppingCart, DollarSign, AlertTriangle, CheckCircle, 
-  Clock, RefreshCw, BarChart3
+import {
+  Package, TrendingUp, ShoppingCart, DollarSign, AlertTriangle, CheckCircle,
+  Clock, RefreshCw, BarChart3, Calendar, ArrowUp, ArrowDown, Minus
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,7 +15,9 @@ import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { TryodoAPI, TransactionAPI, AnalyticsAPI } from '@/lib/api';
-import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { WalletAPI } from '@/lib/api';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, LineChart, Line, XAxis, YAxis, CartesianGrid, BarChart, Bar } from 'recharts';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface Analytics {
   total_sales: number;
@@ -24,6 +26,18 @@ interface Analytics {
   pending_payouts: number;
   total_orders: number;
   total_products: number;
+}
+
+interface DayWiseAnalytics {
+  date: string;
+  net_sales: number;
+  net_earnings: number;
+  net_orders: number;
+  pending_orders: number;
+  confirmed_orders: number;
+  delivered_orders: number;
+  total_commission: number;
+  day_name: string;
 }
 
 interface Vendor {
@@ -51,19 +65,22 @@ const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'
 
 const VendorAnalytics = () => {
   const { profile } = useAuth();
-  
+
   const [vendor, setVendor] = useState<Vendor | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [wallet, setWallet] = useState<any>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [monthlyEarnings, setMonthlyEarnings] = useState<any[]>([]);
   const [categoryBreakdown, setCategoryBreakdown] = useState<any[]>([]);
-  
+  const [dayWiseAnalytics, setDayWiseAnalytics] = useState<DayWiseAnalytics[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loadingFinancials, setLoadingFinancials] = useState(false);
   const [loadingChartData, setLoadingChartData] = useState(false);
+  const [loadingDayWise, setLoadingDayWise] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [dayWisePeriod, setDayWisePeriod] = useState<number>(30);
 
   const fetchVendorByProfileId = async (profileId: string): Promise<Vendor | null> => {
     try {
@@ -103,11 +120,11 @@ const VendorAnalytics = () => {
   const loadFinancialData = async (vendorId: string) => {
     setLoadingFinancials(true);
     try {
-          const [transactionsResponse] = await Promise.all([
-      TransactionAPI.getTransactions({ vendorId })
-    ]);
+      const [transactionsResponse] = await Promise.all([
+        TransactionAPI.getTransactions({ vendorId })
+      ]);
 
-    // Wallet functionality removed
+      // Wallet functionality removed
 
       if (transactionsResponse.success) {
         setTransactions(transactionsResponse.data || []);
@@ -134,7 +151,7 @@ const VendorAnalytics = () => {
 
       const monthlyData = processMonthlyEarnings(tx);
       setMonthlyEarnings(monthlyData);
-      
+
       // Load order items with category information for breakdown
       const { data: orderItems } = await supabase
         .from('order_items')
@@ -161,12 +178,12 @@ const VendorAnalytics = () => {
 
   const processMonthlyEarnings = (transactions: any[]) => {
     const monthlyMap = new Map();
-    
+
     transactions.forEach(transaction => {
       if (transaction.transaction_type === 'vendor_earning') {
         const date = new Date(transaction.transaction_date);
         const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-        
+
         if (!monthlyMap.has(monthKey)) {
           monthlyMap.set(monthKey, 0);
         }
@@ -190,11 +207,11 @@ const VendorAnalytics = () => {
 
   const processCategoryBreakdown = (data: any[]) => {
     const categoryMap = new Map();
-    
+
     data.forEach(item => {
       const category = item.vendor_products?.categories?.name || item.category_name || 'Other';
       const revenue = item.line_total || 0;
-      
+
       if (!categoryMap.has(category)) {
         categoryMap.set(category, 0);
       }
@@ -205,6 +222,79 @@ const VendorAnalytics = () => {
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 8);
+  };
+
+  // Load wallet data using WalletAPI
+  const loadWalletData = async (vendorId: string) => {
+    try {
+      const walletResponse = await WalletAPI.getVendorWallet(vendorId);
+      if (walletResponse.success) {
+        setWallet(walletResponse.data);
+      } else {
+        console.error('Failed to load wallet data:', walletResponse.error);
+        // Set default wallet data
+        setWallet({
+          today_earnings: 0,
+          week_earnings: 0,
+          month_earnings: 0,
+          available_balance: analytics?.net_earnings || 0,
+          pending_balance: analytics?.pending_payouts || 0,
+          total_earned: analytics?.total_sales || 0,
+          minimum_payout_amount: 1000,
+          payout_frequency: 'weekly',
+          auto_payout_enabled: false,
+          last_payout_date: null
+        });
+      }
+    } catch (error) {
+      console.error('Error loading wallet data:', error);
+      setWallet({
+        today_earnings: 0,
+        week_earnings: 0,
+        month_earnings: 0,
+        available_balance: analytics?.net_earnings || 0,
+        pending_balance: analytics?.pending_payouts || 0,
+        total_earned: analytics?.total_sales || 0,
+        minimum_payout_amount: 1000,
+        payout_frequency: 'weekly',
+        auto_payout_enabled: false,
+        last_payout_date: null
+      });
+    }
+  };
+
+  // Load day-wise analytics
+  const loadDayWiseAnalytics = async (vendorId: string, days: number = 30) => {
+    setLoadingDayWise(true);
+    try {
+      const response = await AnalyticsAPI.getVendorDayWiseAnalytics(vendorId, days);
+      if (response.success && response.data) {
+        setDayWiseAnalytics(response.data);
+      } else {
+        console.error('Failed to load day-wise analytics:', response.error);
+        toast.error('Failed to load day-wise analytics.');
+        setDayWiseAnalytics([]);
+      }
+    } catch (error) {
+      console.error('Error loading day-wise analytics:', error);
+      toast.error('An error occurred while loading day-wise analytics.');
+      setDayWiseAnalytics([]);
+    } finally {
+      setLoadingDayWise(false);
+    }
+  };
+
+  // Calculate growth percentage
+  const calculateGrowth = (current: number, previous: number): { percentage: number, isPositive: boolean, isZero: boolean } => {
+    if (previous === 0 && current === 0) return { percentage: 0, isPositive: false, isZero: true };
+    if (previous === 0) return { percentage: 100, isPositive: true, isZero: false };
+
+    const percentage = ((current - previous) / previous) * 100;
+    return {
+      percentage: Math.abs(percentage),
+      isPositive: percentage >= 0,
+      isZero: percentage === 0
+    };
   };
 
   const initializeVendorAnalytics = async () => {
@@ -223,7 +313,11 @@ const VendorAnalytics = () => {
           loadAnalytics(vendorData.id),
           loadFinancialData(vendorData.id),
           loadEnhancedAnalytics(vendorData.id),
+          loadDayWiseAnalytics(vendorData.id, dayWisePeriod),
         ]);
+
+        // Load wallet data
+        await loadWalletData(vendorData.id);
       } else {
         throw new Error('Vendor not found for this profile.');
       }
@@ -238,14 +332,19 @@ const VendorAnalytics = () => {
 
   const refreshData = async () => {
     if (!vendor) return;
-    
+
     setRefreshing(true);
     try {
       await Promise.all([
         loadAnalytics(vendor.id),
         loadFinancialData(vendor.id),
-        loadEnhancedAnalytics(vendor.id)
+        loadEnhancedAnalytics(vendor.id),
+        loadDayWiseAnalytics(vendor.id, dayWisePeriod)
       ]);
+
+      // Reload wallet data
+      await loadWalletData(vendor.id);
+
       toast.success('Data refreshed successfully');
     } catch (error) {
       console.error('Error refreshing data:', error);
@@ -260,6 +359,13 @@ const VendorAnalytics = () => {
       initializeVendorAnalytics();
     }
   }, [profile]);
+
+  // Reload day-wise analytics when period changes
+  useEffect(() => {
+    if (vendor && dayWisePeriod) {
+      loadDayWiseAnalytics(vendor.id, dayWisePeriod);
+    }
+  }, [dayWisePeriod]);
 
   if (loading) {
     return <LoadingSpinner />;
@@ -295,9 +401,9 @@ const VendorAnalytics = () => {
         <div className="absolute top-20 right-20 w-72 h-72 bg-blue-100 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob"></div>
         <div className="absolute top-40 left-20 w-96 h-96 bg-purple-100 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob animation-delay-2000"></div>
       </div>
-      
-      <Header cartItems={0} onCartClick={() => {}} />
-      
+
+      <Header cartItems={0} onCartClick={() => { }} />
+
       <main className="relative container mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <div className="mb-6 sm:mb-8">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -308,8 +414,8 @@ const VendorAnalytics = () => {
               <p className="text-gray-600 font-medium">Comprehensive business insights for {vendor?.business_name}</p>
             </div>
             <div className="flex gap-3">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={refreshData}
                 className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 font-medium"
                 disabled={refreshing}
@@ -322,9 +428,12 @@ const VendorAnalytics = () => {
         </div>
 
         <Tabs defaultValue="earnings" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
+          <TabsList className="grid w-full grid-cols-3 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
             <TabsTrigger value="earnings" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
               ₹ Earnings
+            </TabsTrigger>
+            <TabsTrigger value="daily-trends" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+              📈 Daily Trends
             </TabsTrigger>
             <TabsTrigger value="analytics" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
               Analytics
@@ -431,10 +540,9 @@ const VendorAnalytics = () => {
                             </p>
                           </div>
                           <div className="text-right">
-                            <p className={`font-medium ${
-                              transaction.transaction_type === 'vendor_earning' ? 'text-green-600' : 
-                              'text-gray-600'
-                            }`}>
+                            <p className={`font-medium ${transaction.transaction_type === 'vendor_earning' ? 'text-green-600' :
+                                'text-gray-600'
+                              }`}>
                               {transaction.transaction_type === 'vendor_earning' ? '+' : '-'}
                               ₹{transaction.net_amount?.toLocaleString('en-IN')}
                             </p>
@@ -487,14 +595,329 @@ const VendorAnalytics = () => {
                     <div className="text-sm text-gray-600">
                       <p>Available balance will be processed in the next payout cycle.</p>
                       <p className="mt-2 text-xs">
-                        Last payout: {wallet?.last_payout_date ? 
-                          new Date(wallet.last_payout_date).toLocaleDateString() : 
+                        Last payout: {wallet?.last_payout_date ?
+                          new Date(wallet.last_payout_date).toLocaleDateString() :
                           'No payouts yet'
                         }
                       </p>
                     </div>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="daily-trends" className="space-y-6">
+            {/* Day-wise Analytics Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">Daily Performance Tracking</h2>
+                <p className="text-gray-600 text-sm">Track your daily sales, earnings, and orders over time</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <Select value={dayWisePeriod.toString()} onValueChange={(value) => {
+                  const newPeriod = parseInt(value);
+                  setDayWisePeriod(newPeriod);
+                  if (vendor) {
+                    loadDayWiseAnalytics(vendor.id, newPeriod);
+                  }
+                }}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Select period" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7">Last 7 days</SelectItem>
+                    <SelectItem value="15">Last 15 days</SelectItem>
+                    <SelectItem value="30">Last 30 days</SelectItem>
+                    <SelectItem value="60">Last 60 days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Summary Cards */}
+            {dayWiseAnalytics.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {(() => {
+                  const today = dayWiseAnalytics[0] || { net_sales: 0, net_earnings: 0, net_orders: 0 };
+                  const yesterday = dayWiseAnalytics[1] || { net_sales: 0, net_earnings: 0, net_orders: 0 };
+
+                  const salesGrowth = calculateGrowth(today.net_sales, yesterday.net_sales);
+                  const earningsGrowth = calculateGrowth(today.net_earnings, yesterday.net_earnings);
+                  const ordersGrowth = calculateGrowth(today.net_orders, yesterday.net_orders);
+
+                  const avgSales = dayWiseAnalytics.reduce((sum, day) => sum + day.net_sales, 0) / dayWiseAnalytics.length;
+
+                  return (
+                    <>
+                      <Card className="bg-gradient-to-br from-green-50 to-emerald-100 border-green-200">
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                          <CardTitle className="text-sm font-medium text-green-800">Today's Sales</CardTitle>
+                          <DollarSign className="h-4 w-4 text-green-600" />
+                        </CardHeader>
+                        <CardContent>
+                          <div className="text-2xl font-bold text-green-700">
+                            ₹{today.net_sales.toLocaleString('en-IN')}
+                          </div>
+                          <div className="flex items-center mt-1">
+                            {salesGrowth.isZero ? (
+                              <Minus className="h-3 w-3 text-gray-500 mr-1" />
+                            ) : salesGrowth.isPositive ? (
+                              <ArrowUp className="h-3 w-3 text-green-600 mr-1" />
+                            ) : (
+                              <ArrowDown className="h-3 w-3 text-red-600 mr-1" />
+                            )}
+                            <span className={`text-xs font-medium ${salesGrowth.isZero ? 'text-gray-500' :
+                                salesGrowth.isPositive ? 'text-green-600' : 'text-red-600'
+                              }`}>
+                              {salesGrowth.percentage.toFixed(1)}% vs yesterday
+                            </span>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card className="bg-gradient-to-br from-blue-50 to-cyan-100 border-blue-200">
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                          <CardTitle className="text-sm font-medium text-blue-800">Today's Earnings</CardTitle>
+                          <TrendingUp className="h-4 w-4 text-blue-600" />
+                        </CardHeader>
+                        <CardContent>
+                          <div className="text-2xl font-bold text-blue-700">
+                            ₹{today.net_earnings.toLocaleString('en-IN')}
+                          </div>
+                          <div className="flex items-center mt-1">
+                            {earningsGrowth.isZero ? (
+                              <Minus className="h-3 w-3 text-gray-500 mr-1" />
+                            ) : earningsGrowth.isPositive ? (
+                              <ArrowUp className="h-3 w-3 text-green-600 mr-1" />
+                            ) : (
+                              <ArrowDown className="h-3 w-3 text-red-600 mr-1" />
+                            )}
+                            <span className={`text-xs font-medium ${earningsGrowth.isZero ? 'text-gray-500' :
+                                earningsGrowth.isPositive ? 'text-green-600' : 'text-red-600'
+                              }`}>
+                              {earningsGrowth.percentage.toFixed(1)}% vs yesterday
+                            </span>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card className="bg-gradient-to-br from-purple-50 to-violet-100 border-purple-200">
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                          <CardTitle className="text-sm font-medium text-purple-800">Today's Orders</CardTitle>
+                          <ShoppingCart className="h-4 w-4 text-purple-600" />
+                        </CardHeader>
+                        <CardContent>
+                          <div className="text-2xl font-bold text-purple-700">
+                            {today.net_orders}
+                          </div>
+                          <div className="flex items-center mt-1">
+                            {ordersGrowth.isZero ? (
+                              <Minus className="h-3 w-3 text-gray-500 mr-1" />
+                            ) : ordersGrowth.isPositive ? (
+                              <ArrowUp className="h-3 w-3 text-green-600 mr-1" />
+                            ) : (
+                              <ArrowDown className="h-3 w-3 text-red-600 mr-1" />
+                            )}
+                            <span className={`text-xs font-medium ${ordersGrowth.isZero ? 'text-gray-500' :
+                                ordersGrowth.isPositive ? 'text-green-600' : 'text-red-600'
+                              }`}>
+                              {ordersGrowth.percentage.toFixed(1)}% vs yesterday
+                            </span>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card className="bg-gradient-to-br from-orange-50 to-amber-100 border-orange-200">
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                          <CardTitle className="text-sm font-medium text-orange-800">Avg Daily Sales</CardTitle>
+                          <BarChart3 className="h-4 w-4 text-orange-600" />
+                        </CardHeader>
+                        <CardContent>
+                          <div className="text-2xl font-bold text-orange-700">
+                            ₹{avgSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                          </div>
+                          <p className="text-xs text-orange-600 mt-1">
+                            Last {dayWisePeriod} days average
+                          </p>
+                        </CardContent>
+                      </Card>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Daily Sales Chart */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Daily Sales Trend</CardTitle>
+                  <CardDescription>Net sales over the last {dayWisePeriod} days</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {loadingDayWise ? (
+                    <div className="h-64 flex items-center justify-center">
+                      <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
+                    </div>
+                  ) : dayWiseAnalytics.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <LineChart data={dayWiseAnalytics.slice().reverse()}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="date"
+                          tick={{ fontSize: 10 }}
+                          tickFormatter={(value) => {
+                            const date = new Date(value);
+                            return `${date.getDate()}/${date.getMonth() + 1}`;
+                          }}
+                        />
+                        <YAxis tick={{ fontSize: 10 }} />
+                        <Tooltip
+                          formatter={(value: any) => [`₹${value.toLocaleString('en-IN')}`, 'Sales']}
+                          labelFormatter={(label) => {
+                            const date = new Date(label);
+                            return `${date.toLocaleDateString('en-IN')} (${date.toLocaleDateString('en-US', { weekday: 'short' })})`;
+                          }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="net_sales"
+                          stroke="#10b981"
+                          strokeWidth={2}
+                          dot={{ fill: '#10b981', strokeWidth: 2, r: 3 }}
+                          activeDot={{ r: 5, stroke: '#10b981', strokeWidth: 2, fill: '#fff' }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-64 flex items-center justify-center text-gray-500">
+                      <div className="text-center">
+                        <BarChart3 className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                        <p>No sales data available</p>
+                        <p className="text-xs">Complete some orders to see your daily sales trend</p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Daily Orders Chart */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Daily Orders Trend</CardTitle>
+                  <CardDescription>Number of orders per day</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {loadingDayWise ? (
+                    <div className="h-64 flex items-center justify-center">
+                      <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
+                    </div>
+                  ) : dayWiseAnalytics.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <BarChart data={dayWiseAnalytics.slice().reverse()}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="date"
+                          tick={{ fontSize: 10 }}
+                          tickFormatter={(value) => {
+                            const date = new Date(value);
+                            return `${date.getDate()}/${date.getMonth() + 1}`;
+                          }}
+                        />
+                        <YAxis tick={{ fontSize: 10 }} />
+                        <Tooltip
+                          formatter={(value: any) => [value, 'Orders']}
+                          labelFormatter={(label) => {
+                            const date = new Date(label);
+                            return `${date.toLocaleDateString('en-IN')} (${date.toLocaleDateString('en-US', { weekday: 'short' })})`;
+                          }}
+                        />
+                        <Bar dataKey="net_orders" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-64 flex items-center justify-center text-gray-500">
+                      <div className="text-center">
+                        <ShoppingCart className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                        <p>No orders data available</p>
+                        <p className="text-xs">Complete some orders to see your daily orders trend</p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Daily Performance Table */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Daily Performance Details</CardTitle>
+                <CardDescription>Detailed breakdown of daily metrics</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loadingDayWise ? (
+                  <div className="flex items-center justify-center py-8">
+                    <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
+                  </div>
+                ) : dayWiseAnalytics.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left p-2">Date</th>
+                          <th className="text-right p-2">Sales</th>
+                          <th className="text-right p-2">Earnings</th>
+                          <th className="text-right p-2">Orders</th>
+                          <th className="text-right p-2">Commission</th>
+                          <th className="text-center p-2">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dayWiseAnalytics.slice(0, 15).map((day, index) => (
+                          <tr key={day.date} className="border-b hover:bg-gray-50">
+                            <td className="p-2">
+                              <div>
+                                <p className="font-medium">{new Date(day.date).toLocaleDateString('en-IN')}</p>
+                                <p className="text-xs text-gray-500">{day.day_name}</p>
+                              </div>
+                            </td>
+                            <td className="text-right p-2 font-medium">
+                              ₹{day.net_sales.toLocaleString('en-IN')}
+                            </td>
+                            <td className="text-right p-2 font-medium text-green-600">
+                              ₹{day.net_earnings.toLocaleString('en-IN')}
+                            </td>
+                            <td className="text-right p-2 font-medium">
+                              {day.net_orders}
+                            </td>
+                            <td className="text-right p-2 text-gray-600">
+                              ₹{day.total_commission.toLocaleString('en-IN')}
+                            </td>
+                            <td className="text-center p-2">
+                              {day.net_sales > 0 ? (
+                                <Badge variant="default" className="bg-green-100 text-green-800">
+                                  Active
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary">
+                                  No Sales
+                                </Badge>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <Calendar className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                    <p>No daily data available</p>
+                    <p className="text-xs">Daily tracking will appear once you start getting orders</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -557,8 +980,8 @@ const VendorAnalytics = () => {
                   <ResponsiveContainer width="100%" height={250}>
                     <LineChart data={monthlyEarnings}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis 
-                        dataKey="month" 
+                      <XAxis
+                        dataKey="month"
                         tick={{ fontSize: 12 }}
                         tickFormatter={(value) => {
                           const [year, month] = value.split('-');
@@ -566,7 +989,7 @@ const VendorAnalytics = () => {
                         }}
                       />
                       <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip 
+                      <Tooltip
                         formatter={(value: any) => [`₹${value.toLocaleString('en-IN')}`, 'Earnings']}
                         labelFormatter={(label) => {
                           const [year, month] = label.split('-');
@@ -574,10 +997,10 @@ const VendorAnalytics = () => {
                           return `${monthNames[parseInt(month) - 1]} ${year}`;
                         }}
                       />
-                      <Line 
-                        type="monotone" 
-                        dataKey="earnings" 
-                        stroke="#3b82f6" 
+                      <Line
+                        type="monotone"
+                        dataKey="earnings"
+                        stroke="#3b82f6"
                         strokeWidth={2}
                         dot={{ fill: '#3b82f6', strokeWidth: 2, r: 4 }}
                         activeDot={{ r: 6, stroke: '#3b82f6', strokeWidth: 2, fill: '#fff' }}

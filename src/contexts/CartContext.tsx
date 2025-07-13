@@ -75,12 +75,18 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setLoading(true);
     try {
+      console.log('🛒 CartContext: Starting CartAPI.getCart()...');
       const cartData = await CartAPI.getCart();
+      console.log('🛒 CartContext: CartAPI.getCart() result:', cartData);
+      console.log('🛒 CartContext: Cart items count:', cartData?.items?.length || 0);
+      
       if (cartData) {
+        console.log('✅ CartContext: Setting cart with', cartData.items.length, 'items');
         setCart(cartData);
         lastCartUpdateRef.current = now;
         lastLoadedUserRef.current = currentUserId;
       } else {
+        console.log('❌ CartContext: getCart returned null, setting empty cart');
         setCart({
           items: [],
           totalItems: 0,
@@ -89,7 +95,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       }
     } catch (error) {
-      console.error('Error loading cart:', error);
+      console.error('❌ CartContext: Error loading cart:', error);
       setCart({
         items: [],
         totalItems: 0,
@@ -133,24 +139,56 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Optimized cart operations with local state updates
   const addToCart = useCallback(async (productId: string, quantity: number = 1) => {
+    console.log('🛒 CartContext: addToCart called', { productId, quantity });
+    console.log('🛒 CartContext: Current user:', user?.id);
+    console.log('🛒 CartContext: Current profile:', profile);
+    
     if (!user || !profile || profile.role !== 'customer') {
-      toast.error('Please log in to add items to cart');
+      console.log('❌ CartContext: User not authenticated or not a customer');
+      console.log('❌ CartContext: User exists:', !!user);
+      console.log('❌ CartContext: Profile exists:', !!profile);
+      console.log('❌ CartContext: Profile role:', profile?.role);
+      
+      if (!user) {
+        toast.error('Please log in to add items to cart');
+      } else if (!profile) {
+        toast.error('Profile not found. Please refresh and try again.');
+      } else if (profile.role !== 'customer') {
+        toast.error(`Only customers can add items to cart. Your role: ${profile.role}`);
+      }
       return;
     }
 
+    console.log('✅ CartContext: User authentication verified');
+
     try {
+      console.log('🛒 CartContext: Calling CartAPI.addToCart...');
       const result = await CartAPI.addToCart(productId, quantity);
+      console.log('🛒 CartContext: CartAPI.addToCart result:', result);
+      
       if (result.success) {
+        console.log('✅ CartContext: Successfully added to cart');
         // Force refresh cart after successful add
         lastCartUpdateRef.current = 0;
         await loadCart();
         toast.success('Added to cart!');
       } else {
-        toast.error(result.error || 'Failed to add to cart');
+        console.log('❌ CartContext: Failed to add to cart:', result.error);
+        
+        // Provide specific error messages based on the error
+        if (result.error?.includes('not authenticated')) {
+          toast.error('Please log in to add items to cart');
+        } else if (result.error?.includes('not a customer')) {
+          toast.error('Only customers can add items to cart');
+        } else if (result.error?.includes('not found')) {
+          toast.error('Product not found. Please refresh the page and try again.');
+        } else {
+          toast.error(result.error || 'Failed to add to cart');
+        }
       }
     } catch (error) {
-      console.error('Error adding to cart:', error);
-      toast.error('Failed to add to cart');
+      console.error('❌ CartContext: Exception in addToCart:', error);
+      toast.error('An unexpected error occurred. Please try again.');
     }
   }, [user, profile, loadCart]);
 

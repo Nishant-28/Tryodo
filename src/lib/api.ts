@@ -634,6 +634,7 @@ export class AnalyticsAPI {
           line_total,
           unit_price,
           quantity,
+          item_status,
           order:orders (
             order_status,
             payment_status,
@@ -664,10 +665,21 @@ export class AnalyticsAPI {
 
       // Calculate metrics from order_items
       const items = orderItems || [];
-      const totalSales = items.reduce((sum, item) => sum + parseFloat(item.line_total || 0), 0);
-      const totalOrders = new Set(items.map(item => item.order && item.order.created_at)).size; // Unique orders
-      const deliveredItems = items.filter(item => item.order && item.order.order_status === 'delivered');
-      const deliveredSales = deliveredItems.reduce((sum, item) => sum + parseFloat(item.line_total || 0), 0);
+      
+      // Filter items by status for accurate sales calculation
+      const deliveredItems = items.filter(item => 
+        item.item_status === 'delivered'
+      );
+      
+      const totalSales = deliveredItems.reduce((sum, item) => sum + parseFloat(item.line_total || 0), 0);
+      
+      // Count unique orders from delivered items
+      const uniqueOrderIds = new Set(deliveredItems.map(item => 
+        item.order && item.order.length > 0 ? item.order[0]?.created_at : null
+      ).filter(Boolean));
+      const totalOrders = uniqueOrderIds.size;
+      
+      const deliveredSales = totalSales; // Same as totalSales since we're already filtering delivered items
 
       // Calculate commission (assume 15% default commission rate)
       const commissionRate = 0.15;
@@ -676,8 +688,8 @@ export class AnalyticsAPI {
 
       // Pending payouts (items not yet delivered)
       const pendingItems = items.filter(item =>
-        item.order && item.order.order_status !== 'delivered' &&
-        item.order.order_status !== 'cancelled'
+        item.item_status !== 'delivered' &&
+        item.item_status !== 'cancelled'
       );
       const pendingPayouts = pendingItems.reduce((sum, item) => sum + parseFloat(item.line_total || 0), 0);
 
@@ -692,8 +704,8 @@ export class AnalyticsAPI {
         average_order_value: totalOrders > 0 ? totalSales / totalOrders : 0,
         commission_rate: commissionRate,
         // Additional metrics for dashboard
-        pending_orders: items.filter(item => item.order && item.order.order_status === 'pending').length,
-        confirmed_orders: items.filter(item => item.order && item.order.order_status === 'confirmed').length,
+        pending_orders: items.filter(item => item.item_status === 'pending').length,
+        confirmed_orders: items.filter(item => item.item_status === 'confirmed').length,
         delivered_orders: deliveredItems.length,
       };
 
@@ -709,6 +721,126 @@ export class AnalyticsAPI {
         success: false,
         error: error.message || 'Unknown error in vendor financial summary',
         data: null,
+      };
+    }
+  }
+
+  /**
+   * Get day-wise analytics for a vendor (last 30 days)
+   */
+  static async getVendorDayWiseAnalytics(vendorId: string, days: number = 30): Promise<ApiResponse<any[]>> {
+    try {
+      // Calculate date range
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(endDate.getDate() - days);
+      
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+
+      // Get order items for the date range
+      const { data: orderItems, error: orderError } = await supabase
+        .from('order_items')
+        .select(`
+          line_total,
+          unit_price,
+          quantity,
+          item_status,
+          created_at,
+          orders!inner (
+            order_status,
+            created_at,
+            id
+          )
+        `)
+        .eq('vendor_id', vendorId)
+        .gte('orders.created_at', startDateStr)
+        .lte('orders.created_at', endDateStr + 'T23:59:59');
+
+      if (orderError) {
+        console.error('Error fetching order items for day-wise analytics:', orderError);
+        return {
+          success: false,
+          error: 'Failed to fetch order data: ' + orderError.message
+        };
+      }
+
+      // Group data by date
+      const dailyData = new Map();
+      
+      // Initialize all dates in range with zero values
+      for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+        const dateKey = d.toISOString().split('T')[0];
+        dailyData.set(dateKey, {
+          date: dateKey,
+          net_sales: 0,
+          net_earnings: 0,
+          net_orders: 0,
+          pending_orders: 0,
+          confirmed_orders: 0,
+          delivered_orders: 0,
+          total_commission: 0,
+          order_ids: new Set()
+        });
+      }
+
+      // Process order items
+      const commissionRate = 0.15; // Default 15% commission
+      
+      (orderItems || []).forEach(item => {
+        // Handle orders relationship - it could be an array or single object
+        const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
+        if (!order) return;
+        
+        const orderDate = order.created_at.split('T')[0];
+        const dayData = dailyData.get(orderDate);
+        
+        if (dayData) {
+          // Add unique orders
+          dayData.order_ids.add(order.id);
+          
+          // Calculate metrics based on item status
+          if (item.item_status === 'delivered') {
+            dayData.net_sales += parseFloat(item.line_total || 0);
+            const commission = parseFloat(item.line_total || 0) * commissionRate;
+            dayData.total_commission += commission;
+            dayData.net_earnings += (parseFloat(item.line_total || 0) - commission);
+            dayData.delivered_orders++;
+          } else if (item.item_status === 'confirmed') {
+            dayData.confirmed_orders++;
+          } else if (item.item_status === 'pending') {
+            dayData.pending_orders++;
+          }
+        }
+      });
+
+      // Convert to array and calculate final metrics
+      const result = Array.from(dailyData.values()).map(day => ({
+        date: day.date,
+        net_sales: Math.round(day.net_sales * 100) / 100,
+        net_earnings: Math.round(day.net_earnings * 100) / 100,
+        net_orders: day.order_ids.size,
+        pending_orders: day.pending_orders,
+        confirmed_orders: day.confirmed_orders,
+        delivered_orders: day.delivered_orders,
+        total_commission: Math.round(day.total_commission * 100) / 100,
+        // Calculate day-over-day growth (basic)
+        day_name: new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' })
+      }));
+
+      // Sort by date (newest first)
+      result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      return {
+        success: true,
+        data: result,
+        message: `Retrieved day-wise analytics for ${days} days`
+      };
+
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch day-wise analytics'
       };
     }
   }
@@ -1590,9 +1722,19 @@ export class OrderAPI {
     delivery_date: string;
   }): Promise<ApiResponse<any>> {
     try {
+      // Start a database transaction to ensure atomicity
+      console.log('Starting order creation process...');
+
+      // Generate unique order number
+      const timestamp = Date.now();
+      const randomSuffix = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+      const orderNumber = `TRY${timestamp}${randomSuffix}`;
+
+      // Create order without triggering wallet sync yet
       const { data: order, error: orderError } = await supabase
         .from('orders')
         .insert([{
+          order_number: orderNumber,
           customer_id: orderData.customerId,
           delivery_address_id: orderData.delivery_address_id,
           subtotal: orderData.subtotal,
@@ -1613,14 +1755,19 @@ export class OrderAPI {
         .select()
         .single();
 
-      if (orderError) throw orderError;
+      if (orderError) {
+        console.error('Order creation failed:', orderError);
+        throw orderError;
+      }
+
+      console.log('Order created successfully:', order.id);
 
       // Enhanced order items creation with quality information fetching
       const orderItems = await Promise.all(orderData.items.map(async (item) => {
-        let qualityName = item.qualityName;
+        let qualityName = item.quality_type_name;
 
         // If quality name is missing, fetch it from the database
-        if (!qualityName && item.productId) {
+        if (!qualityName && item.vendor_product_id) {
           try {
             const { data: productData, error: productError } = await supabase
               .from('vendor_products')
@@ -1628,7 +1775,7 @@ export class OrderAPI {
                     quality_type_id,
                     category_qualities:quality_type_id(quality_name)
                   `)
-              .eq('id', item.productId)
+              .eq('id', item.vendor_product_id)
               .single();
 
             if (!productError && productData?.category_qualities && Array.isArray(productData.category_qualities) && productData.category_qualities.length > 0) {
@@ -1637,29 +1784,126 @@ export class OrderAPI {
               qualityName = (productData.category_qualities as any).quality_name;
             }
           } catch (error) {
-            console.warn('Failed to fetch quality information for product:', item.productId);
+            console.warn('Failed to fetch quality information for product:', item.vendor_product_id);
           }
         }
 
-        return {
+        console.log('Processing cart item:', item);
+        
+        // Validate required fields - items now come pre-transformed from checkout
+        if (!item.vendor_id || !item.vendor_product_id || !item.product_name || !item.unit_price || !item.quantity) {
+          console.error('Missing required fields in cart item:', {
+            vendor_id: item.vendor_id,
+            vendor_product_id: item.vendor_product_id,
+            product_name: item.product_name,
+            unit_price: item.unit_price,
+            quantity: item.quantity
+          });
+          throw new Error(`Invalid cart item: missing required fields`);
+        }
+
+        // Check if vendor exists
+        const { data: vendorExists, error: vendorError } = await supabase
+          .from('vendors')
+          .select('id')
+          .eq('id', item.vendor_id)
+          .single();
+
+        if (vendorError || !vendorExists) {
+          console.error('Vendor not found:', item.vendor_id, vendorError);
+          throw new Error(`Vendor ${item.vendor_id} not found`);
+        }
+
+        // Check if product exists
+        const { data: productExists, error: productError } = await supabase
+          .from('vendor_products')
+          .select('id, vendor_id')
+          .eq('id', item.vendor_product_id)
+          .single();
+
+        if (productError || !productExists) {
+          console.error('Product not found:', item.vendor_product_id, productError);
+          throw new Error(`Product ${item.vendor_product_id} not found`);
+        }
+
+        // Verify product belongs to vendor
+        if (productExists.vendor_id !== item.vendor_id) {
+          console.error('Product-vendor mismatch:', {
+            productId: item.vendor_product_id,
+            cartVendorId: item.vendor_id,
+            actualVendorId: productExists.vendor_id
+          });
+          throw new Error(`Product ${item.vendor_product_id} does not belong to vendor ${item.vendor_id}`);
+        }
+        
+        // Create order item with exact field names from schema - use the transformed item directly
+        const orderItem = {
           order_id: order.id,
-          vendor_id: item.vendorId,
-          vendor_product_id: item.productId,
-          product_name: item.name,
-          product_description: `${item.brandName || ''} ${item.modelName || ''}`.trim(),
-          category_name: null, // Will be populated by trigger or subsequent update
-          quality_type_name: qualityName || null,
+          vendor_id: item.vendor_id,
+          vendor_product_id: item.vendor_product_id,
+          product_name: item.product_name,
+          product_description: item.product_description || null,
+          category_name: null,
+          quality_type_name: item.quality_type_name || qualityName || null,
           quantity: item.quantity,
-          unit_price: item.price,
-          line_total: item.price * item.quantity,
-          warranty_months: item.warranty || 0,
-          estimated_delivery_days: item.deliveryTime || 3,
-          smartphone_model_id: null, // Can be populated if we have model ID in cart
+          unit_price: parseFloat(item.unit_price.toString()),
+          line_total: parseFloat(item.line_total.toString()),
+          warranty_months: item.warranty_months || 0,
+          estimated_delivery_days: item.estimated_delivery_days || 3,
+          smartphone_model_id: null,
+          item_status: 'pending'
         };
+        
+        console.log('Created order item object:', orderItem);
+        return orderItem;
       }));
 
-      const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
-      if (itemsError) throw itemsError;
+      console.log('Attempting to insert order items:', orderItems);
+      
+      // Use a direct insert with explicit field specification
+      for (let i = 0; i < orderItems.length; i++) {
+        const item = orderItems[i];
+        console.log(`Inserting order item ${i + 1}/${orderItems.length}:`, item);
+        
+        // Insert with all fields to avoid trigger field mapping issues
+        const insertData = {
+          order_id: item.order_id,
+          vendor_id: item.vendor_id,
+          vendor_product_id: item.vendor_product_id,
+          product_name: item.product_name,
+          product_description: item.product_description,
+          quality_type_name: item.quality_type_name,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          line_total: item.line_total,
+          warranty_months: item.warranty_months,
+          estimated_delivery_days: item.estimated_delivery_days,
+          item_status: 'pending'
+        };
+
+        console.log('Final insert payload:', insertData);
+
+        // Try with minimal required fields only to bypass schema cache issues
+        const { error: itemError } = await supabase
+          .from('order_items')
+          .insert({
+            order_id: insertData.order_id,
+            vendor_id: insertData.vendor_id,
+            vendor_product_id: insertData.vendor_product_id,
+            product_name: insertData.product_name,
+            quantity: insertData.quantity,
+            unit_price: insertData.unit_price,
+            line_total: insertData.line_total,
+            item_status: 'pending'
+          });
+          
+        if (itemError) {
+          console.error(`Error inserting order item ${i + 1}:`, itemError);
+          throw itemError;
+        } else {
+          console.log(`Successfully inserted order item ${i + 1}`);
+        }
+      }
 
       return {
         success: true,
@@ -1684,6 +1928,64 @@ export class TryodoAPI {
   static Comparison = ComparisonAPI;
   static Analytics = AnalyticsAPI;
   static Order = OrderAPI;
+
+  /**
+   * Calculate final customer price with upside markup
+   */
+  static async calculateCustomerPrice(
+    vendorId: string,
+    qualityId: string,
+    basePrice: number
+  ): Promise<number> {
+    try {
+      const result = await CommissionAPI.calculatePricingBreakdown(vendorId, qualityId, basePrice);
+      
+      if (result.success && result.data) {
+        return result.data.finalSellingPrice;
+      }
+      
+      // Fallback to base price if calculation fails
+      console.warn('Failed to calculate upside pricing, using base price:', result.error);
+      return basePrice;
+    } catch (error) {
+      console.warn('Error calculating customer price, using base price:', error);
+      return basePrice;
+    }
+  }
+
+  /**
+   * Add final customer prices to a list of products
+   */
+  static async enrichProductsWithFinalPrices(products: any[]): Promise<any[]> {
+    const enrichedProducts = await Promise.all(
+      products.map(async (product) => {
+        try {
+          const finalPrice = await TryodoAPI.calculateCustomerPrice(
+            product.vendor_id,
+            product.quality_type_id,
+            product.price
+          );
+          
+          return {
+            ...product,
+            final_price: finalPrice,
+            price_markup: finalPrice - product.price,
+            has_upside: finalPrice > product.price
+          };
+        } catch (error) {
+          console.warn('Error enriching product with final price:', error);
+          return {
+            ...product,
+            final_price: product.price,
+            price_markup: 0,
+            has_upside: false
+          };
+        }
+      })
+    );
+    
+    return enrichedProducts;
+  }
 
   /**
    * Health check endpoint
@@ -2733,14 +3035,11 @@ export class CommissionAPI {
 
 export class PayoutAPI {
   /**
-   * Get all payouts with filtering
+   * Get payouts for vendor or admin
    */
   static async getPayouts(filters?: {
-    recipientType?: 'vendor' | 'delivery_partner';
-    recipientId?: string;
+    vendorId?: string;
     status?: string;
-    startDate?: string;
-    endDate?: string;
     limit?: number;
     offset?: number;
   }): Promise<ApiResponse<any[]>> {
@@ -2749,32 +3048,32 @@ export class PayoutAPI {
         .from('payouts')
         .select(`
           *,
-          processed_by_profile:profiles(full_name)
+          vendor:vendors!recipient_id(
+            id,
+            business_name,
+            profile:profiles(full_name, phone)
+          ),
+          processed_by_profile:profiles!processed_by(
+            full_name
+          )
         `)
+        .eq('recipient_type', 'vendor')
         .order('created_at', { ascending: false });
 
-      if (filters) {
-        if (filters.recipientType) {
-          query = query.eq('recipient_type', filters.recipientType);
-        }
-        if (filters.recipientId) {
-          query = query.eq('recipient_id', filters.recipientId);
-        }
-        if (filters.status) {
-          query = query.eq('payout_status', filters.status);
-        }
-        if (filters.startDate) {
-          query = query.gte('created_at', filters.startDate);
-        }
-        if (filters.endDate) {
-          query = query.lte('created_at', filters.endDate);
-        }
-        if (filters.limit) {
-          query = query.limit(filters.limit);
-        }
-        if (filters.offset) {
-          query = query.range(filters.offset, filters.offset + (filters.limit || 50) - 1);
-        }
+      if (filters?.vendorId) {
+        query = query.eq('recipient_id', filters.vendorId);
+      }
+
+      if (filters?.status) {
+        query = query.eq('payout_status', filters.status);
+      }
+
+      if (filters?.limit) {
+        query = query.limit(filters.limit);
+      }
+
+      if (filters?.offset) {
+        query = query.range(filters.offset, filters.offset + (filters.limit || 50) - 1);
       }
 
       const { data, error } = await query;
@@ -2795,7 +3094,37 @@ export class PayoutAPI {
   }
 
   /**
-   * Create a new payout
+   * Create payout request for vendor
+   */
+  static async createPayoutRequest(
+    vendorId: string,
+    amount: number,
+    payoutMethod: string = 'bank_transfer'
+  ): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase.rpc('create_vendor_payout_request', {
+        p_vendor_id: vendorId,
+        p_amount: amount,
+        p_payout_method: payoutMethod
+      });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: { payout_id: data },
+        message: 'Payout request created successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to create payout request'
+      };
+    }
+  }
+
+  /**
+   * Create payout (admin function)
    */
   static async createPayout(payoutData: {
     recipientType: 'vendor' | 'delivery_partner';
@@ -2804,40 +3133,34 @@ export class PayoutAPI {
     payoutMethod: 'bank_transfer' | 'upi' | 'cash' | 'cheque';
     periodStart: string;
     periodEnd: string;
-    includedTransactions?: string[];
-    scheduledDate?: string;
-    bankDetails?: any;
+    scheduledDate: string;
     notes?: string;
     processedBy: string;
   }): Promise<ApiResponse<any>> {
     try {
-      // Generate unique payout number with microseconds and random component
+      // Generate unique payout number
       const now = new Date();
-      const timestamp = now.toISOString().replace(/[-:T.]/g, '').slice(0, 14); // YYYYMMDDHHMMSS
-      const microseconds = now.getTime().toString().slice(-6);
+      const timestamp = now.toISOString().replace(/[-:T.]/g, '').slice(0, 14);
       const randomSuffix = Math.floor(Math.random() * 999999).toString().padStart(6, '0');
-      const recipientSuffix = payoutData.recipientId.slice(0, 8);
+      const payoutNumber = `PAYOUT-${timestamp}-${randomSuffix}`;
 
-      const payoutNumber = `PAY-${timestamp}-${microseconds}-${recipientSuffix}-${randomSuffix}`;
-
+      // Create payout record
       const { data, error } = await supabase
         .from('payouts')
-        .insert([{
+        .insert({
           payout_number: payoutNumber,
           recipient_type: payoutData.recipientType,
           recipient_id: payoutData.recipientId,
           payout_amount: payoutData.payoutAmount,
           payout_method: payoutData.payoutMethod,
+          payout_status: 'pending',
           period_start: payoutData.periodStart,
           period_end: payoutData.periodEnd,
-          included_transactions: payoutData.includedTransactions,
           scheduled_date: payoutData.scheduledDate,
-          bank_details: payoutData.bankDetails,
           notes: payoutData.notes,
           processed_by: payoutData.processedBy,
-          payout_status: 'pending',
-          transaction_count: payoutData.includedTransactions?.length || 0
-        }])
+          transaction_count: 0
+        })
         .select()
         .single();
 
@@ -2845,7 +3168,7 @@ export class PayoutAPI {
 
       return {
         success: true,
-        data,
+        data: data,
         message: 'Payout created successfully'
       };
     } catch (error: any) {
@@ -2857,13 +3180,45 @@ export class PayoutAPI {
   }
 
   /**
+   * Process payout (admin function)
+   */
+  static async processPayout(
+    payoutId: string,
+    processedBy: string,
+    paymentReference?: string,
+    notes?: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase.rpc('process_vendor_payout', {
+        p_payout_id: payoutId,
+        p_processed_by: processedBy,
+        p_payment_reference: paymentReference,
+        p_notes: notes
+      });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data,
+        message: 'Payout processed successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to process payout'
+      };
+    }
+  }
+
+  /**
    * Update payout status
    */
   static async updatePayoutStatus(
     payoutId: string,
-    status: 'processing' | 'completed' | 'failed' | 'cancelled',
-    paymentReference?: string,
-    processedBy?: string
+    status: string,
+    notes?: string,
+    userId?: string
   ): Promise<ApiResponse<any>> {
     try {
       const updateData: any = {
@@ -2871,12 +3226,13 @@ export class PayoutAPI {
         updated_at: new Date().toISOString()
       };
 
-      if (status === 'processing') {
+      if (notes) updateData.notes = notes;
+      if (userId && status === 'processing') {
+        updateData.processed_by = userId;
         updateData.processed_date = new Date().toISOString();
-        updateData.processed_by = processedBy;
-      } else if (status === 'completed') {
+      }
+      if (status === 'completed') {
         updateData.completed_date = new Date().toISOString();
-        updateData.payment_reference = paymentReference;
       }
 
       const { data, error } = await supabase
@@ -2890,7 +3246,7 @@ export class PayoutAPI {
 
       return {
         success: true,
-        data,
+        data: data,
         message: `Payout ${status} successfully`
       };
     } catch (error: any) {
@@ -2902,92 +3258,64 @@ export class PayoutAPI {
   }
 
   /**
-   * Calculate pending payout amount for a recipient
+   * Get vendor payout summary
    */
-  static async calculatePendingPayout(
-    recipientType: 'vendor' | 'delivery_partner',
-    recipientId: string,
-    periodStart?: string,
-    periodEnd?: string
-  ): Promise<ApiResponse<any>> {
+  static async getVendorPayoutSummary(vendorId: string): Promise<ApiResponse<any>> {
     try {
-      let data, error;
-
-      // Wallet tables removed - calculate from transactions instead
-      if (recipientType === 'vendor') {
-        // Calculate from order items and transactions
-        const { data: orderItems } = await supabase
-          .from('order_items')
-          .select('line_total, commission_amount')
-          .eq('vendor_id', recipientId)
-          .eq('item_status', 'delivered');
-
-        const totalEarned = orderItems?.reduce((sum, item) => sum + (item.line_total || 0), 0) || 0;
-        const totalCommission = orderItems?.reduce((sum, item) => sum + (item.commission_amount || 0), 0) || 0;
-
-        data = {
-          available_balance: totalEarned - totalCommission,
-          total_earned: totalEarned,
-          total_paid_out: 0
-        };
-      } else {
-        // Calculate from delivery earnings
-        const { data: deliveries } = await supabase
-          .from('deliveries')
-          .select('delivery_fee, tip_amount')
-          .eq('delivery_partner_id', recipientId)
-          .eq('delivery_status', 'completed');
-
-        const totalEarned = deliveries?.reduce((sum, delivery) => sum + (delivery.delivery_fee || 0) + (delivery.tip_amount || 0), 0) || 0;
-
-        data = {
-          available_balance: totalEarned,
-          total_earned: totalEarned,
-          total_paid_out: 0
-        };
-      }
+      const { data, error } = await supabase.rpc('get_vendor_payout_summary', {
+        p_vendor_id: vendorId
+      });
 
       if (error) throw error;
 
       return {
         success: true,
-        data: {
-          availableBalance: data.available_balance,
-          totalEarned: data.total_earned,
-          totalPaidOut: data.total_paid_out,
-          pendingAmount: data.available_balance
-        },
-        message: 'Pending payout calculated successfully'
+        data: data?.[0] || {},
+        message: 'Vendor payout summary retrieved successfully'
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to calculate pending payout'
+        error: error.message || 'Failed to get vendor payout summary'
       };
     }
   }
 
   /**
-   * Get payout analytics and statistics
+   * Get admin payout dashboard data
+   */
+  static async getAdminPayoutDashboard(): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase.rpc('get_admin_payout_dashboard');
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data?.[0] || {},
+        message: 'Admin payout dashboard data retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get admin payout dashboard data'
+      };
+    }
+  }
+
+  /**
+   * Get payout analytics
    */
   static async getPayoutAnalytics(filters?: {
     recipientType?: 'vendor' | 'delivery_partner';
-    recipientId?: string;
     startDate?: string;
     endDate?: string;
   }): Promise<ApiResponse<any>> {
     try {
-      let query = supabase
-        .from('payouts')
-        .select('payout_status, payout_amount, payout_method, recipient_type, created_at');
+      let query = supabase.from('payouts').select('*');
 
-      // Apply filters
       if (filters?.recipientType) {
         query = query.eq('recipient_type', filters.recipientType);
-      }
-
-      if (filters?.recipientId) {
-        query = query.eq('recipient_id', filters.recipientId);
       }
 
       if (filters?.startDate) {
@@ -3002,227 +3330,105 @@ export class PayoutAPI {
 
       if (error) throw error;
 
+      const payouts = data || [];
+
       // Calculate analytics
-      const analytics = {
-        totalPayouts: data?.length || 0,
-        totalAmount: data?.reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
+      const totalPayouts = payouts.length;
+      const totalAmount = payouts.reduce((sum, p) => sum + p.payout_amount, 0);
 
-        // Status breakdown
-        statusBreakdown: {
-          pending: data?.filter(p => p.payout_status === 'pending').length || 0,
-          processing: data?.filter(p => p.payout_status === 'processing').length || 0,
-          completed: data?.filter(p => p.payout_status === 'completed').length || 0,
-          failed: data?.filter(p => p.payout_status === 'failed').length || 0,
-          cancelled: data?.filter(p => p.payout_status === 'cancelled').length || 0,
-        },
-
-        // Amount breakdown by status
-        amountBreakdown: {
-          pending: data?.filter(p => p.payout_status === 'pending')
-            .reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
-          processing: data?.filter(p => p.payout_status === 'processing')
-            .reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
-          completed: data?.filter(p => p.payout_status === 'completed')
-            .reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
-          failed: data?.filter(p => p.payout_status === 'failed')
-            .reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
-        },
-
-        // Method breakdown
-        methodBreakdown: {
-          bank_transfer: data?.filter(p => p.payout_method === 'bank_transfer').length || 0,
-          upi: data?.filter(p => p.payout_method === 'upi').length || 0,
-          cash: data?.filter(p => p.payout_method === 'cash').length || 0,
-          cheque: data?.filter(p => p.payout_method === 'cheque').length || 0,
-        },
-
-        // Recipient type breakdown
-        recipientTypeBreakdown: {
-          vendor: data?.filter(p => p.recipient_type === 'vendor').length || 0,
-          delivery_partner: data?.filter(p => p.recipient_type === 'delivery_partner').length || 0,
-        },
-
-        // Success rate
-        successRate: data?.length ?
-          ((data.filter(p => p.payout_status === 'completed').length / data.length) * 100).toFixed(2) : 0,
-
-        // Average payout amount
-        averageAmount: data?.length ?
-          (data.reduce((sum, p) => sum + Number(p.payout_amount), 0) / data.length).toFixed(2) : 0,
-
-        // Monthly trend (last 12 months)
-        monthlyTrend: this.calculateMonthlyTrend(data || [])
+      const statusBreakdown = {
+        pending: payouts.filter(p => p.payout_status === 'pending').length,
+        processing: payouts.filter(p => p.payout_status === 'processing').length,
+        completed: payouts.filter(p => p.payout_status === 'completed').length,
+        failed: payouts.filter(p => p.payout_status === 'failed').length,
+        cancelled: payouts.filter(p => p.payout_status === 'cancelled').length,
       };
+
+      const amountBreakdown = {
+        pending: payouts.filter(p => p.payout_status === 'pending').reduce((sum, p) => sum + p.payout_amount, 0),
+        processing: payouts.filter(p => p.payout_status === 'processing').reduce((sum, p) => sum + p.payout_amount, 0),
+        completed: payouts.filter(p => p.payout_status === 'completed').reduce((sum, p) => sum + p.payout_amount, 0),
+        failed: payouts.filter(p => p.payout_status === 'failed').reduce((sum, p) => sum + p.payout_amount, 0),
+      };
+
+      const methodBreakdown = {
+        bank_transfer: payouts.filter(p => p.payout_method === 'bank_transfer').length,
+        upi: payouts.filter(p => p.payout_method === 'upi').length,
+        cash: payouts.filter(p => p.payout_method === 'cash').length,
+        cheque: payouts.filter(p => p.payout_method === 'cheque').length,
+      };
+
+      const recipientTypeBreakdown = {
+        vendor: payouts.filter(p => p.recipient_type === 'vendor').length,
+        delivery_partner: payouts.filter(p => p.recipient_type === 'delivery_partner').length,
+      };
+
+      const successRate = totalPayouts > 0 ? 
+        ((statusBreakdown.completed / totalPayouts) * 100).toFixed(1) : '0';
+
+      const averageAmount = totalPayouts > 0 ? 
+        (totalAmount / totalPayouts).toFixed(2) : '0';
+
+      // Monthly trend (simplified for now)
+      const monthlyTrend = [];
+      const now = new Date();
+      for (let i = 5; i >= 0; i--) {
+        const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const monthStart = date.toISOString().split('T')[0];
+        const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0).toISOString().split('T')[0];
+        
+        const monthPayouts = payouts.filter(p => {
+          const payoutDate = p.created_at.split('T')[0];
+          return payoutDate >= monthStart && payoutDate <= monthEnd;
+        });
+
+        monthlyTrend.push({
+          month: date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+          totalPayouts: monthPayouts.length,
+          totalAmount: monthPayouts.reduce((sum, p) => sum + p.payout_amount, 0),
+          completedPayouts: monthPayouts.filter(p => p.payout_status === 'completed').length,
+          completedAmount: monthPayouts.filter(p => p.payout_status === 'completed').reduce((sum, p) => sum + p.payout_amount, 0),
+        });
+      }
 
       return {
         success: true,
-        data: analytics,
+        data: {
+          totalPayouts,
+          totalAmount,
+          statusBreakdown,
+          amountBreakdown,
+          methodBreakdown,
+          recipientTypeBreakdown,
+          successRate,
+          averageAmount,
+          monthlyTrend,
+        },
         message: 'Payout analytics retrieved successfully'
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to fetch payout analytics'
+        error: error.message || 'Failed to get payout analytics'
       };
     }
   }
 
   /**
-   * Get payout summary for dashboard
-   */
-  static async getPayoutSummary(filters?: {
-    recipientType?: 'vendor' | 'delivery_partner';
-    period?: 'today' | 'week' | 'month' | 'year';
-  }): Promise<ApiResponse<any>> {
-    try {
-      let query = supabase
-        .from('payouts')
-        .select('payout_status, payout_amount, recipient_type, created_at');
-
-      if (filters?.recipientType) {
-        query = query.eq('recipient_type', filters.recipientType);
-      }
-
-      // Apply date filter
-      if (filters?.period) {
-        const now = new Date();
-        let startDate: Date;
-
-        switch (filters.period) {
-          case 'today':
-            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            break;
-          case 'week':
-            startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-            break;
-          case 'month':
-            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-            break;
-          case 'year':
-            startDate = new Date(now.getFullYear(), 0, 1);
-            break;
-          default:
-            startDate = new Date(0);
-        }
-
-        query = query.gte('created_at', startDate.toISOString());
-      }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-
-      const summary = {
-        totalPayouts: data?.length || 0,
-        totalAmount: data?.reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
-        pendingPayouts: data?.filter(p => p.payout_status === 'pending').length || 0,
-        pendingAmount: data?.filter(p => p.payout_status === 'pending')
-          .reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
-        completedPayouts: data?.filter(p => p.payout_status === 'completed').length || 0,
-        completedAmount: data?.filter(p => p.payout_status === 'completed')
-          .reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
-        failedPayouts: data?.filter(p => p.payout_status === 'failed').length || 0,
-        failedAmount: data?.filter(p => p.payout_status === 'failed')
-          .reduce((sum, p) => sum + Number(p.payout_amount), 0) || 0,
-        vendorPayouts: data?.filter(p => p.recipient_type === 'vendor').length || 0,
-        deliveryPartnerPayouts: data?.filter(p => p.recipient_type === 'delivery_partner').length || 0,
-      };
-
-      return {
-        success: true,
-        data: summary,
-        message: 'Payout summary retrieved successfully'
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to fetch payout summary'
-      };
-    }
-  }
-
-  /**
-   * Create bulk payouts for multiple recipients
-   */
-  static async createBulkPayouts(payouts: Array<{
-    recipientType: 'vendor' | 'delivery_partner';
-    recipientId: string;
-    payoutAmount: number;
-    payoutMethod: 'bank_transfer' | 'upi' | 'cash' | 'cheque';
-    periodStart: string;
-    periodEnd: string;
-    includedTransactions?: string[];
-    scheduledDate?: string;
-    bankDetails?: any;
-    notes?: string;
-  }>, processedBy: string): Promise<ApiResponse<any[]>> {
-    try {
-      const results = [];
-      const errors = [];
-
-      for (const payoutData of payouts) {
-        const result = await this.createPayout({
-          ...payoutData,
-          processedBy
-        });
-
-        if (result.success) {
-          results.push(result.data);
-        } else {
-          errors.push({
-            recipientId: payoutData.recipientId,
-            error: result.error
-          });
-        }
-      }
-
-      return {
-        success: errors.length === 0,
-        data: results,
-        message: `Created ${results.length} payouts successfully${errors.length > 0 ? `, ${errors.length} failed` : ''}`,
-        error: errors.length > 0 ? `Some payouts failed: ${JSON.stringify(errors)}` : undefined
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to create bulk payouts'
-      };
-    }
-  }
-
-  /**
-   * Approve or reject a payout
+   * Approve or reject payout (admin function)
    */
   static async approveRejectPayout(
     payoutId: string,
     action: 'approve' | 'reject',
-    approvedBy: string,
-    comments?: string
+    processedBy: string,
+    notes?: string
   ): Promise<ApiResponse<any>> {
     try {
-      const newStatus = action === 'approve' ? 'processing' : 'cancelled';
-
-      const { data, error } = await supabase
-        .from('payouts')
-        .update({
-          payout_status: newStatus,
-          processed_by: approvedBy,
-          processed_date: new Date().toISOString(),
-          notes: comments || null,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', payoutId)
-        .eq('payout_status', 'pending') // Only allow approval/rejection of pending payouts
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      return {
-        success: true,
-        data,
-        message: `Payout ${action}d successfully`
-      };
+      if (action === 'approve') {
+        return this.processPayout(payoutId, processedBy, undefined, notes);
+      } else {
+        return this.updatePayoutStatus(payoutId, 'cancelled', notes, processedBy);
+      }
     } catch (error: any) {
       return {
         success: false,
@@ -3230,103 +3436,303 @@ export class PayoutAPI {
       };
     }
   }
+}
 
+export class WalletAPI {
   /**
-   * Get eligible recipients for automatic payouts
+   * Get vendor wallet data from database
    */
-  static async getEligibleRecipients(
-    recipientType: 'vendor' | 'delivery_partner',
-    filters?: {
-      minAmount?: number;
-      maxAmount?: number;
-    }
-  ): Promise<ApiResponse<any[]>> {
+  static async getVendorWalletData(vendorId: string): Promise<ApiResponse<any>> {
     try {
-      const recipientTable = recipientType === 'vendor' ? 'vendors' : 'delivery_partners';
-      const walletTable = recipientType === 'vendor' ? 'vendor_wallets' : 'delivery_partner_wallets';
+      // Fix the date calculations
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      
+      // Fix week calculation - create a new date object to avoid mutation
+      const weekStartDate = new Date(now);
+      weekStartDate.setDate(now.getDate() - now.getDay()); // Go back to Sunday
+      weekStartDate.setHours(0, 0, 0, 0); // Start of day
+      const weekStart = weekStartDate.toISOString().split('T')[0];
+      
+      // Month start calculation
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
 
-      let query = supabase
-        .from(recipientTable)
+      console.log('Date calculations:', {
+        today,
+        weekStart,
+        monthStart,
+        currentDay: now.getDay() // 0 = Sunday, 1 = Monday, etc.
+      });
+
+      // Get financial summary first
+      const financialSummary = await AnalyticsAPI.getVendorFinancialSummary(vendorId);
+      
+      // Get delivered orders for time-based calculations
+      const { data: deliveredItems, error: deliveredError } = await supabase
+        .from('order_items')
         .select(`
-          id,
-          profile_id,
-          ${recipientType === 'vendor' ? 'business_name' : ''},
-          profiles!${recipientTable}_profile_id_fkey(
-            full_name,
-            email,
-            phone
-          ),
-          ${walletTable}!${recipientTable}_id_fkey(
-            available_balance,
-            minimum_payout_amount,
-            auto_payout_enabled,
-            last_payout_date
+          line_total,
+          created_at,
+          orders!inner (
+            order_status,
+            created_at
           )
         `)
-        .eq('is_active', true);
+        .eq('vendor_id', vendorId)
+        .eq('orders.order_status', 'delivered');
 
-      const { data: recipients, error } = await query;
+      if (deliveredError) {
+        console.error('Error fetching delivered orders:', deliveredError);
+      }
 
-      if (error) throw error;
+      const deliveredOrderItems = deliveredItems || [];
+      
+      console.log('Delivered items found:', deliveredOrderItems.length);
+      
+      // Debug: Log some sample dates
+      if (deliveredOrderItems.length > 0) {
+        console.log('Sample order dates:', deliveredOrderItems.slice(0, 3).map(item => {
+          const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
+          return {
+            order_created: order?.created_at || 'N/A',
+            item_created: item.created_at,
+            line_total: item.line_total
+          };
+        }));
+      }
 
-      // Filter eligible recipients
-      const eligibleRecipients = recipients?.filter(recipient => {
-        const wallet = recipient[walletTable]?.[0];
-        if (!wallet) return false;
+      // Calculate time-based earnings using order creation date (not item creation date)
+      const todayEarnings = deliveredOrderItems
+        .filter(item => {
+          const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
+          if (!order) return false;
+          const orderDate = order.created_at.split('T')[0];
+          return orderDate === today;
+        })
+        .reduce((sum, item) => sum + (item.line_total || 0), 0);
 
-        const availableBalance = Number(wallet.available_balance);
-        const minAmount = filters?.minAmount || Number(wallet.minimum_payout_amount) || 1000;
-        const maxAmount = filters?.maxAmount || 100000;
+      const weekEarnings = deliveredOrderItems
+        .filter(item => {
+          const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
+          if (!order) return false;
+          const orderDate = order.created_at.split('T')[0];
+          return orderDate >= weekStart;
+        })
+        .reduce((sum, item) => sum + (item.line_total || 0), 0);
 
-        return availableBalance >= minAmount && availableBalance <= maxAmount;
-      }) || [];
+      const monthEarnings = deliveredOrderItems
+        .filter(item => {
+          const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
+          if (!order) return false;
+          const orderDate = order.created_at.split('T')[0];
+          return orderDate >= monthStart;
+        })
+        .reduce((sum, item) => sum + (item.line_total || 0), 0);
+
+      console.log('Calculated earnings:', {
+        todayEarnings,
+        weekEarnings,
+        monthEarnings,
+        totalDeliveredItems: deliveredOrderItems.length
+      });
+
+      const walletData = {
+        vendor_id: vendorId,
+        available_balance: financialSummary.success ? financialSummary.data.net_earnings : 0,
+        pending_balance: financialSummary.success ? financialSummary.data.pending_payouts : 0,
+        total_earned: financialSummary.success ? financialSummary.data.total_sales : 0,
+        today_earnings: todayEarnings,
+        week_earnings: weekEarnings,
+        month_earnings: monthEarnings,
+        total_commission_paid: financialSummary.success ? financialSummary.data.total_commission : 0,
+        minimum_payout_amount: 1000,
+        payout_frequency: 'weekly',
+        auto_payout_enabled: false,
+        last_payout_date: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
 
       return {
         success: true,
-        data: eligibleRecipients,
-        message: `Found ${eligibleRecipients.length} eligible recipients`
+        data: walletData,
+        message: 'Vendor wallet data calculated successfully'
       };
+
     } catch (error: any) {
+      console.error('Error calculating vendor wallet data:', error);
       return {
         success: false,
-        error: error.message || 'Failed to fetch eligible recipients'
+        error: error.message || 'Failed to calculate vendor wallet data',
+        data: null
       };
     }
   }
 
   /**
-   * Helper method to calculate monthly trend
+   * Sync wallet balance with order and payout data
    */
-  private static calculateMonthlyTrend(payouts: any[]): any[] {
-    const monthlyData = new Map();
+  static async syncWalletBalance(vendorId: string): Promise<ApiResponse<any>> {
+    try {
+      // Call the database function to sync wallet balance
+      const { data, error } = await supabase.rpc('sync_vendor_wallet_balance', {
+        p_vendor_id: vendorId
+      });
 
-    payouts.forEach(payout => {
-      const date = new Date(payout.created_at);
-      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      if (error) throw error;
 
-      if (!monthlyData.has(monthKey)) {
-        monthlyData.set(monthKey, {
-          month: monthKey,
-          totalPayouts: 0,
-          totalAmount: 0,
-          completedPayouts: 0,
-          completedAmount: 0
-        });
+      return {
+        success: true,
+        data: null,
+        message: 'Wallet balance synchronized successfully'
+      };
+
+    } catch (error: any) {
+      console.error('Error syncing wallet balance:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to sync wallet balance'
+      };
+    }
+  }
+
+  /**
+   * Update wallet payout settings
+   */
+  static async updateWalletSettings(
+    vendorId: string,
+    settings: {
+      minimum_payout_amount?: number;
+      payout_frequency?: 'daily' | 'weekly' | 'monthly';
+      auto_payout_enabled?: boolean;
+      bank_account_number?: string;
+      bank_ifsc_code?: string;
+      bank_account_holder_name?: string;
+      upi_id?: string;
+    }
+  ): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase
+        .from('vendor_wallets')
+        .update(settings)
+        .eq('vendor_id', vendorId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data,
+        message: 'Wallet settings updated successfully'
+      };
+
+    } catch (error: any) {
+      console.error('Error updating wallet settings:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to update wallet settings'
+      };
+    }
+  }
+
+  /**
+   * Get vendor wallet (for backward compatibility)
+   */
+  static async getVendorWallet(vendorId: string): Promise<ApiResponse<any>> {
+    return this.getVendorWalletData(vendorId);
+  }
+
+  /**
+   * Request payout (creates payout request)
+   */
+  static async requestPayout(
+    vendorId: string,
+    amount: number,
+    payoutMethod: 'bank_transfer' | 'upi' = 'bank_transfer'
+  ): Promise<ApiResponse<any>> {
+    try {
+      return await PayoutAPI.createPayoutRequest(vendorId, amount, payoutMethod);
+    } catch (error: any) {
+      console.error('Error requesting payout:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to request payout'
+      };
+    }
+  }
+
+  /**
+   * Get payout history for vendor
+   */
+  static async getPayoutHistory(vendorId: string): Promise<ApiResponse<any[]>> {
+    try {
+      return await PayoutAPI.getPayouts({ vendorId });
+    } catch (error: any) {
+      console.error('Error getting payout history:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to get payout history'
+      };
+    }
+  }
+
+  /**
+   * Get wallet summary with payout info
+   */
+  static async getWalletSummary(vendorId: string): Promise<ApiResponse<any>> {
+    try {
+      const [walletResponse, payoutSummaryResponse] = await Promise.all([
+        this.getVendorWalletData(vendorId),
+        PayoutAPI.getVendorPayoutSummary(vendorId)
+      ]);
+
+      if (!walletResponse.success) {
+        return walletResponse;
       }
 
-      const monthData = monthlyData.get(monthKey);
-      monthData.totalPayouts += 1;
-      monthData.totalAmount += Number(payout.payout_amount);
+      const summary = {
+        ...walletResponse.data,
+        payout_summary: payoutSummaryResponse.success ? payoutSummaryResponse.data : {}
+      };
 
-      if (payout.payout_status === 'completed') {
-        monthData.completedPayouts += 1;
-        monthData.completedAmount += Number(payout.payout_amount);
-      }
-    });
+      return {
+        success: true,
+        data: summary,
+        message: 'Wallet summary retrieved successfully'
+      };
 
-    return Array.from(monthlyData.values())
-      .sort((a, b) => a.month.localeCompare(b.month))
-      .slice(-12); // Last 12 months
+    } catch (error: any) {
+      console.error('Error getting wallet summary:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to get wallet summary'
+      };
+    }
+  }
+
+  /**
+   * Sync all vendor wallets (admin function)
+   */
+  static async syncAllWallets(): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase.rpc('sync_all_vendor_wallets');
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: null,
+        message: 'All vendor wallets synchronized successfully'
+      };
+
+    } catch (error: any) {
+      console.error('Error syncing all wallets:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to sync all wallets'
+      };
+    }
   }
 }
 

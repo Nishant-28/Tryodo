@@ -18,8 +18,8 @@ CREATE TABLE public.cart_items (
   added_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT cart_items_pkey PRIMARY KEY (id),
-  CONSTRAINT cart_items_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.vendor_products(id),
-  CONSTRAINT cart_items_cart_id_fkey FOREIGN KEY (cart_id) REFERENCES public.shopping_carts(id)
+  CONSTRAINT cart_items_cart_id_fkey FOREIGN KEY (cart_id) REFERENCES public.shopping_carts(id),
+  CONSTRAINT cart_items_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.vendor_products(id)
 );
 CREATE TABLE public.categories (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -61,8 +61,8 @@ CREATE TABLE public.commission_analytics (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT commission_analytics_pkey PRIMARY KEY (id),
-  CONSTRAINT commission_analytics_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES public.vendors(id),
-  CONSTRAINT commission_analytics_quality_id_fkey FOREIGN KEY (quality_id) REFERENCES public.category_qualities(id)
+  CONSTRAINT commission_analytics_quality_id_fkey FOREIGN KEY (quality_id) REFERENCES public.category_qualities(id),
+  CONSTRAINT commission_analytics_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES public.vendors(id)
 );
 CREATE TABLE public.commission_rules (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -80,10 +80,10 @@ CREATE TABLE public.commission_rules (
   quality_id uuid,
   smartphone_model_id uuid,
   CONSTRAINT commission_rules_pkey PRIMARY KEY (id),
-  CONSTRAINT commission_rules_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.profiles(id),
-  CONSTRAINT commission_rules_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id),
+  CONSTRAINT commission_rules_smartphone_model_id_fkey FOREIGN KEY (smartphone_model_id) REFERENCES public.smartphone_models(id),
   CONSTRAINT commission_rules_quality_id_fkey FOREIGN KEY (quality_id) REFERENCES public.category_qualities(id),
-  CONSTRAINT commission_rules_smartphone_model_id_fkey FOREIGN KEY (smartphone_model_id) REFERENCES public.smartphone_models(id)
+  CONSTRAINT commission_rules_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id),
+  CONSTRAINT commission_rules_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.profiles(id)
 );
 CREATE TABLE public.customer_addresses (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -122,8 +122,8 @@ CREATE TABLE public.delivery_assignments (
   status character varying DEFAULT 'assigned'::character varying CHECK (status::text = ANY (ARRAY['assigned'::character varying, 'active'::character varying, 'completed'::character varying, 'cancelled'::character varying]::text[])),
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT delivery_assignments_pkey PRIMARY KEY (id),
-  CONSTRAINT delivery_assignments_sector_id_fkey FOREIGN KEY (sector_id) REFERENCES public.sectors(id),
-  CONSTRAINT delivery_assignments_slot_id_fkey FOREIGN KEY (slot_id) REFERENCES public.delivery_slots(id)
+  CONSTRAINT delivery_assignments_slot_id_fkey FOREIGN KEY (slot_id) REFERENCES public.delivery_slots(id),
+  CONSTRAINT delivery_assignments_sector_id_fkey FOREIGN KEY (sector_id) REFERENCES public.sectors(id)
 );
 CREATE TABLE public.delivery_day_end_summaries (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -160,9 +160,9 @@ CREATE TABLE public.delivery_earnings (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT delivery_earnings_pkey PRIMARY KEY (id),
+  CONSTRAINT delivery_earnings_delivery_partner_id_fkey FOREIGN KEY (delivery_partner_id) REFERENCES public.delivery_partners(id),
   CONSTRAINT delivery_earnings_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id),
-  CONSTRAINT delivery_earnings_delivery_partner_order_id_fkey FOREIGN KEY (delivery_partner_order_id) REFERENCES public.delivery_partner_orders(id),
-  CONSTRAINT delivery_earnings_delivery_partner_id_fkey FOREIGN KEY (delivery_partner_id) REFERENCES public.delivery_partners(id)
+  CONSTRAINT delivery_earnings_delivery_partner_order_id_fkey FOREIGN KEY (delivery_partner_order_id) REFERENCES public.delivery_partner_orders(id)
 );
 CREATE TABLE public.delivery_partner_attendance (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -206,8 +206,8 @@ CREATE TABLE public.delivery_partner_earnings (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT delivery_partner_earnings_pkey PRIMARY KEY (id),
-  CONSTRAINT delivery_partner_earnings_delivery_partner_id_fkey FOREIGN KEY (delivery_partner_id) REFERENCES public.delivery_partners(id),
-  CONSTRAINT delivery_partner_earnings_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id)
+  CONSTRAINT delivery_partner_earnings_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id),
+  CONSTRAINT delivery_partner_earnings_delivery_partner_id_fkey FOREIGN KEY (delivery_partner_id) REFERENCES public.delivery_partners(id)
 );
 CREATE TABLE public.delivery_partner_orders (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -234,6 +234,20 @@ CREATE TABLE public.delivery_partner_orders (
   CONSTRAINT delivery_partner_orders_delivery_partner_id_fkey FOREIGN KEY (delivery_partner_id) REFERENCES public.delivery_partners(id),
   CONSTRAINT delivery_partner_orders_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id)
 );
+CREATE TABLE public.delivery_partner_sector_assignments (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  delivery_partner_id uuid NOT NULL,
+  sector_id uuid NOT NULL,
+  slot_id uuid NOT NULL,
+  assigned_date date NOT NULL DEFAULT CURRENT_DATE,
+  is_active boolean DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT delivery_partner_sector_assignments_pkey PRIMARY KEY (id),
+  CONSTRAINT delivery_partner_sector_assignments_sector_id_fkey FOREIGN KEY (sector_id) REFERENCES public.sectors(id),
+  CONSTRAINT delivery_partner_sector_assignments_delivery_partner_id_fkey FOREIGN KEY (delivery_partner_id) REFERENCES public.delivery_partners(id),
+  CONSTRAINT delivery_partner_sector_assignments_slot_id_fkey FOREIGN KEY (slot_id) REFERENCES public.delivery_slots(id)
+);
 CREATE TABLE public.delivery_partner_stats (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   delivery_partner_id uuid NOT NULL UNIQUE,
@@ -253,50 +267,6 @@ CREATE TABLE public.delivery_partner_stats (
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT delivery_partner_stats_pkey PRIMARY KEY (id),
   CONSTRAINT delivery_partner_stats_delivery_partner_id_fkey FOREIGN KEY (delivery_partner_id) REFERENCES public.delivery_partners(id)
-);
-CREATE TABLE public.delivery_partner_wallets (
-  id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  delivery_partner_id uuid NOT NULL UNIQUE,
-  pending_balance numeric DEFAULT 0,
-  available_balance numeric DEFAULT 0,
-  total_earned numeric DEFAULT 0,
-  total_paid_out numeric DEFAULT 0,
-  base_salary numeric DEFAULT 0,
-  incentive_earnings numeric DEFAULT 0,
-  bonus_earnings numeric DEFAULT 0,
-  today_earnings numeric DEFAULT 0,
-  week_earnings numeric DEFAULT 0,
-  month_earnings numeric DEFAULT 0,
-  today_deliveries integer DEFAULT 0,
-  week_deliveries integer DEFAULT 0,
-  month_deliveries integer DEFAULT 0,
-  base_salary_amount numeric DEFAULT 15000,
-  incentive_per_delivery numeric DEFAULT 5.00,
-  minimum_payout_amount numeric DEFAULT 500,
-  auto_payout_enabled boolean DEFAULT false,
-  last_payout_date timestamp with time zone,
-  last_delivery_date timestamp with time zone,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  total_collected numeric NOT NULL DEFAULT 0,
-  cash_in_hand numeric NOT NULL DEFAULT 0,
-  last_settlement_date date,
-  CONSTRAINT delivery_partner_wallets_pkey PRIMARY KEY (id),
-  CONSTRAINT delivery_partner_wallets_delivery_partner_id_fkey FOREIGN KEY (delivery_partner_id) REFERENCES public.delivery_partners(id)
-);
-CREATE TABLE public.delivery_partner_zone_assignments (
-  id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  delivery_partner_id uuid NOT NULL,
-  zone_id uuid NOT NULL,
-  slot_id uuid NOT NULL,
-  assigned_date date NOT NULL DEFAULT CURRENT_DATE,
-  is_active boolean DEFAULT true,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT delivery_partner_zone_assignments_pkey PRIMARY KEY (id),
-  CONSTRAINT delivery_partner_zone_assignments_delivery_partner_id_fkey FOREIGN KEY (delivery_partner_id) REFERENCES public.delivery_partners(id),
-  CONSTRAINT delivery_partner_zone_assignments_zone_id_fkey FOREIGN KEY (zone_id) REFERENCES public.delivery_zones(id),
-  CONSTRAINT delivery_partner_zone_assignments_slot_id_fkey FOREIGN KEY (slot_id) REFERENCES public.delivery_slots(id)
 );
 CREATE TABLE public.delivery_partners (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -343,16 +313,6 @@ CREATE TABLE public.delivery_payment_collections (
   CONSTRAINT delivery_payment_collections_delivery_partner_id_fkey FOREIGN KEY (delivery_partner_id) REFERENCES public.delivery_partners(id),
   CONSTRAINT delivery_payment_collections_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id)
 );
-CREATE TABLE public.delivery_sectors (
-  id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  name character varying NOT NULL,
-  description text,
-  area_polygon USER-DEFINED,
-  is_active boolean DEFAULT true,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT delivery_sectors_pkey PRIMARY KEY (id)
-);
 CREATE TABLE public.delivery_slots (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   sector_id uuid,
@@ -369,42 +329,6 @@ CREATE TABLE public.delivery_slots (
   CONSTRAINT delivery_slots_pkey PRIMARY KEY (id),
   CONSTRAINT delivery_slots_sector_id_fkey FOREIGN KEY (sector_id) REFERENCES public.sectors(id)
 );
-CREATE TABLE public.delivery_zones (
-  id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  name character varying NOT NULL,
-  pincodes ARRAY NOT NULL,
-  is_active boolean DEFAULT true,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT delivery_zones_pkey PRIMARY KEY (id)
-);
-CREATE TABLE public.generic_products (
-  id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  category_id uuid NOT NULL,
-  name character varying NOT NULL,
-  description text,
-  specifications jsonb,
-  official_images ARRAY,
-  is_active boolean DEFAULT true,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT generic_products_pkey PRIMARY KEY (id),
-  CONSTRAINT generic_products_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id)
-);
-CREATE TABLE public.model_category_qualities (
-  id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  smartphone_model_id uuid NOT NULL,
-  category_id uuid NOT NULL,
-  category_quality_id uuid NOT NULL,
-  additional_specs jsonb,
-  is_active boolean DEFAULT true,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT model_category_qualities_pkey PRIMARY KEY (id),
-  CONSTRAINT model_category_qualities_category_quality_id_fkey FOREIGN KEY (category_quality_id) REFERENCES public.category_qualities(id),
-  CONSTRAINT model_category_qualities_smartphone_model_id_fkey FOREIGN KEY (smartphone_model_id) REFERENCES public.smartphone_models(id),
-  CONSTRAINT model_category_qualities_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id)
-);
 CREATE TABLE public.order_deliveries (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   order_id uuid NOT NULL,
@@ -416,15 +340,14 @@ CREATE TABLE public.order_deliveries (
   delivery_status character varying NOT NULL DEFAULT 'delivered'::character varying,
   delivery_time timestamp with time zone,
   CONSTRAINT order_deliveries_pkey PRIMARY KEY (id),
-  CONSTRAINT order_deliveries_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id),
-  CONSTRAINT order_deliveries_delivery_partner_id_fkey FOREIGN KEY (delivery_partner_id) REFERENCES public.delivery_partners(id)
+  CONSTRAINT order_deliveries_delivery_partner_id_fkey FOREIGN KEY (delivery_partner_id) REFERENCES public.delivery_partners(id),
+  CONSTRAINT order_deliveries_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id)
 );
 CREATE TABLE public.order_items (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   order_id uuid NOT NULL,
   vendor_id uuid NOT NULL,
   vendor_product_id uuid,
-  vendor_generic_product_id uuid,
   product_name character varying NOT NULL,
   product_description text,
   category_name character varying,
@@ -444,10 +367,9 @@ CREATE TABLE public.order_items (
   smartphone_model_id uuid,
   CONSTRAINT order_items_pkey PRIMARY KEY (id),
   CONSTRAINT order_items_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id),
+  CONSTRAINT order_items_smartphone_model_id_fkey FOREIGN KEY (smartphone_model_id) REFERENCES public.smartphone_models(id),
   CONSTRAINT order_items_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES public.vendors(id),
-  CONSTRAINT order_items_vendor_product_id_fkey FOREIGN KEY (vendor_product_id) REFERENCES public.vendor_products(id),
-  CONSTRAINT order_items_vendor_generic_product_id_fkey FOREIGN KEY (vendor_generic_product_id) REFERENCES public.vendor_generic_products(id),
-  CONSTRAINT order_items_smartphone_model_id_fkey FOREIGN KEY (smartphone_model_id) REFERENCES public.smartphone_models(id)
+  CONSTRAINT order_items_vendor_product_id_fkey FOREIGN KEY (vendor_product_id) REFERENCES public.vendor_products(id)
 );
 CREATE TABLE public.order_pickups (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -496,10 +418,10 @@ CREATE TABLE public.orders (
   delivery_address_id uuid,
   picked_up_date timestamp without time zone,
   CONSTRAINT orders_pkey PRIMARY KEY (id),
-  CONSTRAINT orders_delivery_address_id_fkey FOREIGN KEY (delivery_address_id) REFERENCES public.customer_addresses(id),
+  CONSTRAINT orders_sector_id_fkey FOREIGN KEY (sector_id) REFERENCES public.sectors(id),
   CONSTRAINT orders_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id),
-  CONSTRAINT orders_slot_id_fkey FOREIGN KEY (slot_id) REFERENCES public.delivery_slots(id),
-  CONSTRAINT orders_sector_id_fkey FOREIGN KEY (sector_id) REFERENCES public.sectors(id)
+  CONSTRAINT orders_delivery_address_id_fkey FOREIGN KEY (delivery_address_id) REFERENCES public.customer_addresses(id),
+  CONSTRAINT orders_slot_id_fkey FOREIGN KEY (slot_id) REFERENCES public.delivery_slots(id)
 );
 CREATE TABLE public.payouts (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -526,25 +448,6 @@ CREATE TABLE public.payouts (
   CONSTRAINT payouts_pkey PRIMARY KEY (id),
   CONSTRAINT payouts_processed_by_fkey FOREIGN KEY (processed_by) REFERENCES public.profiles(id)
 );
-CREATE TABLE public.platform_wallet (
-  id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  total_commission_earned numeric DEFAULT 0,
-  total_transaction_fees numeric DEFAULT 0,
-  total_refunds_processed numeric DEFAULT 0,
-  total_operational_costs numeric DEFAULT 0,
-  today_commission numeric DEFAULT 0,
-  week_commission numeric DEFAULT 0,
-  month_commission numeric DEFAULT 0,
-  year_commission numeric DEFAULT 0,
-  total_transactions_processed integer DEFAULT 0,
-  today_transactions integer DEFAULT 0,
-  week_transactions integer DEFAULT 0,
-  month_transactions integer DEFAULT 0,
-  last_updated timestamp with time zone DEFAULT now(),
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT platform_wallet_pkey PRIMARY KEY (id)
-);
 CREATE TABLE public.profiles (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   user_id uuid UNIQUE,
@@ -558,7 +461,6 @@ CREATE TABLE public.profiles (
   CONSTRAINT profiles_pkey PRIMARY KEY (id),
   CONSTRAINT profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
-
 CREATE TABLE public.sectors (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   city_name character varying NOT NULL,
@@ -569,17 +471,6 @@ CREATE TABLE public.sectors (
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT sectors_pkey PRIMARY KEY (id)
 );
-
-  create index IF not exists idx_sectors_city_active on public.sectors using btree (city_name, is_active) TABLESPACE pg_default;
-
-  create index IF not exists idx_sectors_pincodes on public.sectors using gin (pincodes) TABLESPACE pg_default;
-
-  create trigger update_sectors_updated_at BEFORE
-  update on sectors for EACH row
-  execute FUNCTION update_updated_at_column ();
-
-
-
 CREATE TABLE public.shopping_carts (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   customer_id uuid NOT NULL UNIQUE,
@@ -640,8 +531,8 @@ CREATE TABLE public.transactions (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT transactions_pkey PRIMARY KEY (id),
-  CONSTRAINT transactions_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id),
-  CONSTRAINT transactions_order_item_id_fkey FOREIGN KEY (order_item_id) REFERENCES public.order_items(id)
+  CONSTRAINT transactions_order_item_id_fkey FOREIGN KEY (order_item_id) REFERENCES public.order_items(id),
+  CONSTRAINT transactions_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id)
 );
 CREATE TABLE public.vendor_addresses (
   vendor_id uuid NOT NULL,
@@ -675,11 +566,11 @@ CREATE TABLE public.vendor_commission_overrides (
   quality_id uuid,
   smartphone_model_id uuid,
   CONSTRAINT vendor_commission_overrides_pkey PRIMARY KEY (id),
-  CONSTRAINT vendor_commission_overrides_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES public.vendors(id),
   CONSTRAINT vendor_commission_overrides_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id),
-  CONSTRAINT vendor_commission_overrides_quality_id_fkey FOREIGN KEY (quality_id) REFERENCES public.category_qualities(id),
+  CONSTRAINT vendor_commission_overrides_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES public.vendors(id),
+  CONSTRAINT vendor_commission_overrides_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.profiles(id),
   CONSTRAINT vendor_commission_overrides_smartphone_model_id_fkey FOREIGN KEY (smartphone_model_id) REFERENCES public.smartphone_models(id),
-  CONSTRAINT vendor_commission_overrides_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.profiles(id)
+  CONSTRAINT vendor_commission_overrides_quality_id_fkey FOREIGN KEY (quality_id) REFERENCES public.category_qualities(id)
 );
 CREATE TABLE public.vendor_commissions (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -695,34 +586,9 @@ CREATE TABLE public.vendor_commissions (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT vendor_commissions_pkey PRIMARY KEY (id),
-  CONSTRAINT vendor_commissions_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES public.vendors(id),
   CONSTRAINT vendor_commissions_quality_id_fkey FOREIGN KEY (quality_id) REFERENCES public.category_qualities(id),
+  CONSTRAINT vendor_commissions_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES public.vendors(id),
   CONSTRAINT vendor_commissions_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.profiles(id)
-);
-CREATE TABLE public.vendor_generic_products (
-  id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  vendor_id uuid NOT NULL,
-  generic_product_id uuid NOT NULL,
-  quality_type_id uuid NOT NULL,
-  price numeric NOT NULL CHECK (price > 0::numeric),
-  original_price numeric,
-  discount_percentage integer DEFAULT 0,
-  stock_quantity integer NOT NULL DEFAULT 0,
-  is_in_stock boolean DEFAULT true,
-  low_stock_threshold integer DEFAULT 5,
-  warranty_months integer DEFAULT 0,
-  delivery_time_days integer DEFAULT 3,
-  product_images ARRAY,
-  specifications jsonb,
-  vendor_notes text,
-  is_active boolean DEFAULT true,
-  featured boolean DEFAULT false,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT vendor_generic_products_pkey PRIMARY KEY (id),
-  CONSTRAINT vendor_generic_products_quality_type_id_fkey FOREIGN KEY (quality_type_id) REFERENCES public.category_qualities(id),
-  CONSTRAINT vendor_generic_products_generic_product_id_fkey FOREIGN KEY (generic_product_id) REFERENCES public.generic_products(id),
-  CONSTRAINT vendor_generic_products_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES public.vendors(id)
 );
 CREATE TABLE public.vendor_products (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -745,33 +611,10 @@ CREATE TABLE public.vendor_products (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT vendor_products_pkey PRIMARY KEY (id),
-  CONSTRAINT vendor_products_model_id_fkey FOREIGN KEY (model_id) REFERENCES public.smartphone_models(id),
   CONSTRAINT vendor_products_quality_type_id_fkey FOREIGN KEY (quality_type_id) REFERENCES public.category_qualities(id),
   CONSTRAINT vendor_products_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES public.vendors(id),
-  CONSTRAINT vendor_products_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id)
-);
-CREATE TABLE public.vendor_wallets (
-  id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  vendor_id uuid NOT NULL UNIQUE,
-  pending_balance numeric DEFAULT 0,
-  available_balance numeric DEFAULT 0,
-  reserved_balance numeric DEFAULT 0,
-  total_earned numeric DEFAULT 0,
-  total_paid_out numeric DEFAULT 0,
-  today_earnings numeric DEFAULT 0,
-  week_earnings numeric DEFAULT 0,
-  month_earnings numeric DEFAULT 0,
-  total_commission_paid numeric DEFAULT 0,
-  average_commission_rate numeric DEFAULT 0,
-  minimum_payout_amount numeric DEFAULT 1000,
-  auto_payout_enabled boolean DEFAULT false,
-  payout_frequency character varying DEFAULT 'weekly'::character varying CHECK (payout_frequency::text = ANY (ARRAY['daily'::character varying, 'weekly'::character varying, 'monthly'::character varying]::text[])),
-  last_payout_date timestamp with time zone,
-  last_transaction_date timestamp with time zone,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT vendor_wallets_pkey PRIMARY KEY (id),
-  CONSTRAINT vendor_wallets_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES public.vendors(id)
+  CONSTRAINT vendor_products_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id),
+  CONSTRAINT vendor_products_model_id_fkey FOREIGN KEY (model_id) REFERENCES public.smartphone_models(id)
 );
 CREATE TABLE public.vendors (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),

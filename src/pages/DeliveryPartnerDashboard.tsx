@@ -150,6 +150,11 @@ const DeliveryPartnerDashboard = () => {
     if (user && profile?.role === 'delivery_partner') {
       initializeDeliveryPartnerDashboard();
     }
+
+    // Make DeliveryAPI available globally for debugging
+    if (typeof window !== 'undefined') {
+      (window as any).DeliveryAPI = DeliveryAPI;
+    }
   }, [user, profile]);
 
   // Real-time refresh interval
@@ -193,34 +198,26 @@ const DeliveryPartnerDashboard = () => {
 
       // Fetch delivery partner data
       const deliveryPartnerData = await fetchDeliveryPartnerByProfileId(profile!.id);
-
+      
       if (!deliveryPartnerData) {
         setError('Delivery partner account not found. Please contact support.');
+        setLoading(false);
         return;
       }
 
       setDeliveryPartner(deliveryPartnerData);
       setIsAvailable(deliveryPartnerData.is_available);
 
-      // FIXED: Run system fixes before loading data to ensure proper relationships
-      console.log('🔧 Running delivery system fixes...');
-      try {
-        await DeliveryAPI.fixMissingDeliveryPartnerAssignments();
-        console.log('✅ System fixes completed');
-      } catch (fixError) {
-        console.warn('⚠️ System fixes failed, continuing with normal load:', fixError);
-      }
-
-      // Load dashboard data
-      await Promise.allSettled([
+      // Load orders, stats, and delivered orders
+      await Promise.all([
         loadMyOrders(deliveryPartnerData.id),
-        loadDeliveredOrders(deliveryPartnerData.id),
-        loadStats(deliveryPartnerData.id)
+        loadStats(deliveryPartnerData.id),
+        loadDeliveredOrders(deliveryPartnerData.id)
       ]);
 
     } catch (error) {
-      console.error('Error initializing delivery partner dashboard:', error);
-      setError('Failed to load dashboard data');
+      console.error('Error initializing dashboard:', error);
+      setError('Failed to load dashboard. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -252,14 +249,12 @@ const DeliveryPartnerDashboard = () => {
 
   const loadMyOrders = async (deliveryPartnerId: string) => {
     try {
-      console.log('🎯 Loading orders for delivery partner:', deliveryPartnerId);
+      console.log('🎯 Loading slot-based orders for delivery partner:', deliveryPartnerId);
 
-      // Get slot-based assignments from both tables for backward compatibility
-      // Include today and yesterday to handle late completions
       const today = new Date().toISOString().split('T')[0];
       const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-      // First try the new sector assignments table
+      // Get slot assignments from both tables for backward compatibility
       const { data: sectorAssignments, error: sectorError } = await supabase
         .from('delivery_partner_sector_assignments')
         .select(`
@@ -271,7 +266,6 @@ const DeliveryPartnerDashboard = () => {
         .in('assigned_date', [today, yesterday])
         .eq('is_active', true);
 
-      // Also get delivery assignments for backward compatibility
       const { data: deliveryAssignments, error: deliveryError } = await supabase
         .from('delivery_assignments')
         .select(`
@@ -284,14 +278,16 @@ const DeliveryPartnerDashboard = () => {
         .in('status', ['assigned', 'active'])
         .order('slot_id');
 
-      // Combine both assignment types, prioritizing sector assignments
-      let slotData: any[] = [];
+      if (sectorError || deliveryError) {
+        console.warn('Error loading assignments:', sectorError || deliveryError);
+      }
 
+      // Prioritize sector assignments over delivery assignments
+      let slotData: any[] = [];
       if (sectorAssignments && sectorAssignments.length > 0) {
-        // Transform sector assignments to match the expected format
         slotData = sectorAssignments.map(assignment => ({
           ...assignment,
-          status: 'assigned', // Default status for sector assignments
+          status: 'assigned',
           slot_id: assignment.slot_id,
           assigned_date: assignment.assigned_date
         }));
@@ -301,56 +297,45 @@ const DeliveryPartnerDashboard = () => {
         console.log('📋 Using legacy delivery assignments:', slotData.length);
       }
 
-      const slotError = sectorError || deliveryError;
-
-      if (slotError) {
-        console.log('⚠️ Error loading slot-based assignments:', slotError);
+      if (!slotData || slotData.length === 0) {
+        console.log('📝 No slot assignments found');
+        setMyOrders([]);
+        return;
       }
 
       const slotsWithOrders: SlotOrder[] = [];
 
-      // Process slot-based assignments only
-      if (slotData && slotData.length > 0) {
-        console.log('📋 Processing slot-based assignments:', slotData.length);
+      // Sort slots by start time
+      slotData.sort((a, b) => {
+        const aTime = a.delivery_slot?.start_time || '';
+        const bTime = b.delivery_slot?.start_time || '';
+        return aTime.localeCompare(bTime);
+      });
 
-        // Sort by start time since we can't do it in the query
-        slotData.sort((a, b) => {
-          const aTime = a.delivery_slot?.start_time || '';
-          const bTime = b.delivery_slot?.start_time || '';
-          return aTime.localeCompare(bTime);
-        });
+      // Filter out expired slots
+      const now = new Date();
+      const currentTime = now.toTimeString().slice(0, 5);
+      
+      const validSlots = slotData.filter(assignment => {
+        if (assignment.assigned_date !== today) return true;
+        
+        const slot = assignment.delivery_slot;
+        if (!slot) return false;
 
-        // FIXED: More lenient slot time filtering for current day only
-        const now = new Date();
-        const currentTime = now.toTimeString().slice(0, 5); // HH:mm format
+        // Allow 2 hour buffer after slot end time
+        const [endHour, endMinute] = slot.end_time.split(':').map(Number);
+        const bufferEndTime = `${String(endHour + 2).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`;
+        
+        return currentTime <= bufferEndTime;
+      });
 
-        const validSlots = slotData.filter(assignment => {
-          // Don't filter future dates or yesterday's slots (let completion logic handle them)
-          if (assignment.assigned_date !== today) return true;
+      console.log(`📋 Valid slots after filtering: ${validSlots.length}/${slotData.length}`);
 
-          const slot = assignment.delivery_slot;
-          if (!slot) return false;
+      for (let i = 0; i < validSlots.length; i++) {
+        const assignment = validSlots[i];
 
-          // Only filter if slot has ended + 1 hour buffer (to allow late pickups/deliveries)
-          const slotEndTime = slot.end_time;
-          const [endHour, endMinute] = slotEndTime.split(':').map(Number);
-          const slotEndWithBuffer = `${String(endHour + 1).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`;
-          const isSlotExpired = currentTime > slotEndWithBuffer;
-
-          if (isSlotExpired) {
-            console.log(`⏰ Filtering out expired slot: ${slot.slot_name} (${slot.start_time}-${slot.end_time}), current time: ${currentTime}`);
-            return false;
-          }
-
-          return true;
-        });
-
-        console.log(`📋 Valid slots after time filtering: ${validSlots.length}/${slotData.length}`);
-
-        for (let i = 0; i < validSlots.length; i++) {
-          const assignment = validSlots[i];
-
-          // FIXED: Remove the inner join requirement and make it more flexible
+        try {
+          // Load orders for this slot
           const { data: orders, error: ordersError } = await supabase
             .from('orders')
             .select(`
@@ -359,24 +344,11 @@ const DeliveryPartnerDashboard = () => {
                 delivery_partner_id,
                 status
               ),
-              order_pickups(pickup_status, vendor_id),
-              order_items(
-                *,
-                vendor_products(
-                  *,
-                  smartphone_models(model_name)
-                ),
-                vendors(
-                  id,
-                  business_name,
-                  profiles(phone),
-                  vendor_addresses(
-                    address_box
-                  )
-                )
-              ),
+              order_items(*),
               customer_addresses(*),
-              customers(profiles(full_name, phone))
+              customers(
+                profiles(full_name, phone)
+              )
             `)
             .eq('slot_id', assignment.slot_id)
             .eq('delivery_date', assignment.assigned_date);
@@ -386,161 +358,160 @@ const DeliveryPartnerDashboard = () => {
             continue;
           }
 
-          // FIXED: Normalize delivery_partner_orders to always be an array
-          if (orders) {
-            orders.forEach(order => {
-              if (order.delivery_partner_orders && !Array.isArray(order.delivery_partner_orders)) {
-                order.delivery_partner_orders = [order.delivery_partner_orders];
-              } else if (!order.delivery_partner_orders) {
-                order.delivery_partner_orders = [];
-              }
-            });
+          if (!orders || orders.length === 0) {
+            console.log(`📦 No orders found for slot ${assignment.delivery_slot?.slot_name}`);
+            continue;
           }
 
-          // FIXED: Filter orders to only include those assigned to this delivery partner
-          const assignedOrders = orders?.filter(order => {
-            // Check if order has delivery_partner_orders record for this partner
-            // Now we can safely use .find() since we normalized the data structure
-            const dpOrder = order.delivery_partner_orders?.find((dpo: any) =>
-              dpo.delivery_partner_id === deliveryPartnerId
-            );
+          // Filter orders assigned to this delivery partner for this specific slot
+          const assignedOrders = orders.filter(order => {
+            // An order is considered assigned if it's in the current slot AND a delivery partner order record exists for this partner.
+            const dpo = order.delivery_partner_orders;
+            const hasAssignmentForThisPartner = Array.isArray(dpo)
+              ? dpo.some((a: any) => a.delivery_partner_id === deliveryPartnerId)
+              : dpo?.delivery_partner_id === deliveryPartnerId;
+            return order.slot_id === assignment.slot_id && hasAssignmentForThisPartner;
+          });
 
-            return dpOrder || order.order_status === 'picked_up' || order.order_status === 'out_for_delivery';
-          }) || [];
+          console.log(`📦 Processing ${assignedOrders.length}/${orders.length} assigned orders for slot ${assignment.delivery_slot?.slot_name}`);
 
-          console.log(`📦 Total orders in slot: ${orders?.length || 0}, Assigned to partner: ${assignedOrders.length}`);
+          // Determine which orders in the slot do not have a delivery_partner_orders record yet
+          const ordersNeedingAssignment = orders.filter(order => {
+            const dpo = order.delivery_partner_orders;
+            const hasAssignment = Array.isArray(dpo)
+              ? dpo.some((a: any) => a.delivery_partner_id === deliveryPartnerId)
+              : dpo?.delivery_partner_id === deliveryPartnerId;
+            return !hasAssignment && order.slot_id === assignment.slot_id;
+          });
 
-          // If no orders are assigned to this partner, create the assignment records
-          if (assignedOrders.length === 0 && orders && orders.length > 0) {
-            console.log('🔧 Creating missing delivery partner order assignments...');
+          // If there are orders in this slot that are missing the assignment record, create them.
+          if (ordersNeedingAssignment.length > 0) {
+            console.log(`🔧 Creating missing delivery partner assignments for ${ordersNeedingAssignment.length} orders in slot ${assignment.slot_id}`);
 
-            for (const order of orders) {
-              // Check if delivery_partner_orders record exists
-              // Since we normalized the data, we can safely check array length
-              if (order.delivery_partner_orders.length === 0) {
-                const { error: insertError } = await supabase
-                  .from('delivery_partner_orders')
-                  .insert({
-                    delivery_partner_id: deliveryPartnerId,
-                    order_id: order.id,
-                    status: 'assigned',
-                    accepted_at: new Date().toISOString()
-                  });
+            for (const order of ordersNeedingAssignment) {
+              // CORRECT: Call the fixed API method
+              await DeliveryAPI.ensureOrderDeliveryPartnerAssignment(order.id, deliveryPartnerId);
+            }
 
-                if (insertError) {
-                  console.error('Error creating delivery partner order assignment:', insertError);
-                } else {
-                  console.log(`✅ Created assignment for order ${order.order_number}`);
-                  // Add the new assignment to the order object
-                  const newAssignment = {
-                    delivery_partner_id: deliveryPartnerId,
-                    status: 'assigned'
-                  };
+            // Reload orders after creating assignments
+            const { data: updatedOrders } = await supabase
+              .from('orders')
+              .select(`
+                *,
+                delivery_partner_orders!left(
+                  delivery_partner_id,
+                  status
+                ),
+                order_items(*),
+                customer_addresses(*),
+                customers(
+                  profiles(full_name, phone)
+                )
+              `)
+              .eq('slot_id', assignment.slot_id)
+              .eq('delivery_date', assignment.assigned_date);
 
-                  // Since we normalized the data, we can safely push to the array
-                  order.delivery_partner_orders.push(newAssignment);
-                  assignedOrders.push(order);
-                }
-              }
+            if (updatedOrders) {
+              orders.splice(0, orders.length, ...updatedOrders);
             }
           }
 
-          // Group orders by vendor - FIXED: Only process non-delivered orders for vendor pickups
+          // Load vendor and pickup data separately to avoid complex joins
+          const vendorIds = [...new Set(assignedOrders.flatMap(order => 
+            order.order_items?.map((item: any) => item.vendor_id) || []
+          ))].filter(Boolean);
+
+          let vendorData: any[] = [];
+          let pickupData: any[] = [];
+          
+          if (vendorIds.length > 0) {
+            const { data: vendors } = await supabase
+              .from('vendors')
+              .select(`
+                id,
+                business_name,
+                profiles(phone),
+                vendor_addresses(address_box)
+              `)
+              .in('id', vendorIds);
+            
+            vendorData = vendors || [];
+
+            const orderIds = assignedOrders.map(order => order.id);
+            const { data: pickups } = await supabase
+              .from('order_pickups')
+              .select('*')
+              .in('order_id', orderIds);
+            
+            pickupData = pickups || [];
+          }
+
+          // Group orders by vendor and process deliveries
           const vendorGroups: { [vendorId: string]: VendorPickup } = {};
           const customerDeliveries: CustomerDelivery[] = [];
 
-          // FIXED: Filter out delivered orders before processing vendors
           const nonDeliveredOrders = assignedOrders.filter(order => order.order_status !== 'delivered');
-          const deliveredOrders = assignedOrders.filter(order => order.order_status === 'delivered');
-
-          console.log(`📦 Processing ${nonDeliveredOrders.length} non-delivered orders and ${deliveredOrders.length} delivered orders`);
 
           for (const order of nonDeliveredOrders) {
-            // Process vendor pickups - only for non-delivered orders
-            for (const item of order.order_items) {
-              const vendorInfo = Array.isArray(item.vendors) ? item.vendors[0] : item.vendors;
-              const vendorId = vendorInfo?.id ?? '';
-              const vendorAddress = vendorInfo?.vendor_addresses?.[0];
+            // Process vendor pickups
+            for (const item of order.order_items || []) {
+              const vendorInfo = vendorData.find(v => v.id === item.vendor_id);
+              const vendorId = item.vendor_id;
 
-              if (!vendorGroups[vendorId]) {
-                const fullAddress = vendorAddress ?
-                  `${vendorAddress.address_box}`
-                  : 'Address not available';
-
-                const navigationUrl = null;
+              if (!vendorGroups[vendorId] && vendorInfo) {
+                const pickupRecord = pickupData.find(p => 
+                  p.order_id === order.id && p.vendor_id === vendorId
+                );
 
                 vendorGroups[vendorId] = {
                   vendor_id: vendorId,
-                  vendor_name: vendorInfo?.business_name || '',
-                  vendor_phone: Array.isArray(vendorInfo?.profiles) ? vendorInfo.profiles[0]?.phone || '' : vendorInfo?.profiles?.phone || '',
-                  vendor_address: vendorAddress?.address_box || 'Address not available',
-                  vendor_full_address: fullAddress,
+                  vendor_name: vendorInfo.business_name || '',
+                  vendor_phone: vendorInfo.profiles?.phone || '',
+                  vendor_address: vendorInfo.vendor_addresses?.[0]?.address_box || '',
                   total_items: 0,
                   total_amount: 0,
-                  pickup_status: (() => {
-                    const pr = order.order_pickups?.find((p: any) => p.vendor_id === vendorId);
-                    return pr?.pickup_status ?? 'pending';
-                  })(),
-                  orders: [],
-                  navigation_url: navigationUrl || undefined
+                  pickup_status: pickupRecord?.pickup_status || 'pending',
+                  orders: []
                 };
               }
 
-              vendorGroups[vendorId].total_items += item.quantity;
-              vendorGroups[vendorId].total_amount += item.line_total;
+              if (vendorGroups[vendorId]) {
+                vendorGroups[vendorId].total_items += item.quantity;
+                vendorGroups[vendorId].total_amount += item.line_total;
 
-              let vendorOrder = vendorGroups[vendorId].orders.find(o => o.order_id === order.id);
-              if (!vendorOrder) {
-                vendorOrder = {
-                  order_id: order.id,
-                  order_number: order.order_number,
-                  items: [],
-                  total_amount: order.total_amount,
-                  special_instructions: order.special_instructions,
-                  customer_name: order.customers?.profiles?.full_name || 'Unknown',
-                  customer_phone: order.customers?.profiles?.phone || ''
-                };
-                vendorGroups[vendorId].orders.push(vendorOrder);
+                let vendorOrder = vendorGroups[vendorId].orders.find(o => o.order_id === order.id);
+                if (!vendorOrder) {
+                  vendorOrder = {
+                    order_id: order.id,
+                    order_number: order.order_number,
+                    items: [],
+                    total_amount: order.total_amount,
+                    special_instructions: order.special_instructions,
+                    customer_name: order.customers?.profiles?.full_name || 'Unknown',
+                    customer_phone: order.customers?.profiles?.phone || ''
+                  };
+                  vendorGroups[vendorId].orders.push(vendorOrder);
+                }
+
+                vendorOrder.items.push({
+                  product_name: item.product_name,
+                  quality_type_name: item.quality_type_name,
+                  quantity: item.quantity,
+                  unit_price: item.unit_price,
+                  line_total: item.line_total
+                });
               }
-
-              vendorOrder.items.push({
-                product_name: item.vendor_products?.smartphone_models?.model_name || 'Unknown',
-                quality_type_name: item.quality_type_name,
-                quantity: item.quantity,
-                unit_price: item.unit_price,
-                line_total: item.line_total
-              });
             }
 
-            // FIXED: More inclusive delivery readiness logic (delivered orders already filtered out)
-            const isReadyForDelivery = order.order_status === 'picked_up' || order.order_status === 'out_for_delivery';
-
-            // For orders in confirmed/preparing status, check if vendors are picked up
-            const hasPickedUpVendors = Object.values(vendorGroups).some(v => v.pickup_status === 'picked_up');
+            // Process customer deliveries (orders ready for delivery)
+            const isReadyForDelivery = ['picked_up', 'out_for_delivery'].includes(order.order_status);
             const allVendorsPickedUp = Object.values(vendorGroups).every(v => v.pickup_status === 'picked_up');
 
-            // Include orders that are ready for delivery OR have all vendors picked up (delivered orders already excluded)
-            if (isReadyForDelivery || allVendorsPickedUp || order.order_status === 'confirmed' || order.order_status === 'preparing') {
+            if (isReadyForDelivery || allVendorsPickedUp) {
               const customerAddress = order.customer_addresses;
-              const fullDeliveryAddress = customerAddress ?
-                `${customerAddress.address_box}, ${customerAddress.area}, ${customerAddress.city} ${customerAddress.pincode}${customerAddress.landmark ? `, Near ${customerAddress.landmark}` : ''}`
-                : 'Address not available';
-
-              const deliveryNavigationUrl = customerAddress?.latitude && customerAddress?.longitude ?
-                `https://www.google.com/maps/dir/?api=1&destination=${customerAddress.latitude},${customerAddress.longitude}&travelmode=driving`
-                : null;
-
-              // Determine delivery status based on order status and vendor pickup progress
-              let deliveryStatus: 'pending' | 'out_for_delivery' | 'delivered' = 'pending';
-              if (order.order_status === 'out_for_delivery') {
-                deliveryStatus = 'out_for_delivery';
-              } else if (order.order_status === 'delivered') {
-                deliveryStatus = 'delivered';
-              } else if (allVendorsPickedUp) {
-                deliveryStatus = 'pending'; // Ready for delivery
-              } else {
-                deliveryStatus = 'pending'; // Partially ready
-              }
+              const fullAddress = customerAddress ? 
+                `${customerAddress.address_box}, ${customerAddress.area}, ${customerAddress.city} ${customerAddress.pincode}` :
+                'Address not available';
 
               customerDeliveries.push({
                 order_id: order.id,
@@ -548,23 +519,18 @@ const DeliveryPartnerDashboard = () => {
                 customer_name: order.customers?.profiles?.full_name || 'Unknown',
                 customer_phone: order.customers?.profiles?.phone || '',
                 delivery_address: customerAddress?.address_box || '',
-                delivery_full_address: fullDeliveryAddress,
+                delivery_full_address: fullAddress,
                 total_amount: order.total_amount,
                 payment_method: order.payment_method,
-                delivery_status: deliveryStatus,
+                delivery_status: order.order_status === 'out_for_delivery' ? 'out_for_delivery' : 'pending',
                 estimated_delivery_time: assignment.delivery_slot?.end_time,
-                special_instructions: order.special_instructions,
-                navigation_url: deliveryNavigationUrl || undefined
+                special_instructions: order.special_instructions
               });
             }
           }
 
-          // FIXED: Clean up vendors with no active orders (all orders delivered)
+          // Calculate progress
           const activeVendors = Object.values(vendorGroups).filter(vendor => vendor.orders.length > 0);
-          
-          console.log(`🏪 Filtered vendors: ${Object.values(vendorGroups).length} total, ${activeVendors.length} with active orders`);
-
-          // Calculate progress metrics using only active vendors
           const totalVendors = activeVendors.length;
           const pickedUpVendors = activeVendors.filter(v => v.pickup_status === 'picked_up').length;
           const pickupProgress = totalVendors > 0 ? Math.round((pickedUpVendors / totalVendors) * 100) : 0;
@@ -573,11 +539,10 @@ const DeliveryPartnerDashboard = () => {
           const completedDeliveries = customerDeliveries.filter(d => d.delivery_status === 'delivered').length;
           const deliveryProgress = totalDeliveries > 0 ? Math.round((completedDeliveries / totalDeliveries) * 100) : 0;
 
-          // Check if previous slot is completed (slot-wise restriction logic)
+          // Determine slot status
           const previousSlotCompleted = i === 0 ? true : (slotsWithOrders[i - 1]?.status === 'completed');
-          const canStart = previousSlotCompleted && (assignment.status === 'assigned' || assignment.status === 'active');
+          const canStart = previousSlotCompleted;
 
-          // Determine slot status based on progress and restrictions
           let slotStatus: SlotOrder['status'] = 'assigned';
           if (!canStart && !previousSlotCompleted) {
             slotStatus = 'blocked';
@@ -597,8 +562,8 @@ const DeliveryPartnerDashboard = () => {
             delivery_date: assignment.assigned_date,
             sector_name: assignment.sector?.name || '',
             status: slotStatus,
-            total_orders: assignedOrders?.length || 0,
-            total_amount: assignedOrders?.reduce((sum, order) => sum + order.total_amount, 0) || 0,
+            total_orders: assignedOrders.length,
+            total_amount: assignedOrders.reduce((sum, order) => sum + order.total_amount, 0),
             vendors: activeVendors,
             ready_for_delivery: customerDeliveries,
             estimated_completion: assignment.delivery_slot?.end_time || '',
@@ -606,79 +571,27 @@ const DeliveryPartnerDashboard = () => {
             previous_slot_completed: previousSlotCompleted,
             pickup_progress: pickupProgress,
             delivery_progress: deliveryProgress,
-            estimated_earnings: Math.round((assignedOrders?.reduce((sum, order) => sum + order.total_amount, 0) || 0) * 0.1) // 10% commission
+            estimated_earnings: Math.round(assignedOrders.reduce((sum, order) => sum + order.total_amount, 0) * 0.1)
           };
 
-          // FIXED: Filter out completed slots from My Orders - they should only appear in Delivered section
-          // Also filter out slots from previous days that are completed or have no active vendors/deliveries
+          // Only include active slots (filter out completed ones from previous days)
           const isPreviousDay = assignment.assigned_date !== today;
-          const hasNoActiveWork = activeVendors.length === 0 && customerDeliveries.length === 0;
-          
-          if (slotStatus !== 'completed' && !(isPreviousDay && hasNoActiveWork)) {
+          const shouldInclude = !isPreviousDay || (slotStatus !== 'completed' && (activeVendors.length > 0 || customerDeliveries.length > 0));
+
+          if (shouldInclude) {
             slotsWithOrders.push(slotOrder);
-            console.log(`✅ Added slot ${slotOrder.slot_name} to My Orders (status: ${slotStatus}, date: ${assignment.assigned_date})`);
-          } else {
-            const reason = slotStatus === 'completed' ? 'all deliveries completed' : 'no active work remaining';
-            console.log(`🎯 Skipping slot ${slotOrder.slot_name} from My Orders - ${reason} (date: ${assignment.assigned_date})`);
-            
-            // FIXED: Auto-update slot assignment status to 'completed' in database for consistency
-            try {
-              // Update sector assignment status if it exists (only is_active field)
-              const { error: sectorUpdateError } = await supabase
-                .from('delivery_partner_sector_assignments')
-                .update({ 
-                  is_active: false
-                })
-                .eq('delivery_partner_id', deliveryPartnerId)
-                .eq('slot_id', assignment.slot_id)
-                .eq('assigned_date', assignment.assigned_date);
-
-              // Update legacy delivery assignment status if it exists
-              const { error: assignmentUpdateError } = await supabase
-                .from('delivery_assignments')
-                .update({ 
-                  status: 'completed'
-                })
-                .eq('delivery_partner_id', deliveryPartnerId)
-                .eq('slot_id', assignment.slot_id)
-                .eq('assigned_date', assignment.assigned_date);
-
-              if (sectorUpdateError || assignmentUpdateError) {
-                console.warn('Warning: Could not update slot assignment status:', sectorUpdateError || assignmentUpdateError);
-              } else {
-                console.log(`✅ Updated slot assignment status to completed for ${slotOrder.slot_name} (${assignment.assigned_date})`);
-              }
-            } catch (error) {
-              console.error('Error updating slot assignment status:', error);
-            }
           }
+
+        } catch (error) {
+          console.error(`Error processing slot ${assignment.delivery_slot?.slot_name}:`, error);
         }
-      } else {
-        console.log('📝 No slot-based assignments found for today or yesterday');
       }
 
       setMyOrders(slotsWithOrders);
-      console.log('✅ Orders loaded:', slotsWithOrders.length);
+      console.log('✅ Slot-based orders loaded:', slotsWithOrders.length);
 
-      // Debug logging for delivery section
-      slotsWithOrders.forEach((slot, index) => {
-        console.log(`🚚 Slot ${index + 1} (${slot.slot_name}):`, {
-          total_orders: slot.total_orders,
-          ready_for_delivery_count: slot.ready_for_delivery.length,
-          ready_for_delivery: slot.ready_for_delivery.map(d => ({
-            order_id: d.order_id,
-            order_number: d.order_number,
-            delivery_status: d.delivery_status
-          })),
-          vendor_statuses: slot.vendors.map(v => ({
-            vendor_id: v.vendor_id,
-            vendor_name: v.vendor_name,
-            pickup_status: v.pickup_status
-          }))
-        });
-      });
     } catch (error) {
-      console.error('💥 Error loading orders:', error);
+      console.error('💥 Error loading slot-based orders:', error);
       setMyOrders([]);
     }
   };
@@ -687,39 +600,20 @@ const DeliveryPartnerDashboard = () => {
     try {
       console.log('📦 Loading delivered orders for delivery partner:', deliveryPartnerId);
 
-      // Step 1: Get all slot_ids assigned to this delivery partner from both tables
-      const { data: sectorSlots, error: sectorError } = await supabase
+      // Get slot assignments
+      const { data: sectorSlots } = await supabase
         .from('delivery_partner_sector_assignments')
         .select('slot_id, assigned_date')
-        .eq('delivery_partner_id', deliveryPartnerId)
-        .eq('is_active', true);
+        .eq('delivery_partner_id', deliveryPartnerId);
 
-      const { data: assignedSlots, error: assignmentError } = await supabase
+      const { data: assignedSlots } = await supabase
         .from('delivery_assignments')
         .select('slot_id, assigned_date')
-        .eq('delivery_partner_id', deliveryPartnerId)
-        .in('status', ['completed', 'active', 'assigned']); // Include active/assigned slots that might have completed deliveries
+        .eq('delivery_partner_id', deliveryPartnerId);
 
-      if (sectorError || assignmentError) {
-        console.warn('Error loading slot assignments:', sectorError || assignmentError);
-      }
-
-      // Combine slot IDs from both sources with their dates
-      const sectorSlotData = sectorSlots?.map(assignment => ({ 
-        slot_id: assignment.slot_id, 
-        assigned_date: assignment.assigned_date 
-      })).filter((item): item is { slot_id: string; assigned_date: string } => 
-        item.slot_id !== null && item.assigned_date !== null
-      ) || [];
+      const sectorSlotData = sectorSlots?.map(s => ({ slot_id: s.slot_id, assigned_date: s.assigned_date })).filter(s => s.slot_id && s.assigned_date) || [];
+      const deliverySlotData = assignedSlots?.map(s => ({ slot_id: s.slot_id, assigned_date: s.assigned_date })).filter(s => s.slot_id && s.assigned_date) || [];
       
-      const deliverySlotData = assignedSlots?.map(assignment => ({ 
-        slot_id: assignment.slot_id, 
-        assigned_date: assignment.assigned_date 
-      })).filter((item): item is { slot_id: string; assigned_date: string } => 
-        item.slot_id !== null && item.assigned_date !== null
-      ) || [];
-      
-      // Combine and deduplicate slot data
       const allSlotData = [...sectorSlotData, ...deliverySlotData];
       const uniqueSlotData = allSlotData.filter((item, index, self) => 
         index === self.findIndex(t => t.slot_id === item.slot_id && t.assigned_date === item.assigned_date)
@@ -727,11 +621,9 @@ const DeliveryPartnerDashboard = () => {
 
       if (uniqueSlotData.length === 0) {
         setDeliveredOrders([]);
-        console.log('📝 No slot assignments found for this partner.');
         return;
       }
 
-      // Step 2: Get delivered orders associated with these slots
       const slotIds = uniqueSlotData.map(item => item.slot_id);
       const { data: deliveredData, error: ordersError } = await supabase
         .from('orders')
@@ -749,11 +641,10 @@ const DeliveryPartnerDashboard = () => {
         .eq('order_status', 'delivered')
         .not('actual_delivery_date', 'is', null)
         .order('actual_delivery_date', { ascending: false })
-        .limit(50); // Increased limit to show more delivered orders
+        .limit(50);
 
       if (ordersError) throw ordersError;
 
-      // Filter to only include orders from slots actually assigned to this delivery partner
       const validDeliveredOrders = (deliveredData || []).filter(order => {
         return uniqueSlotData.some(slotData => 
           slotData.slot_id === order.slot_id && 
@@ -769,107 +660,102 @@ const DeliveryPartnerDashboard = () => {
         delivery_time: item.actual_delivery_date || '',
         total_amount: item.total_amount || 0,
         slot_name: item.delivery_slots?.[0]?.slot_name || '',
-        earnings: Math.round((item.total_amount || 0) * 0.1) // 10% commission
+        earnings: Math.round((item.total_amount || 0) * 0.1)
       }));
 
       setDeliveredOrders(completedOrders);
       console.log('✅ Delivered orders loaded:', completedOrders.length);
-    } catch (error: any) {
-      console.error('💥 Error loading delivered orders:', error.message);
+
+    } catch (error) {
+      console.error('Error loading delivered orders:', error);
       setDeliveredOrders([]);
     }
   };
 
   const loadStats = async (deliveryPartnerId: string) => {
     try {
-      console.log('📊 Loading delivery stats for partner:', deliveryPartnerId);
       const result = await DeliveryAPI.getDeliveryStats(deliveryPartnerId);
-
       if (result.success && result.data) {
         setStats(result.data);
-        console.log('✅ Stats loaded successfully');
-      } else {
-        console.error('❌ Failed to load stats:', result.error);
-        setStats(null);
       }
     } catch (error) {
-      console.error('💥 Error loading stats:', error);
-      setStats(null);
+      console.error('Error loading stats:', error);
     }
   };
 
   const refreshData = async () => {
-    if (!deliveryPartner) return;
+    if (!deliveryPartner || refreshing) return;
 
+    setRefreshing(true);
     try {
-      setRefreshing(true);
-      await Promise.allSettled([
+      await Promise.all([
         loadMyOrders(deliveryPartner.id),
-        loadDeliveredOrders(deliveryPartner.id),
-        loadStats(deliveryPartner.id)
+        loadStats(deliveryPartner.id),
+        loadDeliveredOrders(deliveryPartner.id)
       ]);
-      console.log('🔄 Data refreshed successfully');
-    } catch (error) {
-      console.error('💥 Error refreshing data:', error);
     } finally {
       setRefreshing(false);
     }
   };
 
   const updateLocationInDatabase = async (location: { lat: number; lng: number }) => {
-    // Implementation for updating location
+    // Implementation for location update
   };
 
   const handleUpdateAvailability = async (available: boolean) => {
     if (!deliveryPartner) return;
-
+    
     try {
-      const { error } = await supabase
-        .from('delivery_partners')
-        .update({
-          is_available: available,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', deliveryPartner.id);
-
-      if (error) throw error;
-
-      setIsAvailable(available);
-      setDeliveryPartner({ ...deliveryPartner, is_available: available });
-
-      toast.success(available ? 'You are now available for orders' : 'You are now unavailable');
+      const result = await DeliveryAPI.updateAvailabilityStatus(deliveryPartner.id, available);
+      if (result.success) {
+        setIsAvailable(available);
+        toast.success(`You are now ${available ? 'available' : 'unavailable'} for deliveries`);
+      } else {
+        throw new Error(result.error);
+      }
     } catch (error) {
       console.error('Error updating availability:', error);
       toast.error('Failed to update availability status');
     }
   };
 
-  // Mark all orders from a particular vendor within a slot as picked up (vendor-level)
-  const handleVendorPickup = async (_slotId: string, vendor: VendorPickup) => {
+  // Fixed vendor pickup function with proper error handling
+  const handleVendorPickup = async (slotId: string, vendor: VendorPickup) => {
     if (!deliveryPartner) return;
 
     try {
-      const updatePromises = vendor.orders.map(async (o) => {
-        const res = await DeliveryAPI.markVendorPickedUp(o.order_id, vendor.vendor_id, deliveryPartner.id);
-        if (!res.success) throw res.error;
+      console.log('🚚 Starting vendor pickup for:', vendor.vendor_name);
+
+      const updatePromises = vendor.orders.map(async (order) => {
+        console.log(`📦 Marking order ${order.order_number} as picked up from vendor ${vendor.vendor_id}`);
+        
+        const result = await DeliveryAPI.markVendorPickedUp(order.order_id, vendor.vendor_id, deliveryPartner.id);
+        
+        if (!result.success) {
+          console.error(`❌ Failed to mark pickup for order ${order.order_number}:`, result.error);
+          throw new Error(result.error || 'Failed to mark vendor pickup');
+        }
+        
+        console.log(`✅ Successfully marked pickup for order ${order.order_number}`);
+        return result;
       });
 
       await Promise.all(updatePromises);
 
-      toast.success('Vendor pickup marked as complete');
+      toast.success(`All orders picked up from ${vendor.vendor_name}`);
       await refreshData();
-      // Log the updated status for debugging
-      console.log('DEBUG: Vendor status after refresh for vendor', vendor.vendor_id, 'is', vendor.pickup_status);
+      
     } catch (error) {
       console.error('Error marking vendor pickup:', error);
-      toast.error('Failed to mark vendor pickup');
+      toast.error(`Failed to mark vendor pickup: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
   const handleStartDelivery = async (orderId: string) => {
     if (!deliveryPartner) return;
+    
     try {
-      // First ensure the order is marked as picked_up in the main orders table
+      // Check current order status
       const { data: currentOrder, error: fetchError } = await supabase
         .from('orders')
         .select('order_status')
@@ -878,7 +764,7 @@ const DeliveryPartnerDashboard = () => {
 
       if (fetchError) throw fetchError;
 
-      // If order is not yet marked as picked_up, update it first
+      // Update to picked_up if not already
       if (currentOrder.order_status !== 'picked_up') {
         const { error: updateError } = await supabase
           .from('orders')
@@ -889,10 +775,9 @@ const DeliveryPartnerDashboard = () => {
           .eq('id', orderId);
 
         if (updateError) throw updateError;
-        console.log('✅ Updated order status to picked_up');
       }
 
-      // Now mark as out for delivery
+      // Mark as out for delivery
       const { error: outForDeliveryError } = await supabase
         .from('orders')
         .update({
@@ -903,7 +788,7 @@ const DeliveryPartnerDashboard = () => {
 
       if (outForDeliveryError) throw outForDeliveryError;
 
-      // Also update delivery partner orders status
+      // Update delivery partner orders status
       const { error: dpOrderError } = await supabase
         .from('delivery_partner_orders')
         .update({
@@ -914,8 +799,9 @@ const DeliveryPartnerDashboard = () => {
 
       if (dpOrderError) throw dpOrderError;
 
-      toast.success('Started delivery - Order is now out for delivery');
+      toast.success('Order is now out for delivery');
       await refreshData();
+      
     } catch (error) {
       console.error('Error starting delivery:', error);
       toast.error('Failed to start delivery');
@@ -924,13 +810,17 @@ const DeliveryPartnerDashboard = () => {
 
   const handleCustomerDelivery = async (orderId: string) => {
     if (!deliveryPartner) return;
+    
     try {
-      const res = await DeliveryAPI.markDelivered(orderId, deliveryPartner.id);
-      console.log('DEBUG: markDelivered API response:', res);
-      if (!res.success) throw res.error;
+      const result = await DeliveryAPI.markDelivered(orderId, deliveryPartner.id);
+      
+      if (!result.success) {
+        throw new Error(result.error);
+      }
 
       toast.success('Order delivered successfully');
       await refreshData();
+      
     } catch (error) {
       console.error('Error marking delivery:', error);
       toast.error('Failed to mark delivery');
@@ -1589,7 +1479,7 @@ const DeliveryPartnerDashboard = () => {
 
                             <div className="text-right">
                               <div className="text-lg font-bold text-gray-900">₹{order.total_amount.toLocaleString()}</div>
-                              <div className="text-sm font-semibold text-green-600">Earned: ₹{order.earnings}</div>
+                              {/* <div className="text-sm font-semibold text-green-600">Earned: ₹{order.earnings}</div> */}
                               {order.rating && (
                                 <div className="flex items-center gap-1 justify-end">
                                   <Star className="h-3 w-3 text-yellow-500 fill-current" />

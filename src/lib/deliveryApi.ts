@@ -235,6 +235,8 @@ export interface DeliveryAssignment {
   current_orders: number;
   status: 'assigned' | 'active' | 'completed' | 'cancelled';
   created_at: string;
+  delivery_slot?: DeliverySlot;
+  sector?: Sector;
 }
 
 export interface OrderPickup {
@@ -701,6 +703,9 @@ export class DeliveryAPI {
           order_id: orderId,
           delivery_partner_id: deliveryPartnerId,
           status: 'accepted',
+          delivery_fee: 0, // Proper numeric value
+          distance_km: null, // Use null for optional numeric fields
+          payment_collection_amount: 0 // Proper numeric value
         })
         .select()
         .single();
@@ -2354,7 +2359,7 @@ export class DeliveryAPI {
       console.log('🚚 Starting vendor pickup process:', { orderId, vendorId, deliveryPartnerId });
 
       // First validate that this delivery partner is assigned to this order
-      const { data: assignment, error: assignmentError } = await supabase
+      let { data: assignment, error: assignmentError } = await supabase
         .from('delivery_partner_orders')
         .select('status')
         .eq('order_id', orderId)
@@ -2366,13 +2371,22 @@ export class DeliveryAPI {
         throw assignmentError;
       }
 
+      // If no assignment exists, try to create it automatically
       if (!assignment) {
-        console.error('❌ Delivery partner not assigned to this order');
-        return {
-          success: false,
-          error: 'Delivery partner is not assigned to this order',
-          data: null
-        };
+        console.log('🔧 No delivery partner assignment found, attempting to create one...');
+        
+        const ensureResult = await this.ensureOrderDeliveryPartnerAssignment(orderId, deliveryPartnerId);
+        if (ensureResult.success) {
+          assignment = ensureResult.data;
+          console.log('✅ Created delivery partner assignment');
+        } else {
+          console.error('❌ Failed to create delivery partner assignment:', ensureResult.error);
+          return {
+            success: false,
+            error: 'Delivery partner is not assigned to this order and could not create assignment',
+            data: null
+          };
+        }
       }
 
       // Allow pickup if the assignment is in one of the expected in-progress states.
@@ -3271,9 +3285,14 @@ export class DeliveryAPI {
                        order.order_status === 'out_for_delivery' ? 'out_for_delivery' :
                        order.order_status === 'delivered' ? 'delivered' : 'assigned',
                 accepted_at: new Date().toISOString(),
+                delivery_fee: 0, // Proper numeric value
+                distance_km: null, // Use null for optional numeric fields
+                payment_collection_amount: 0, // Proper numeric value
                 ...(order.order_status === 'picked_up' && { picked_up_at: new Date().toISOString() }),
                 ...(order.order_status === 'delivered' && { delivered_at: new Date().toISOString() })
-              });
+              })
+              .select()
+              .single();
 
             if (insertError) {
               console.error('Error creating delivery partner order assignment:', insertError);
@@ -3298,22 +3317,25 @@ export class DeliveryAPI {
     orderId: string,
     deliveryPartnerId: string
   ): Promise<ApiResponse<any>> {
+    if (!orderId || !deliveryPartnerId) {
+      return { success: false, error: 'Missing orderId or deliveryPartnerId' };
+    }
+
     try {
-      // Check if assignment already exists
-      const { data: existingAssignment, error: checkError } = await supabase
+      // Final, definitive check: Does a record for this order_id exist at all?
+      const { data: anyExistingAssignment, error: anyCheckError } = await supabase
         .from('delivery_partner_orders')
-        .select('id, status')
+        .select('id, delivery_partner_id')
         .eq('order_id', orderId)
-        .eq('delivery_partner_id', deliveryPartnerId)
-        .single();
+        .maybeSingle();
 
-      if (checkError && checkError.code !== 'PGRST116') {
-        throw checkError;
+      if (anyCheckError) {
+        throw anyCheckError;
       }
-
-      if (existingAssignment) {
-        console.log('✅ Delivery partner assignment already exists');
-        return { success: true, data: existingAssignment };
+      
+      // If an assignment for this order already exists (for any partner), do NOT proceed.
+      if (anyExistingAssignment) {
+        return { success: false, error: 'An assignment for this order already exists.' };
       }
 
       // Get order status to set appropriate assignment status
@@ -3325,30 +3347,109 @@ export class DeliveryAPI {
 
       if (orderError) throw orderError;
 
-      // Create new assignment
+      const assignmentData = {
+        delivery_partner_id: deliveryPartnerId,
+        order_id: orderId,
+        status: order.order_status === 'picked_up' ? 'picked_up' :
+               order.order_status === 'out_for_delivery' ? 'out_for_delivery' :
+               order.order_status === 'delivered' ? 'delivered' : 'assigned',
+        accepted_at: new Date().toISOString(),
+        delivery_fee: 0, // Proper numeric value instead of empty string
+        distance_km: null, // Use null for optional numeric fields
+        payment_collection_amount: 0, // Proper numeric value
+      };
+
+      // Create new assignment with proper numeric values
       const { data: newAssignment, error: insertError } = await supabase
         .from('delivery_partner_orders')
-        .insert({
-          delivery_partner_id: deliveryPartnerId,
-          order_id: orderId,
-          status: order.order_status === 'picked_up' ? 'picked_up' : 
-                 order.order_status === 'out_for_delivery' ? 'out_for_delivery' :
-                 order.order_status === 'delivered' ? 'delivered' : 'assigned',
-          accepted_at: new Date().toISOString(),
-          ...(order.order_status === 'picked_up' && { picked_up_at: new Date().toISOString() }),
-          ...(order.order_status === 'delivered' && { delivered_at: new Date().toISOString() })
-        })
+        .insert(assignmentData)
         .select()
         .single();
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        throw insertError;
+      }
 
-      console.log('✅ Created delivery partner order assignment');
       return { success: true, data: newAssignment };
 
     } catch (error: any) {
-      console.error('Error ensuring delivery partner assignment:', error);
       return { success: false, error: error.message };
+    }
+  }
+
+  // Debug function to fix missing delivery partner assignments
+  static async debugAndFixMissingAssignment(
+    orderId: string,
+    deliveryPartnerId: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      console.log('🔍 Debug: Checking delivery partner assignment for order:', orderId);
+
+      // Check if assignment exists
+      const { data: assignment, error: assignmentError } = await supabase
+        .from('delivery_partner_orders')
+        .select('*')
+        .eq('order_id', orderId)
+        .eq('delivery_partner_id', deliveryPartnerId)
+        .maybeSingle();
+
+      if (assignmentError) {
+        console.error('❌ Error checking assignment:', assignmentError);
+        throw assignmentError;
+      }
+
+      if (!assignment) {
+        console.log('🔧 No assignment found, creating one...');
+        
+        // Get order details
+        const { data: order, error: orderError } = await supabase
+          .from('orders')
+          .select('order_status, order_number')
+          .eq('id', orderId)
+          .single();
+
+        if (orderError) throw orderError;
+
+        // Create assignment with proper numeric values
+        const { data: newAssignment, error: createError } = await supabase
+          .from('delivery_partner_orders')
+          .insert({
+            delivery_partner_id: deliveryPartnerId,
+            order_id: orderId,
+            status: 'assigned',
+            assigned_at: new Date().toISOString(),
+            accepted_at: new Date().toISOString(),
+            delivery_fee: 0, // Proper numeric value
+            distance_km: null, // Use null for optional numeric fields
+            payment_collection_amount: 0 // Proper numeric value
+          })
+          .select()
+          .single();
+
+        if (createError) throw createError;
+
+        console.log('✅ Created assignment:', newAssignment.id);
+        
+        return {
+          success: true,
+          data: { created: true, assignment: newAssignment },
+          message: `Created delivery partner assignment for order ${order.order_number}`
+        };
+      } else {
+        console.log('✅ Assignment already exists:', assignment.id);
+        return {
+          success: true,
+          data: { created: false, assignment },
+          message: 'Assignment already exists'
+        };
+      }
+
+    } catch (error: any) {
+      console.error('💥 Error in debug fix:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to fix assignment'
+      };
     }
   }
 }
