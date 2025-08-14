@@ -470,7 +470,7 @@ const VendorAnalytics = () => {
 
               <Card className="bg-gradient-to-br from-purple-50 to-violet-100 border-purple-200">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium text-purple-800">Total Earned</CardTitle>
+                  <CardTitle className="text-sm font-medium text-purple-800">Total Sales</CardTitle>
                   <TrendingUp className="h-4 w-4 text-purple-600" />
                 </CardHeader>
                 <CardContent>
@@ -485,13 +485,13 @@ const VendorAnalytics = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card>
                 <CardHeader>
-                  <CardTitle>Earnings Breakdown</CardTitle>
+                  <CardTitle>Sales Breakdown</CardTitle>
                   <CardDescription>Today's financial summary</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium">Today's Earnings</span>
+                      <span className="text-sm font-medium">Today's Sales</span>
                       <span className="font-bold text-green-600">
                         ₹{wallet?.today_earnings?.toLocaleString('en-IN') || '0'}
                       </span>

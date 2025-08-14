@@ -43,6 +43,7 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
   updateProfile: (updates: Partial<Profile>) => Promise<{ success: boolean; error?: string }>;
   refreshProfile: () => Promise<void>;
+  refreshSession: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -141,6 +142,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Refresh session manually
+  const refreshSession = async (): Promise<void> => {
+    try {
+      console.log('🔄 Manually refreshing session...');
+      const { data: { session: newSession }, error } = await supabase.auth.refreshSession();
+      
+      if (error) {
+        console.error('❌ Session refresh error:', error);
+        // If refresh fails, clear auth state
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+        return;
+      }
+
+      if (newSession) {
+        console.log('✅ Session refreshed successfully');
+        setSession(newSession);
+        setUser(newSession.user);
+        
+        // Refresh profile too
+        if (newSession.user) {
+          const profileData = await fetchProfile(newSession.user.id);
+          setProfile(profileData);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error refreshing session:', error);
+    }
+  };
+
   // Check session and initialize auth state
   const initializeAuth = async () => {
     try {
@@ -229,6 +261,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setSession(null);
             setUser(null);
             setProfile(null);
+          } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+            console.log('🔄 Token refreshed for user:', session.user.email);
+            setSession(session);
+            setUser(session.user);
+            // Profile should remain the same, no need to refetch
           }
         } catch (error) {
           console.error('❌ Auth state change error:', error);
@@ -238,6 +275,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Set up automatic session refresh
+  useEffect(() => {
+    if (!session?.expires_at) return;
+
+    const expiryTime = new Date(session.expires_at * 1000);
+    const now = new Date();
+    const timeUntilExpiry = expiryTime.getTime() - now.getTime();
+    
+    // Refresh 5 minutes before expiry
+    const refreshTime = Math.max(0, timeUntilExpiry - (5 * 60 * 1000));
+    
+    console.log(`⏰ Setting up auto-refresh in ${Math.round(refreshTime / 1000 / 60)} minutes`);
+    
+    const refreshTimer = setTimeout(() => {
+      console.log('⏰ Auto-refreshing session...');
+      refreshSession();
+    }, refreshTime);
+
+    return () => clearTimeout(refreshTimer);
+  }, [session?.expires_at]);
 
   const signIn = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
@@ -497,6 +555,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     resetPassword,
     updateProfile,
     refreshProfile,
+    refreshSession,
   };
 
   return (

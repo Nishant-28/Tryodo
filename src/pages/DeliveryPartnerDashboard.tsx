@@ -24,7 +24,11 @@ import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { DeliveryAPI, DeliveryStats } from '@/lib/deliveryApi';
+
 import { cn } from '@/lib/utils';
+import CancelOrderButton from '@/components/CancelOrderButton';
+import OrderCancellationModal from '@/components/OrderCancellationModal';
+import { CancellationReason, CancellationResponse } from '@/types/orderCancellation';
 
 interface DeliveryPartner {
   id: string;
@@ -144,6 +148,11 @@ const DeliveryPartnerDashboard = () => {
   const [error, setError] = useState<string | null>(null);
   const [expandedSlotId, setExpandedSlotId] = useState<string>('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Order cancellation state
+  const [showCancellationModal, setShowCancellationModal] = useState(false);
+  const [selectedOrderForCancellation, setSelectedOrderForCancellation] = useState<CustomerDelivery | null>(null);
+  const [cancellationLoading, setCancellationLoading] = useState<string | null>(null);
 
   // Initialize delivery partner dashboard
   useEffect(() => {
@@ -335,7 +344,7 @@ const DeliveryPartnerDashboard = () => {
         const assignment = validSlots[i];
 
         try {
-          // Load orders for this slot
+          // Load orders for this slot (excluding cancelled orders)
           const { data: orders, error: ordersError } = await supabase
             .from('orders')
             .select(`
@@ -351,7 +360,8 @@ const DeliveryPartnerDashboard = () => {
               )
             `)
             .eq('slot_id', assignment.slot_id)
-            .eq('delivery_date', assignment.assigned_date);
+            .eq('delivery_date', assignment.assigned_date)
+            .neq('order_status', 'cancelled');
 
           if (ordersError) {
             console.error('Error loading orders for slot:', ordersError);
@@ -827,6 +837,92 @@ const DeliveryPartnerDashboard = () => {
     }
   };
 
+  // ==================== ORDER CANCELLATION HANDLERS ====================
+
+  /**
+   * Handle opening the cancellation modal for an order
+   */
+  const handleCancelOrderClick = (order: CustomerDelivery) => {
+    setSelectedOrderForCancellation(order);
+    setShowCancellationModal(true);
+  };
+
+  /**
+   * Handle the actual order cancellation
+   */
+  const handleOrderCancellation = async (
+    reason: CancellationReason,
+    additionalDetails?: string
+  ): Promise<CancellationResponse> => {
+    if (!deliveryPartner || !selectedOrderForCancellation) {
+      return {
+        success: false,
+        error: 'Missing delivery partner or order information'
+      };
+    }
+
+    setCancellationLoading(selectedOrderForCancellation.order_id);
+
+    try {
+      console.log('🚫 Cancelling order:', {
+        orderId: selectedOrderForCancellation.order_id,
+        orderNumber: selectedOrderForCancellation.order_number,
+        reason,
+        additionalDetails
+      });
+
+      // Use the order cancellation API
+      const result = await DeliveryAPI.cancelOrder(
+        selectedOrderForCancellation.order_id,
+        deliveryPartner.id,
+        reason,
+        additionalDetails
+      );
+
+      if (result.success) {
+        // Refresh the dashboard data to reflect the cancellation
+        await refreshData();
+        
+        // Show success message
+        toast.success(`Order ${selectedOrderForCancellation.order_number} has been cancelled successfully`);
+      } else {
+        // Show error message
+        toast.error(result.error || 'Failed to cancel order');
+      }
+
+      return result;
+
+    } catch (error: any) {
+      console.error('💥 Error in handleOrderCancellation:', error);
+      const errorMessage = error.message || 'An unexpected error occurred while cancelling the order';
+      toast.error(errorMessage);
+      
+      return {
+        success: false,
+        error: errorMessage
+      };
+    } finally {
+      setCancellationLoading(null);
+    }
+  };
+
+  /**
+   * Handle closing the cancellation modal
+   */
+  const handleCancellationModalClose = () => {
+    setShowCancellationModal(false);
+    setSelectedOrderForCancellation(null);
+  };
+
+  /**
+   * Check if an order can be cancelled
+   */
+  const canCancelOrder = (order: CustomerDelivery): boolean => {
+    // Only allow cancellation for orders that are out for delivery or picked up
+    const validStatuses = ['out_for_delivery', 'pending'];
+    return validStatuses.includes(order.delivery_status);
+  };
+
   const getStatusBadgeColor = (status: string) => {
     switch (status) {
       case 'assigned': return 'bg-blue-100 text-blue-800';
@@ -978,7 +1074,7 @@ const DeliveryPartnerDashboard = () => {
         </div>
 
         {/* Enhanced Stats Overview */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-6 sm:mb-8">
+        {/* <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-6 sm:mb-8">
           <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200 shadow-soft hover:shadow-medium transition-all duration-200">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-semibold text-blue-800">Today's Deliveries</CardTitle>
@@ -1004,11 +1100,11 @@ const DeliveryPartnerDashboard = () => {
               </p>
             </CardContent>
           </Card>
-        </div>
+        </div> */}
 
         <Tabs defaultValue="my-orders" className="w-full">
           {/* Mobile-first tabs with improved layout */}
-          <div className="block sm:hidden mb-4">
+          {/* <div className="block sm:hidden mb-4">
             <TabsList className="flex flex-wrap gap-1 p-1 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl shadow-soft h-auto">
               <TabsTrigger
                 value="my-orders"
@@ -1029,7 +1125,7 @@ const DeliveryPartnerDashboard = () => {
                 </div>
               </TabsTrigger>
             </TabsList>
-          </div>
+          </div> */}
 
           {/* Desktop tabs */}
           <div className="hidden sm:block">
@@ -1404,14 +1500,42 @@ const DeliveryPartnerDashboard = () => {
                                             )}
 
                                             {delivery.delivery_status === 'out_for_delivery' && (
-                                              <Button
+                                              <>
+                                                <Button
+                                                  size="sm"
+                                                  onClick={() => handleCustomerDelivery(delivery.order_id)}
+                                                  className="flex-1 sm:flex-none bg-green-600 hover:bg-green-700 rounded-lg"
+                                                >
+                                                  <CheckCircle className="h-4 w-4 mr-2" />
+                                                  Mark Delivered
+                                                </Button>
+                                                
+                                                <CancelOrderButton
+                                                  orderId={delivery.order_id}
+                                                  orderNumber={delivery.order_number}
+                                                  orderStatus={delivery.delivery_status}
+                                                  canCancel={canCancelOrder(delivery)}
+                                                  onCancelClick={() => handleCancelOrderClick(delivery)}
+                                                  isLoading={cancellationLoading === delivery.order_id}
+                                                  size="sm"
+                                                  className="flex-1 sm:flex-none"
+                                                  showConfirmDialog={false}
+                                                />
+                                              </>
+                                            )}
+
+                                            {(delivery.delivery_status === 'pending') && canCancelOrder(delivery) && (
+                                              <CancelOrderButton
+                                                orderId={delivery.order_id}
+                                                orderNumber={delivery.order_number}
+                                                orderStatus={delivery.delivery_status}
+                                                canCancel={canCancelOrder(delivery)}
+                                                onCancelClick={() => handleCancelOrderClick(delivery)}
+                                                isLoading={cancellationLoading === delivery.order_id}
                                                 size="sm"
-                                                onClick={() => handleCustomerDelivery(delivery.order_id)}
-                                                className="flex-1 sm:flex-none bg-green-600 hover:bg-green-700 rounded-lg"
-                                              >
-                                                <CheckCircle className="h-4 w-4 mr-2" />
-                                                Mark Delivered
-                                              </Button>
+                                                className="flex-1 sm:flex-none"
+                                                showConfirmDialog={false}
+                                              />
                                             )}
 
                                             {delivery.delivery_status === 'delivered' && (
@@ -1498,6 +1622,20 @@ const DeliveryPartnerDashboard = () => {
           </TabsContent>
         </Tabs>
       </main>
+
+      {/* Order Cancellation Modal */}
+      {selectedOrderForCancellation && (
+        <OrderCancellationModal
+          isOpen={showCancellationModal}
+          onClose={handleCancellationModalClose}
+          orderId={selectedOrderForCancellation.order_id}
+          orderNumber={selectedOrderForCancellation.order_number}
+          customerName={selectedOrderForCancellation.customer_name}
+          totalAmount={selectedOrderForCancellation.total_amount}
+          orderStatus={selectedOrderForCancellation.delivery_status}
+          onCancel={handleOrderCancellation}
+        />
+      )}
     </div>
   );
 };

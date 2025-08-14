@@ -17,6 +17,8 @@ export interface CartItem {
   brandName?: string;
   qualityName?: string;
   addedAt: string;
+  productType?: 'existing' | 'marketplace';
+  marketVendorProductId?: string;
 }
 
 export interface CartSummary {
@@ -140,7 +142,7 @@ export class CartAPI {
         };
       }
 
-      // OPTIMIZED: Single query with all necessary joins (using left joins to handle missing data)
+      // OPTIMIZED: Single query with all necessary joins for both product types
       const { data: cartItems, error: itemsError } = await supabase
         .from('cart_items')
         .select(`
@@ -148,7 +150,8 @@ export class CartAPI {
           quantity,
           added_at,
           product_id,
-          vendor_products:product_id!inner(
+          market_vendor_product_id,
+          vendor_products:product_id(
             id,
             price,
             original_price,
@@ -183,6 +186,42 @@ export class CartAPI {
                 logo_url
               )
             )
+          ),
+          market_vendor_products:market_vendor_product_id(
+            id,
+            price,
+            original_price,
+            discount_percentage,
+            stock_quantity,
+            is_in_stock,
+            delivery_time_hours,
+            vendor_id,
+            market_product_id,
+            vendors:vendor_id(
+              id,
+              business_name,
+              rating,
+              is_verified
+            ),
+            market_products:market_product_id(
+              id,
+              name,
+              description,
+              images,
+              specifications,
+              base_unit,
+              category_id,
+              brand_id,
+              market_categories:category_id(
+                id,
+                name
+              ),
+              market_brands:brand_id(
+                id,
+                name,
+                logo_url
+              )
+            )
           )
         `)
         .eq('cart_id', cart.id);
@@ -201,66 +240,115 @@ export class CartAPI {
         };
       }
 
-      // Transform the optimized query results with robust error handling
+      // Transform the optimized query results with robust error handling for both product types
       const enrichedItems: CartItem[] = await Promise.all(
         cartItems.map(async (item: any) => {
-          console.log('🔍 Processing cart item:', item.id, 'for product:', item.product_id);
+          console.log('🔍 Processing cart item:', item.id);
           
-          const product = item.vendor_products;
-          if (!product) {
-            console.log('❌ No product data found for cart item:', item.id);
-            return null;
-          }
+          // Determine product type based on which ID is present
+          const isMarketplaceProduct = !!item.market_vendor_product_id;
+          const productType = isMarketplaceProduct ? 'marketplace' : 'existing';
           
-          const vendor = product.vendors;
-          const quality = product.category_qualities;
-          const model = product.smartphone_models;
-          const brand = model?.brands;
-
-          // Handle cases where joins might fail due to data issues
-          const vendorName = vendor?.business_name || 'Unknown Vendor';
-          const modelName = model?.model_name || `Product ${product.id}`;
-          const brandName = brand?.name || 'Unknown Brand';
-          const qualityName = quality?.quality_name || 'Standard';
-
-          console.log('✅ Processing:', { brandName, modelName, vendorName, qualityName });
-
-          // Calculate final price with upside markup
-          let finalPrice = parseFloat(product.price || 0);
-          try {
-            if (product.vendor_id && product.quality_type_id) {
-              const calculatedPrice = await TryodoAPI.calculateCustomerPrice(
-                product.vendor_id,
-                product.quality_type_id,
-                finalPrice
-              );
-              if (calculatedPrice > finalPrice) {
-                console.log(`💰 Upside pricing applied: ₹${finalPrice} → ₹${calculatedPrice}`);
-                finalPrice = calculatedPrice;
-              }
+          if (isMarketplaceProduct) {
+            // Handle marketplace product
+            const marketVendorProduct = item.market_vendor_products;
+            if (!marketVendorProduct) {
+              console.log('❌ No marketplace product data found for cart item:', item.id);
+              return null;
             }
-          } catch (error) {
-            console.warn('❌ Failed to calculate upside pricing for cart item:', error);
-            // Fall back to base price if upside calculation fails
-          }
+            
+            const vendor = marketVendorProduct.vendors;
+            const marketProduct = marketVendorProduct.market_products;
+            const category = marketProduct?.market_categories;
+            const brand = marketProduct?.market_brands;
 
-          return {
-            id: item.id,
-            productId: product.id,
-            name: `${brandName} ${modelName}`,
-            vendor: vendorName,
-            vendorId: product.vendor_id,
-            price: finalPrice,
-            originalPrice: product.original_price ? parseFloat(product.original_price) : undefined,
-            quantity: item.quantity,
-            image: model?.official_images?.[0],
-            deliveryTime: product.delivery_time_days || 0,
-            warranty: product.warranty_months || 0,
-            modelName: modelName,
-            brandName: brandName,
-            qualityName: qualityName,
-            addedAt: item.added_at
-          };
+            const vendorName = vendor?.business_name || 'Unknown Vendor';
+            const productName = marketProduct?.name || `Product ${marketVendorProduct.id}`;
+            const brandName = brand?.name || 'Unknown Brand';
+            const categoryName = category?.name || 'Unknown Category';
+
+            console.log('✅ Processing marketplace product:', { brandName, productName, vendorName, categoryName });
+
+            const finalPrice = parseFloat(marketVendorProduct.price || 0);
+
+            return {
+              id: item.id,
+              productId: marketVendorProduct.id,
+              name: productName,
+              vendor: vendorName,
+              vendorId: marketVendorProduct.vendor_id,
+              price: finalPrice,
+              originalPrice: marketVendorProduct.original_price ? parseFloat(marketVendorProduct.original_price) : undefined,
+              quantity: item.quantity,
+              image: marketProduct?.images?.[0],
+              deliveryTime: Math.ceil((marketVendorProduct.delivery_time_hours || 0) / 24), // Convert hours to days
+              warranty: 0, // Marketplace products don't have warranty in the current schema
+              modelName: productName,
+              brandName: brandName,
+              qualityName: categoryName,
+              addedAt: item.added_at,
+              productType: 'marketplace',
+              marketVendorProductId: marketVendorProduct.id
+            };
+          } else {
+            // Handle existing product
+            const product = item.vendor_products;
+            if (!product) {
+              console.log('❌ No existing product data found for cart item:', item.id);
+              return null;
+            }
+            
+            const vendor = product.vendors;
+            const quality = product.category_qualities;
+            const model = product.smartphone_models;
+            const brand = model?.brands;
+
+            // Handle cases where joins might fail due to data issues
+            const vendorName = vendor?.business_name || 'Unknown Vendor';
+            const modelName = model?.model_name || `Product ${product.id}`;
+            const brandName = brand?.name || 'Unknown Brand';
+            const qualityName = quality?.quality_name || 'Standard';
+
+            console.log('✅ Processing existing product:', { brandName, modelName, vendorName, qualityName });
+
+            // Calculate final price with upside markup
+            let finalPrice = parseFloat(product.price || 0);
+            try {
+              if (product.vendor_id && product.quality_type_id) {
+                const calculatedPrice = await TryodoAPI.calculateCustomerPrice(
+                  product.vendor_id,
+                  product.quality_type_id,
+                  finalPrice
+                );
+                if (calculatedPrice > finalPrice) {
+                  console.log(`💰 Upside pricing applied: ₹${finalPrice} → ₹${calculatedPrice}`);
+                  finalPrice = calculatedPrice;
+                }
+              }
+            } catch (error) {
+              console.warn('❌ Failed to calculate upside pricing for cart item:', error);
+              // Fall back to base price if upside calculation fails
+            }
+
+            return {
+              id: item.id,
+              productId: product.id,
+              name: `${brandName} ${modelName}`,
+              vendor: vendorName,
+              vendorId: product.vendor_id,
+              price: finalPrice,
+              originalPrice: product.original_price ? parseFloat(product.original_price) : undefined,
+              quantity: item.quantity,
+              image: model?.official_images?.[0],
+              deliveryTime: product.delivery_time_days || 0,
+              warranty: product.warranty_months || 0,
+              modelName: modelName,
+              brandName: brandName,
+              qualityName: qualityName,
+              addedAt: item.added_at,
+              productType: 'existing'
+            };
+          }
         })
       );
 
@@ -285,10 +373,37 @@ export class CartAPI {
 
   /**
    * Add item to cart or update quantity if already exists
+   * Supports both existing products and marketplace products
    */
-  static async addToCart(productId: string, quantity: number = 1): Promise<{ success: boolean; error?: string }> {
+  static async addToCart(
+    productIdOrOptions: string | { 
+      market_vendor_product_id?: string; 
+      product_id?: string; 
+      quantity?: number; 
+      product_type?: 'existing' | 'marketplace' 
+    }, 
+    quantity: number = 1
+  ): Promise<{ success: boolean; error?: string }> {
     try {
-      console.log('🎯 AddToCart: Starting with productId:', productId, 'quantity:', quantity);
+      // Parse input parameters
+      let productId: string | null = null;
+      let marketVendorProductId: string | null = null;
+      let productType: 'existing' | 'marketplace' = 'existing';
+      let actualQuantity = quantity;
+
+      if (typeof productIdOrOptions === 'string') {
+        // Legacy format - existing product
+        productId = productIdOrOptions;
+        productType = 'existing';
+      } else {
+        // New format - supports both types
+        productId = productIdOrOptions.product_id || null;
+        marketVendorProductId = productIdOrOptions.market_vendor_product_id || null;
+        productType = productIdOrOptions.product_type || 'existing';
+        actualQuantity = productIdOrOptions.quantity || quantity;
+      }
+
+      console.log('🎯 AddToCart: Starting with', { productId, marketVendorProductId, productType, actualQuantity });
       
       const customerId = await this.getCustomerId();
       if (!customerId) {
@@ -326,13 +441,21 @@ export class CartAPI {
 
       console.log('🛒 Using cart ID:', cart.id);
 
-      // Check if item already exists in cart
-      const { data: existingItem, error: checkError } = await supabase
+      // Build query for checking existing item based on product type
+      let existingItemQuery = supabase
         .from('cart_items')
         .select('id, quantity')
-        .eq('cart_id', cart.id)
-        .eq('product_id', productId)
-        .single();
+        .eq('cart_id', cart.id);
+
+      if (productType === 'marketplace' && marketVendorProductId) {
+        existingItemQuery = existingItemQuery.eq('market_vendor_product_id', marketVendorProductId);
+      } else if (productType === 'existing' && productId) {
+        existingItemQuery = existingItemQuery.eq('product_id', productId);
+      } else {
+        return { success: false, error: 'Invalid product information provided' };
+      }
+
+      const { data: existingItem, error: checkError } = await existingItemQuery.single();
 
       if (checkError && checkError.code !== 'PGRST116') { // PGRST116 = no rows returned
         console.log('❌ Error checking existing item:', checkError);
@@ -340,12 +463,12 @@ export class CartAPI {
       }
 
       if (existingItem) {
-        console.log('🔄 Item exists, updating quantity from', existingItem.quantity, 'to', existingItem.quantity + quantity);
+        console.log('🔄 Item exists, updating quantity from', existingItem.quantity, 'to', existingItem.quantity + actualQuantity);
         
         // Update existing item quantity
         const { error: updateError } = await supabase
           .from('cart_items')
-          .update({ quantity: existingItem.quantity + quantity })
+          .update({ quantity: existingItem.quantity + actualQuantity })
           .eq('id', existingItem.id);
 
         if (updateError) {
@@ -357,14 +480,22 @@ export class CartAPI {
       } else {
         console.log('➕ Adding new item to cart');
         
+        // Prepare insert data based on product type
+        const insertData: any = {
+          cart_id: cart.id,
+          quantity: actualQuantity
+        };
+
+        if (productType === 'marketplace' && marketVendorProductId) {
+          insertData.market_vendor_product_id = marketVendorProductId;
+        } else if (productType === 'existing' && productId) {
+          insertData.product_id = productId;
+        }
+
         // Add new item to cart
         const { error: insertError } = await supabase
           .from('cart_items')
-          .insert([{
-            cart_id: cart.id,
-            product_id: productId,
-            quantity: quantity
-          }]);
+          .insert([insertData]);
 
         if (insertError) {
           console.log('❌ Error adding new cart item:', insertError);

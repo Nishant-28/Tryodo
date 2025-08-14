@@ -21,7 +21,8 @@ import { useCart } from '@/contexts/CartContext';
 import { PulsatingButton } from "@/components/magicui/pulsating-button";
 import { ShineBorder } from "@/components/magicui/shine-border";
 import { deliveryUtils, type DeliverySlot } from '@/lib/deliveryApi';
-import { OrderAPI } from '@/lib/api';
+import { OrderAPI, MarketplaceStockAPI } from '@/lib/api';
+import { hapticFeedback } from '@/lib/haptic';
 
 interface CartItem {
   id: string;
@@ -37,6 +38,8 @@ interface CartItem {
   qualityName?: string;
   brandName?: string;
   modelName?: string;
+  productType?: 'existing' | 'marketplace';
+  marketVendorProductId?: string;
 }
 
 interface Address {
@@ -100,13 +103,13 @@ const Checkout = () => {
   const [estimatedDelivery, setEstimatedDelivery] = useState<string>('');
 
   const paymentMethods: PaymentMethod[] = [
-    {
-      id: 'razorpay_upi',
-      name: 'UPI Payment',
-      type: 'upi',
-      icon: <div className="h-5 w-5 bg-green-600 rounded text-white text-xs flex items-center justify-center">₹</div>,
-      description: 'Pay with Google Pay, PhonePe, Paytm'
-    },
+    // {
+    //   id: 'razorpay_upi',
+    //   name: 'UPI Payment',
+    //   type: 'upi',
+    //   icon: <div className="h-5 w-5 bg-green-600 rounded text-white text-xs flex items-center justify-center">₹</div>,
+    //   description: 'Pay with Google Pay, PhonePe, Paytm'
+    // },
     {
       id: 'cod',
       name: 'Cash on Delivery',
@@ -217,20 +220,25 @@ const Checkout = () => {
       !newAddress.address_box.trim() ||
       !newAddress.phone_number.trim()
     ) {
+      hapticFeedback.error();
       showErrorToast("Please fill in all required fields.");
       return;
     }
 
     if (!/^\d{6}$/.test(newAddress.pincode)) {
+      hapticFeedback.error();
       showErrorToast("Pincode must be 6 digits.");
       return;
     }
 
     const MAX_ADDRESSES = 5;
     if (!editingAddressId && addresses.length >= MAX_ADDRESSES) {
+      hapticFeedback.error();
       showErrorToast(`You can add up to ${MAX_ADDRESSES} addresses only.`);
       return;
     }
+
+    hapticFeedback.button();
 
     try {
       let operationSuccess = false;
@@ -248,6 +256,7 @@ const Checkout = () => {
         setAddresses(addresses.map(addr =>
           addr.id === editingAddressId ? { ...addr, ...newAddress } : addr
         ));
+        hapticFeedback.success();
         toast({
           title: "Success",
           description: "Address updated successfully.",
@@ -269,6 +278,7 @@ const Checkout = () => {
 
         setAddresses([...addresses, data]);
         setSelectedAddress(data.id);
+        hapticFeedback.success();
         toast({
           title: "Success",
           description: "Address added successfully.",
@@ -289,6 +299,7 @@ const Checkout = () => {
 
     } catch (error: any) {
       console.error('Error saving address:', error);
+      hapticFeedback.error();
       showErrorToast(error.message || "Failed to save address.");
     }
   };
@@ -298,9 +309,12 @@ const Checkout = () => {
 
     const MIN_ADDRESSES = 1;
     if (addresses.length === MIN_ADDRESSES) {
+      hapticFeedback.error();
       showErrorToast(`You must have at least ${MIN_ADDRESSES} address.`);
       return;
     }
+
+    hapticFeedback.delete();
 
     try {
       const { error } = await supabase
@@ -319,12 +333,14 @@ const Checkout = () => {
         setSelectedAddress('');
       }
 
+      hapticFeedback.success();
       toast({
         title: "Success",
         description: "Address deleted successfully.",
       });
     } catch (error: any) {
       console.error('Error deleting address:', error);
+      hapticFeedback.error();
       showErrorToast(error.message || "Failed to delete address.");
     }
   };
@@ -351,30 +367,69 @@ const Checkout = () => {
 
   const handlePlaceOrder = async () => {
     if (!selectedAddress) {
+      hapticFeedback.error();
       showErrorToast("Please select a delivery address.");
       return;
     }
     if (!selectedSlot) {
+      hapticFeedback.error();
       showErrorToast("Please select a delivery slot.");
       return;
     }
     if (!selectedPayment) {
+      hapticFeedback.error();
       showErrorToast("Please select a payment method.");
       return;
     }
     if (!user || !profile || !customerId) {
+      hapticFeedback.error();
       showErrorToast("You must be logged in to place an order.");
       return;
     }
 
+    hapticFeedback.checkout();
     setIsPlacingOrder(true);
 
     try {
+      // First, validate stock availability for marketplace products
+      const marketplaceItems = cart.items
+        .filter(item => item.productType === 'marketplace' && item.marketVendorProductId)
+        .map(item => ({
+          marketVendorProductId: item.marketVendorProductId!,
+          requestedQuantity: item.quantity
+        }));
+
+      if (marketplaceItems.length > 0) {
+        const stockValidation = await MarketplaceStockAPI.validateStockAvailability(marketplaceItems);
+        
+        if (!stockValidation.success) {
+          showErrorToast("Failed to validate stock availability. Please try again.");
+          return;
+        }
+
+        if (!stockValidation.data?.all_available) {
+          const unavailableItems = stockValidation.data?.items.filter(item => !item.available) || [];
+          const errorMessages = unavailableItems.map(item => 
+            `${item.productName}: ${item.error}`
+          ).join('\n');
+          
+          showErrorToast(`Some items are no longer available:\n${errorMessages}`);
+          
+          // Redirect to cart page for user to review and update
+          navigate('/cart');
+          return;
+        }
+      }
+
       const { subtotal, shippingCharges, taxAmount, total } = calculateTotals();
       
       // Transform cart items to the correct format for order creation
       const transformedItems = cart.items.map(item => ({
-        vendor_product_id: item.productId,
+        // For existing products
+        vendor_product_id: item.productType === 'existing' ? item.productId : null,
+        // For marketplace products
+        market_vendor_product_id: item.productType === 'marketplace' ? item.marketVendorProductId : null,
+        product_type: item.productType || 'existing',
         vendor_id: item.vendorId,
         product_name: item.name,
         product_description: `${item.brandName || ''} ${item.modelName || ''}`.trim() || item.name,
@@ -406,6 +461,25 @@ const Checkout = () => {
       const result = await OrderAPI.createOrder(orderData);
 
       if (result.success) {
+        // If order creation succeeded and we have marketplace items, reserve stock atomically
+        if (marketplaceItems.length > 0) {
+          const stockReservation = await MarketplaceStockAPI.validateAndReserveStock(
+            marketplaceItems,
+            result.data.id
+          );
+          
+          if (!stockReservation.success) {
+            // If stock reservation fails, we need to cancel the order
+            console.error('Stock reservation failed after order creation:', stockReservation.error);
+            
+            // Note: In a production system, you might want to implement order cancellation here
+            // For now, we'll show an error but the order will still be created
+            hapticFeedback.error();
+            showErrorToast("Order created but stock reservation failed. Please contact support.");
+          }
+        }
+
+        hapticFeedback.success();
         toast({
           title: "Order Placed Successfully!",
           description: `Your order #${result.data.order_number} has been placed.`,
@@ -421,6 +495,7 @@ const Checkout = () => {
         throw new Error(result.error || "Failed to place order.");
       }
     } catch (error: any) {
+      hapticFeedback.error();
       showErrorToast(error.message);
     } finally {
       setIsPlacingOrder(false);
@@ -438,7 +513,10 @@ const Checkout = () => {
             <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-gray-800 mb-2">Your cart is empty!</h2>
             <p className="text-gray-600 mb-6">Looks like you haven't added anything to your cart yet.</p>
-            <Button onClick={() => navigate('/order')}>
+            <Button onClick={() => {
+              hapticFeedback.navigation();
+              navigate('/order');
+            }}>
               Start Shopping
             </Button>
           </div>
@@ -476,7 +554,12 @@ const Checkout = () => {
                 </CardTitle>
                 <Dialog open={showAddressModal} onOpenChange={setShowAddressModal}>
                   <DialogTrigger asChild>
-                    <Button variant="outline" size="sm" className="flex items-center gap-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="flex items-center gap-2"
+                      onClick={() => hapticFeedback.button()}
+                    >
                       <Plus className="h-4 w-4" /> Add New Address
                     </Button>
                   </DialogTrigger>
@@ -564,7 +647,10 @@ const Checkout = () => {
                           (selectedAddress === address.id
                             ? "border-orange-500 ring-2 ring-orange-500" : "border-gray-200")
                         }
-                        onClick={() => setSelectedAddress(address.id)}
+                        onClick={() => {
+                          hapticFeedback.button();
+                          setSelectedAddress(address.id);
+                        }}
                       >
                         {selectedAddress === address.id && (
                           <ShineBorder
@@ -588,6 +674,7 @@ const Checkout = () => {
                             className="h-8 w-8 text-gray-500 hover:text-orange-500"
                             onClick={(e) => {
                               e.stopPropagation();
+                              hapticFeedback.button();
                               setNewAddress({
                                 shop_name: address.shop_name,
                                 owner_name: address.owner_name,
@@ -675,6 +762,93 @@ const Checkout = () => {
                     </AlertDescription>
                   </Alert>
                 )}
+              </CardContent>
+            </Card>
+
+            {/* Cart Items Review */}
+            <Card className="bg-white rounded-2xl shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                  <Shield className="h-6 w-6 text-blue-600" />
+                  Order Items
+                </CardTitle>
+                <CardDescription>Review your items before checkout</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Group items by vendor */}
+                {Object.entries(
+                  cart.items.reduce((groups, item) => {
+                    const vendorKey = `${item.vendorId}-${item.vendor}`;
+                    if (!groups[vendorKey]) {
+                      groups[vendorKey] = {
+                        vendor: item.vendor,
+                        vendorId: item.vendorId,
+                        items: []
+                      };
+                    }
+                    groups[vendorKey].items.push(item);
+                    return groups;
+                  }, {} as Record<string, { vendor: string; vendorId: string; items: CartItem[] }>)
+                ).map(([vendorKey, group]) => (
+                  <div key={vendorKey} className="space-y-3">
+                    {/* Vendor Header */}
+                    <div className="flex items-center gap-2 px-2">
+                      <div className="h-px bg-gray-200 flex-1" />
+                      <span className="text-sm font-medium text-gray-600 bg-gray-50 px-3 py-1 rounded-full">
+                        {group.vendor}
+                      </span>
+                      <div className="h-px bg-gray-200 flex-1" />
+                    </div>
+
+                    {/* Vendor Items */}
+                    {group.items.map((item) => (
+                      <div key={item.id} className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg">
+                        {item.image && (
+                          <div className="w-12 h-12 bg-gray-200 rounded-lg overflow-hidden flex-shrink-0">
+                            <img
+                              src={item.image}
+                              alt={item.name}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                e.currentTarget.src = '/placeholder.svg';
+                              }}
+                            />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-medium text-gray-900 truncate">{item.name}</h4>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            <Badge 
+                              variant={item.productType === 'marketplace' ? 'default' : 'secondary'} 
+                              className="text-xs"
+                            >
+                              {item.productType === 'marketplace' ? 'Marketplace' : 'Direct'}
+                            </Badge>
+                            {item.qualityName && (
+                              <Badge variant="outline" className="text-xs">
+                                {item.qualityName}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-medium text-gray-900">₹{item.price.toFixed(2)}</div>
+                          <div className="text-sm text-gray-500">Qty: {item.quantity}</div>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Vendor Subtotal */}
+                    <div className="flex justify-between items-center px-2 py-1 bg-blue-50 rounded">
+                      <span className="text-sm font-medium text-blue-900">
+                        {group.vendor} Subtotal
+                      </span>
+                      <span className="text-sm font-medium text-blue-900">
+                        ₹{group.items.reduce((sum, item) => sum + (item.price * item.quantity), 0).toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
               </CardContent>
             </Card>
 

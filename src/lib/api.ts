@@ -627,14 +627,19 @@ export class AnalyticsAPI {
       // Fallback: compute summary directly from order_items and orders
       console.log('RPC failed or returned empty, computing from order_items...');
 
-      // Get vendor's sales data from order_items
+      // Get vendor's sales data from order_items with vendor_products to get category/quality info
       const { data: orderItems, error: orderError } = await supabase
         .from('order_items')
         .select(`
+          id,
           line_total,
           unit_price,
           quantity,
           item_status,
+          category_name,
+          quality_type_name,
+          vendor_product_id,
+          vendor_id,
           order:orders (
             order_status,
             payment_status,
@@ -663,7 +668,7 @@ export class AnalyticsAPI {
         console.warn('Error fetching product count:', productError);
       }
 
-      // Calculate metrics from order_items
+      // Calculate metrics from order_items with proper per-product commission
       const items = orderItems || [];
       
       // Filter items by status for accurate sales calculation
@@ -681,9 +686,90 @@ export class AnalyticsAPI {
       
       const deliveredSales = totalSales; // Same as totalSales since we're already filtering delivered items
 
-      // Calculate commission (assume 15% default commission rate)
-      const commissionRate = 0.15;
-      const totalCommission = totalSales * commissionRate;
+      // Calculate commission per product using proper commission rules
+      let totalCommission = 0;
+      
+      console.log(`🔍 Calculating commission for ${deliveredItems.length} delivered items for vendor ${vendorId}`);
+      
+      for (const item of deliveredItems) {
+        const lineTotal = parseFloat(item.line_total || 0);
+        let commissionRate = 0.15; // Default fallback rate
+        
+        try {
+          // First, get the vendor_product to find category_id and quality_type_id
+          if (item.vendor_product_id) {
+            const { data: vendorProduct, error: vpError } = await supabase
+              .from('vendor_products')
+              .select('category_id, quality_type_id')
+              .eq('id', item.vendor_product_id)
+              .single();
+            
+            if (!vpError && vendorProduct) {
+              // Try to get vendor-specific commission rate first
+              if (vendorProduct.quality_type_id) {
+                const { data: vendorCommission, error: vcError } = await supabase
+                  .from('vendor_commissions')
+                  .select('commission_rate')
+                  .eq('vendor_id', vendorId)
+                  .eq('quality_id', vendorProduct.quality_type_id)
+                  .eq('is_active', true)
+                  .single();
+                
+                if (!vcError && vendorCommission) {
+                  commissionRate = vendorCommission.commission_rate / 100;
+                  console.log(`✅ Found vendor-specific commission: ${vendorCommission.commission_rate}% for quality ${vendorProduct.quality_type_id}`);
+                } else {
+                  console.log(`⚠️ No vendor-specific commission found, checking general rules...`);
+                  
+                  // Fall back to general commission rules
+                  if (vendorProduct.category_id && vendorProduct.quality_type_id) {
+                    const { data: qualityRule, error: qrError } = await supabase
+                      .from('commission_rules')
+                      .select('commission_percentage')
+                      .eq('category_id', vendorProduct.category_id)
+                      .eq('quality_id', vendorProduct.quality_type_id)
+                      .eq('is_active', true)
+                      .single();
+                    
+                    if (!qrError && qualityRule) {
+                      commissionRate = qualityRule.commission_percentage / 100;
+                      console.log(`✅ Found quality-specific rule: ${qualityRule.commission_percentage}%`);
+                    } else {
+                      // Fall back to category-only rule
+                      const { data: categoryRule, error: crError } = await supabase
+                        .from('commission_rules')
+                        .select('commission_percentage')
+                        .eq('category_id', vendorProduct.category_id)
+                        .eq('is_active', true)
+                        .is('quality_id', null)
+                        .single();
+                      
+                      if (!crError && categoryRule) {
+                        commissionRate = categoryRule.commission_percentage / 100;
+                        console.log(`✅ Found category rule: ${categoryRule.commission_percentage}%`);
+                      } else {
+                        console.log(`⚠️ No rules found, using default 15%`);
+                      }
+                    }
+                  }
+                }
+              }
+            } else {
+              console.log(`⚠️ Could not fetch vendor product ${item.vendor_product_id}:`, vpError?.message);
+            }
+          } else {
+            console.log(`⚠️ No vendor_product_id for item ${item.id}`);
+          }
+        } catch (error) {
+          console.warn(`Failed to calculate commission for item ${item.id}, using default rate:`, error);
+        }
+        
+        const itemCommission = lineTotal * commissionRate;
+        totalCommission += itemCommission;
+        
+        console.log(`📦 Item ${item.id}: ${item.category_name || 'Unknown'} (${item.quality_type_name || 'Unknown'}) - ₹${lineTotal} @ ${(commissionRate * 100).toFixed(1)}% = ₹${itemCommission.toFixed(2)}`);
+      }
+
       const netEarnings = totalSales - totalCommission;
 
       // Pending payouts (items not yet delivered)
@@ -695,19 +781,21 @@ export class AnalyticsAPI {
 
       const summary = {
         total_sales: totalSales,
-        total_commission: totalCommission,
-        net_earnings: netEarnings,
+        total_commission: Math.round(totalCommission * 100) / 100,
+        net_earnings: Math.round(netEarnings * 100) / 100,
         pending_payouts: pendingPayouts,
         total_orders: totalOrders,
         total_products: productCount || 0,
         delivered_sales: deliveredSales,
         average_order_value: totalOrders > 0 ? totalSales / totalOrders : 0,
-        commission_rate: commissionRate,
+        commission_rate: totalSales > 0 ? totalCommission / totalSales : 0,
         // Additional metrics for dashboard
         pending_orders: items.filter(item => item.item_status === 'pending').length,
         confirmed_orders: items.filter(item => item.item_status === 'confirmed').length,
         delivered_orders: deliveredItems.length,
       };
+
+      console.log(`📊 FINAL SUMMARY: Total Sales: ₹${totalSales}, Total Commission: ₹${totalCommission.toFixed(2)}, Net Earnings: ₹${netEarnings.toFixed(2)}`);
 
       return {
         success: true,
@@ -716,10 +804,10 @@ export class AnalyticsAPI {
       };
 
     } catch (error: any) {
-      console.error('Error in getVendorFinancialSummary:', error);
+      console.error('Error calculating vendor financial summary:', error);
       return {
         success: false,
-        error: error.message || 'Unknown error in vendor financial summary',
+        error: error.message || 'Failed to calculate vendor financial summary',
         data: null,
       };
     }
@@ -747,6 +835,7 @@ export class AnalyticsAPI {
           quantity,
           item_status,
           created_at,
+          vendor_product_id,
           orders!inner (
             order_status,
             created_at,
@@ -784,13 +873,11 @@ export class AnalyticsAPI {
         });
       }
 
-      // Process order items
-      const commissionRate = 0.15; // Default 15% commission
-      
-      (orderItems || []).forEach(item => {
+      // Process order items with proper commission calculation (same logic as financial summary)
+      for (const item of orderItems || []) {
         // Handle orders relationship - it could be an array or single object
         const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
-        if (!order) return;
+        if (!order) continue;
         
         const orderDate = order.created_at.split('T')[0];
         const dayData = dailyData.get(orderDate);
@@ -801,10 +888,43 @@ export class AnalyticsAPI {
           
           // Calculate metrics based on item status
           if (item.item_status === 'delivered') {
-            dayData.net_sales += parseFloat(item.line_total || 0);
-            const commission = parseFloat(item.line_total || 0) * commissionRate;
+            const lineTotal = parseFloat(item.line_total || 0);
+            dayData.net_sales += lineTotal;
+            
+            // Calculate commission using the same logic as financial summary
+            let commissionRate = 0.15; // Default fallback rate
+            
+            try {
+              // Get vendor_product to find category_id and quality_type_id
+              if (item.vendor_product_id) {
+                const { data: vendorProduct } = await supabase
+                  .from('vendor_products')
+                  .select('category_id, quality_type_id')
+                  .eq('id', item.vendor_product_id)
+                  .single();
+                
+                if (vendorProduct?.quality_type_id) {
+                  // Try vendor-specific commission first
+                  const { data: vendorCommission } = await supabase
+                    .from('vendor_commissions')
+                    .select('commission_rate')
+                    .eq('vendor_id', vendorId)
+                    .eq('quality_id', vendorProduct.quality_type_id)
+                    .eq('is_active', true)
+                    .single();
+                  
+                  if (vendorCommission) {
+                    commissionRate = vendorCommission.commission_rate / 100;
+                  }
+                }
+              }
+            } catch (error) {
+              // Fall back to default rate
+            }
+            
+            const commission = lineTotal * commissionRate;
             dayData.total_commission += commission;
-            dayData.net_earnings += (parseFloat(item.line_total || 0) - commission);
+            dayData.net_earnings += (lineTotal - commission);
             dayData.delivered_orders++;
           } else if (item.item_status === 'confirmed') {
             dayData.confirmed_orders++;
@@ -812,7 +932,7 @@ export class AnalyticsAPI {
             dayData.pending_orders++;
           }
         }
-      });
+      }
 
       // Convert to array and calculate final metrics
       const result = Array.from(dailyData.values()).map(day => ({
@@ -842,6 +962,71 @@ export class AnalyticsAPI {
         success: false,
         error: error.message || 'Failed to fetch day-wise analytics'
       };
+    }
+  }
+
+  /**
+   * Get platform P&L summary between dates
+   */
+  static async getPlatformPnLSummary(startDate: Date, endDate: Date): Promise<ApiResponse<{ total_revenue: number; total_commission: number; total_orders: number; avg_order_value: number }>> {
+    try {
+      const { data, error } = await supabase.rpc('get_platform_pnl_summary', {
+        p_start_date: startDate.toISOString().split('T')[0],
+        p_end_date: endDate.toISOString().split('T')[0],
+      });
+      if (error) throw error;
+      const row = (data && data[0]) || { total_revenue: 0, total_commission: 0, total_orders: 0, avg_order_value: 0 };
+      return { success: true, data: row, message: 'Platform P&L summary retrieved' };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'Failed to fetch P&L summary' };
+    }
+  }
+
+  /**
+   * Get platform P&L daily breakdown between dates
+   */
+  static async getPlatformPnLDaily(startDate: Date, endDate: Date): Promise<ApiResponse<Array<{ date_day: string; daily_revenue: number; daily_commission: number; orders_count: number; avg_order_value: number }>>> {
+    try {
+      const { data, error } = await supabase.rpc('get_platform_pnl_daily', {
+        p_start_date: startDate.toISOString().split('T')[0],
+        p_end_date: endDate.toISOString().split('T')[0],
+      });
+      if (error) throw error;
+      return { success: true, data: (data || []), message: 'Platform P&L daily breakdown retrieved' };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'Failed to fetch P&L daily breakdown' };
+    }
+  }
+
+  /**
+   * Get commission by category between dates
+   */
+  static async getPlatformCommissionByCategory(startDate: Date, endDate: Date): Promise<ApiResponse<Array<{ category_id: string; category_name: string; commission_amount: number }>>> {
+    try {
+      const { data, error } = await supabase.rpc('get_platform_commission_by_category', {
+        p_start_date: startDate.toISOString().split('T')[0],
+        p_end_date: endDate.toISOString().split('T')[0],
+      });
+      if (error) throw error;
+      return { success: true, data: (data || []), message: 'Commission by category retrieved' };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'Failed to fetch commission by category' };
+    }
+  }
+
+  /**
+   * Get vendor performance (revenue, commission) between dates
+   */
+  static async getPlatformVendorPerformance(startDate: Date, endDate: Date): Promise<ApiResponse<Array<{ vendor_id: string; vendor_name: string; total_revenue: number; total_commission: number; total_orders: number }>>> {
+    try {
+      const { data, error } = await supabase.rpc('get_platform_vendor_performance', {
+        p_start_date: startDate.toISOString().split('T')[0],
+        p_end_date: endDate.toISOString().split('T')[0],
+      });
+      if (error) throw error;
+      return { success: true, data: (data || []), message: 'Vendor performance retrieved' };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'Failed to fetch vendor performance' };
     }
   }
 }
@@ -917,12 +1102,25 @@ export class OrderAPI {
       const orderIds = orders.map(order => order.id);
       const deliveryAddressIds = orders.map(order => order.delivery_address_id).filter(Boolean);
 
-      // Fetch order items separately
+      // Fetch order items separately with support for both existing and marketplace products
       const { data: orderItems, error: orderItemsError } = await supabase
         .from('order_items')
         .select(`
           *,
-          vendor:vendors ( id, business_name )
+          vendor:vendors ( id, business_name ),
+          market_vendor_product:market_vendor_products (
+            id,
+            price,
+            delivery_time_hours,
+            market_product:market_products (
+              id,
+              name,
+              images,
+              category:market_categories ( name ),
+              brand:market_brands ( name )
+            ),
+            vendor:vendors ( id, business_name )
+          )
         `)
         .in('order_id', orderIds);
       if (orderItemsError) throw orderItemsError;
@@ -980,13 +1178,29 @@ export class OrderAPI {
         addresses?.forEach(addr => customerAddressesMap.set(addr.id, addr));
       }
 
-      // Organize order items by order_id
+      // Organize order items by order_id and enhance with product type information
       const orderItemsMap = new Map();
       orderItems?.forEach(item => {
         if (!orderItemsMap.has(item.order_id)) {
           orderItemsMap.set(item.order_id, []);
         }
-        orderItemsMap.get(item.order_id).push(item);
+        
+        // Enhance item with product type information
+        const enhancedItem = {
+          ...item,
+          product_type: item.product_type || 'existing',
+          // Add marketplace-specific fields if it's a marketplace product
+          ...(item.product_type === 'marketplace' && item.market_vendor_product ? {
+            market_product_name: item.market_vendor_product.market_product?.name,
+            market_product_images: item.market_vendor_product.market_product?.images,
+            market_product_category: item.market_vendor_product.market_product?.category?.name,
+            market_product_brand: item.market_vendor_product.market_product?.brand?.name,
+            market_delivery_time_hours: item.market_vendor_product.delivery_time_hours,
+            market_vendor: item.market_vendor_product.vendor
+          } : {})
+        };
+        
+        orderItemsMap.get(item.order_id).push(enhancedItem);
       });
 
       // Organize delivery partner orders by order_id
@@ -1450,7 +1664,7 @@ export class OrderAPI {
   }
 
   /**
-   * Cancel an order
+   * Cancel an order (Original method - for admin/vendor use)
    */
   static async cancelOrder(orderId: string, reason: string): Promise<ApiResponse<any>> {
     try {
@@ -1488,6 +1702,187 @@ export class OrderAPI {
         message: 'Order cancelled successfully'
       };
     } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to cancel order'
+      };
+    }
+  }
+
+  /**
+   * Cancel an order by customer (allows cancellation before delivery)
+   */
+  static async cancelOrderByCustomer(
+    orderId: string, 
+    customerId: string, 
+    reason: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      console.log('🚫 Customer cancelling order:', { orderId, customerId, reason });
+
+      // First, verify the order belongs to the customer and check its status
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .select('id, order_status, customer_id, total_amount, payment_status')
+        .eq('id', orderId)
+        .eq('customer_id', customerId)
+        .single();
+
+      if (orderError) {
+        console.error('❌ Error fetching order:', orderError);
+        throw orderError;
+      }
+
+      if (!order) {
+        return { 
+          success: false, 
+          error: 'Order not found or does not belong to this customer' 
+        };
+      }
+
+      // Check if order can be cancelled (before delivered)
+      const cancellableStatuses = [
+        'pending', 
+        'confirmed', 
+        'processing', 
+        'assigned_to_delivery', 
+        'packed', 
+        'picked_up', 
+        'out_for_delivery'
+      ];
+
+      if (!cancellableStatuses.includes(order.order_status.toLowerCase())) {
+        return { 
+          success: false, 
+          error: `Order cannot be cancelled. Current status: ${order.order_status}` 
+        };
+      }
+
+      // Update order status to cancelled
+      const { data: updatedOrder, error: updateError } = await supabase
+        .from('orders')
+        .update({
+          order_status: 'cancelled',
+          cancelled_date: new Date().toISOString(),
+          cancellation_reason: reason,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', orderId)
+        .eq('customer_id', customerId) // Double-check ownership
+        .select()
+        .single();
+
+      if (updateError) {
+        console.error('❌ Error updating order:', updateError);
+        throw updateError;
+      }
+
+      // Cancel all order items
+      const { error: itemsUpdateError } = await supabase
+        .from('order_items')
+        .update({
+          item_status: 'cancelled',
+          updated_at: new Date().toISOString()
+        })
+        .eq('order_id', orderId);
+
+      if (itemsUpdateError) {
+        console.error('❌ Error updating order items:', itemsUpdateError);
+        throw itemsUpdateError;
+      }
+
+      // Update delivery partner order status if assigned
+      const { error: dpOrderUpdateError } = await supabase
+        .from('delivery_partner_orders')
+        .update({
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('order_id', orderId);
+
+      if (dpOrderUpdateError) {
+        console.error('⚠️ Warning: Could not update delivery partner order status:', dpOrderUpdateError);
+        // Don't throw error as this is not critical for customer cancellation
+      }
+
+      // Restore inventory for cancelled items
+      const { data: orderItems, error: itemsError } = await supabase
+        .from('order_items')
+        .select('vendor_id, vendor_product_id, market_vendor_product_id, quantity, product_type')
+        .eq('order_id', orderId);
+
+      if (!itemsError && orderItems) {
+        for (const item of orderItems) {
+          // Handle both existing vendor products and marketplace products
+          if (item.vendor_product_id && (item.product_type === 'existing' || !item.product_type)) {
+            // Get current stock and increment it
+            const { data: product, error: fetchError } = await supabase
+              .from('vendor_products')
+              .select('stock_quantity')
+              .eq('vendor_id', item.vendor_id)
+              .eq('id', item.vendor_product_id)
+              .single();
+
+            if (!fetchError && product) {
+              const newStockQuantity = (product.stock_quantity || 0) + item.quantity;
+              
+              // Restore inventory for existing vendor products
+              const { error: inventoryError } = await supabase
+                .from('vendor_products')
+                .update({
+                  stock_quantity: newStockQuantity,
+                  is_in_stock: newStockQuantity > 0
+                })
+                .eq('vendor_id', item.vendor_id)
+                .eq('id', item.vendor_product_id);
+
+              if (inventoryError) {
+                console.error('⚠️ Warning: Error restoring inventory for vendor product:', item.vendor_product_id, inventoryError);
+                // Don't throw error as this is not critical for customer cancellation
+              }
+            }
+          } else if (item.market_vendor_product_id && item.product_type === 'marketplace') {
+            // Get current stock and increment it
+            const { data: product, error: fetchError } = await supabase
+              .from('market_vendor_products')
+              .select('stock_quantity')
+              .eq('vendor_id', item.vendor_id)
+              .eq('id', item.market_vendor_product_id)
+              .single();
+
+            if (!fetchError && product) {
+              const newStockQuantity = (product.stock_quantity || 0) + item.quantity;
+              
+              // Restore inventory for marketplace products
+              const { error: inventoryError } = await supabase
+                .from('market_vendor_products')
+                .update({
+                  stock_quantity: newStockQuantity,
+                  is_in_stock: newStockQuantity > 0
+                })
+                .eq('vendor_id', item.vendor_id)
+                .eq('id', item.market_vendor_product_id);
+
+              if (inventoryError) {
+                console.error('⚠️ Warning: Error restoring inventory for marketplace product:', item.market_vendor_product_id, inventoryError);
+                // Don't throw error as this is not critical for customer cancellation
+              }
+            }
+          }
+        }
+      }
+
+      console.log('✅ Order cancelled successfully by customer:', orderId);
+
+      return {
+        success: true,
+        data: updatedOrder,
+        message: 'Order cancelled successfully. Refund will be processed within 3-5 business days.'
+      };
+
+    } catch (error: any) {
+      console.error('💥 Error cancelling order by customer:', error);
       return {
         success: false,
         error: error.message || 'Failed to cancel order'
@@ -1814,33 +2209,62 @@ export class OrderAPI {
           throw new Error(`Vendor ${item.vendor_id} not found`);
         }
 
-        // Check if product exists
-        const { data: productExists, error: productError } = await supabase
-          .from('vendor_products')
-          .select('id, vendor_id')
-          .eq('id', item.vendor_product_id)
-          .single();
+        // Check if product exists based on product type
+        if (item.product_type === 'marketplace' && item.market_vendor_product_id) {
+          // Check marketplace product
+          const { data: marketProductExists, error: marketProductError } = await supabase
+            .from('market_vendor_products')
+            .select('id, vendor_id')
+            .eq('id', item.market_vendor_product_id)
+            .single();
 
-        if (productError || !productExists) {
-          console.error('Product not found:', item.vendor_product_id, productError);
-          throw new Error(`Product ${item.vendor_product_id} not found`);
-        }
+          if (marketProductError || !marketProductExists) {
+            console.error('Marketplace product not found:', item.market_vendor_product_id, marketProductError);
+            throw new Error(`Marketplace product ${item.market_vendor_product_id} not found`);
+          }
 
-        // Verify product belongs to vendor
-        if (productExists.vendor_id !== item.vendor_id) {
-          console.error('Product-vendor mismatch:', {
-            productId: item.vendor_product_id,
-            cartVendorId: item.vendor_id,
-            actualVendorId: productExists.vendor_id
-          });
-          throw new Error(`Product ${item.vendor_product_id} does not belong to vendor ${item.vendor_id}`);
+          // Verify product belongs to vendor
+          if (marketProductExists.vendor_id !== item.vendor_id) {
+            console.error('Marketplace product-vendor mismatch:', {
+              productId: item.market_vendor_product_id,
+              cartVendorId: item.vendor_id,
+              actualVendorId: marketProductExists.vendor_id
+            });
+            throw new Error(`Marketplace product ${item.market_vendor_product_id} does not belong to vendor ${item.vendor_id}`);
+          }
+        } else if (item.vendor_product_id) {
+          // Check existing product
+          const { data: productExists, error: productError } = await supabase
+            .from('vendor_products')
+            .select('id, vendor_id')
+            .eq('id', item.vendor_product_id)
+            .single();
+
+          if (productError || !productExists) {
+            console.error('Product not found:', item.vendor_product_id, productError);
+            throw new Error(`Product ${item.vendor_product_id} not found`);
+          }
+
+          // Verify product belongs to vendor
+          if (productExists.vendor_id !== item.vendor_id) {
+            console.error('Product-vendor mismatch:', {
+              productId: item.vendor_product_id,
+              cartVendorId: item.vendor_id,
+              actualVendorId: productExists.vendor_id
+            });
+            throw new Error(`Product ${item.vendor_product_id} does not belong to vendor ${item.vendor_id}`);
+          }
+        } else {
+          throw new Error('Invalid product information: missing product ID');
         }
         
         // Create order item with exact field names from schema - use the transformed item directly
         const orderItem = {
           order_id: order.id,
           vendor_id: item.vendor_id,
-          vendor_product_id: item.vendor_product_id,
+          vendor_product_id: item.product_type === 'existing' ? item.vendor_product_id : null,
+          market_vendor_product_id: item.product_type === 'marketplace' ? item.market_vendor_product_id : null,
+          product_type: item.product_type || 'existing',
           product_name: item.product_name,
           product_description: item.product_description || null,
           category_name: null,
@@ -1884,18 +2308,27 @@ export class OrderAPI {
         console.log('Final insert payload:', insertData);
 
         // Try with minimal required fields only to bypass schema cache issues
+        const insertPayload: any = {
+          order_id: insertData.order_id,
+          vendor_id: insertData.vendor_id,
+          product_name: insertData.product_name,
+          quantity: insertData.quantity,
+          unit_price: insertData.unit_price,
+          line_total: insertData.line_total,
+          item_status: 'pending',
+          product_type: item.product_type || 'existing'
+        };
+
+        // Add the appropriate product ID based on type
+        if (item.product_type === 'marketplace' && item.market_vendor_product_id) {
+          insertPayload.market_vendor_product_id = item.market_vendor_product_id;
+        } else if (item.vendor_product_id) {
+          insertPayload.vendor_product_id = item.vendor_product_id;
+        }
+
         const { error: itemError } = await supabase
           .from('order_items')
-          .insert({
-            order_id: insertData.order_id,
-            vendor_id: insertData.vendor_id,
-            vendor_product_id: insertData.vendor_product_id,
-            product_name: insertData.product_name,
-            quantity: insertData.quantity,
-            unit_price: insertData.unit_price,
-            line_total: insertData.line_total,
-            item_status: 'pending'
-          });
+          .insert(insertPayload);
           
         if (itemError) {
           console.error(`Error inserting order item ${i + 1}:`, itemError);
@@ -2927,6 +3360,70 @@ export class CommissionAPI {
   }
 
   /**
+   * Calculate commission rate for a specific vendor and product
+   */
+  static async getCommissionRateForProduct(
+    vendorId: string,
+    categoryId?: string,
+    qualityId?: string,
+    smartphoneModelId?: string
+  ): Promise<number> {
+    try {
+      // Try vendor-specific commission first
+      if (qualityId) {
+        const { data: vendorCommission } = await supabase
+          .from('vendor_commissions')
+          .select('commission_rate')
+          .eq('vendor_id', vendorId)
+          .eq('quality_id', qualityId)
+          .eq('is_active', true)
+          .single();
+        
+        if (vendorCommission) {
+          return vendorCommission.commission_rate / 100;
+        }
+      }
+
+      // Fall back to general commission rules
+      if (categoryId) {
+        // Try quality-specific rule first
+        if (qualityId) {
+          const { data: qualityRule } = await supabase
+            .from('commission_rules')
+            .select('commission_percentage')
+            .eq('category_id', categoryId)
+            .eq('quality_id', qualityId)
+            .eq('is_active', true)
+            .single();
+          
+          if (qualityRule) {
+            return qualityRule.commission_percentage / 100;
+          }
+        }
+
+        // Fall back to category-only rule
+        const { data: categoryRule } = await supabase
+          .from('commission_rules')
+          .select('commission_percentage')
+          .eq('category_id', categoryId)
+          .eq('is_active', true)
+          .is('quality_id', null)
+          .single();
+        
+        if (categoryRule) {
+          return categoryRule.commission_percentage / 100;
+        }
+      }
+
+      // Default fallback rate
+      return 0.15;
+    } catch (error) {
+      console.warn('Error calculating commission rate, using default:', error);
+      return 0.15;
+    }
+  }
+
+  /**
    * Calculate commission for a given amount
    */
   static async calculateCommission(
@@ -3035,45 +3532,49 @@ export class CommissionAPI {
 
 export class PayoutAPI {
   /**
-   * Get payouts for vendor or admin
+   * Get payouts with filtering and pagination
    */
   static async getPayouts(filters?: {
-    vendorId?: string;
+    recipientType?: 'vendor' | 'delivery_partner' | 'all';
     status?: string;
+    startDate?: string;
+    endDate?: string;
     limit?: number;
     offset?: number;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
   }): Promise<ApiResponse<any[]>> {
     try {
       let query = supabase
         .from('payouts')
         .select(`
           *,
-          vendor:vendors!recipient_id(
-            id,
-            business_name,
-            profile:profiles(full_name, phone)
-          ),
-          processed_by_profile:profiles!processed_by(
-            full_name
-          )
-        `)
-        .eq('recipient_type', 'vendor')
+          processed_by_profile:profiles!processed_by(full_name)
+        `) // Simplified select statement
         .order('created_at', { ascending: false });
 
-      if (filters?.vendorId) {
-        query = query.eq('recipient_id', filters.vendorId);
-      }
-
-      if (filters?.status) {
-        query = query.eq('payout_status', filters.status);
-      }
-
-      if (filters?.limit) {
-        query = query.limit(filters.limit);
-      }
-
-      if (filters?.offset) {
-        query = query.range(filters.offset, filters.offset + (filters.limit || 50) - 1);
+      if (filters) {
+        if (filters.recipientType && filters.recipientType !== 'all') {
+          query = query.eq('recipient_type', filters.recipientType);
+        }
+        if (filters.status) {
+          query = query.eq('payout_status', filters.status);
+        }
+        if (filters.startDate) {
+          query = query.gte('period_start', filters.startDate);
+        }
+        if (filters.endDate) {
+          query = query.lte('period_end', filters.endDate);
+        }
+        if (filters.limit) {
+          query = query.limit(filters.limit);
+        }
+        if (filters.offset) {
+          query = query.range(filters.offset, filters.offset + (filters.limit || 50) - 1);
+        }
+        if (filters.sortBy) {
+          query = query.order(filters.sortBy, { ascending: filters.sortOrder === 'asc' });
+        }
       }
 
       const { data, error } = await query;
@@ -3440,150 +3941,189 @@ export class PayoutAPI {
 
 export class WalletAPI {
   /**
-   * Get vendor wallet data from database
+   * Get vendor wallet data from database (with auto-sync)
    */
   static async getVendorWalletData(vendorId: string): Promise<ApiResponse<any>> {
     try {
-      // Fix the date calculations
-      const now = new Date();
-      const today = now.toISOString().split('T')[0];
-      
-      // Fix week calculation - create a new date object to avoid mutation
-      const weekStartDate = new Date(now);
-      weekStartDate.setDate(now.getDate() - now.getDay()); // Go back to Sunday
-      weekStartDate.setHours(0, 0, 0, 0); // Start of day
-      const weekStart = weekStartDate.toISOString().split('T')[0];
-      
-      // Month start calculation
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-
-      console.log('Date calculations:', {
-        today,
-        weekStart,
-        monthStart,
-        currentDay: now.getDay() // 0 = Sunday, 1 = Monday, etc.
-      });
-
-      // Get financial summary first
-      const financialSummary = await AnalyticsAPI.getVendorFinancialSummary(vendorId);
-      
-      // Get delivered orders for time-based calculations
-      const { data: deliveredItems, error: deliveredError } = await supabase
-        .from('order_items')
-        .select(`
-          line_total,
-          created_at,
-          orders!inner (
-            order_status,
-            created_at
-          )
-        `)
+      // First, try to get existing wallet from database
+      const { data: existingWallet, error: fetchError } = await supabase
+        .from('vendor_wallets')
+        .select('*')
         .eq('vendor_id', vendorId)
-        .eq('orders.order_status', 'delivered');
+        .single();
 
-      if (deliveredError) {
-        console.error('Error fetching delivered orders:', deliveredError);
+      // If wallet doesn't exist or has fetch error, sync/create it
+      if (fetchError || !existingWallet) {
+        console.log(`🔄 Wallet not found for vendor ${vendorId}, creating/syncing...`);
+        await this.syncWalletBalance(vendorId);
+        
+        // Try to fetch again after sync
+        const { data: newWallet, error: newFetchError } = await supabase
+          .from('vendor_wallets')
+          .select('*')
+          .eq('vendor_id', vendorId)
+          .single();
+
+        if (newFetchError) {
+          throw new Error(`Failed to fetch wallet after sync: ${newFetchError.message}`);
+        }
+
+        return {
+          success: true,
+          data: newWallet,
+          message: 'Vendor wallet created and retrieved successfully'
+        };
       }
 
-      const deliveredOrderItems = deliveredItems || [];
+      // Check if wallet data is stale (older than 5 minutes)
+      const lastUpdated = new Date(existingWallet.last_updated_balance_at || existingWallet.updated_at);
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
       
-      console.log('Delivered items found:', deliveredOrderItems.length);
-      
-      // Debug: Log some sample dates
-      if (deliveredOrderItems.length > 0) {
-        console.log('Sample order dates:', deliveredOrderItems.slice(0, 3).map(item => {
-          const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
+      if (lastUpdated < fiveMinutesAgo) {
+        console.log(`🔄 Wallet data is stale for vendor ${vendorId}, syncing...`);
+        // Sync wallet balance and get updated data
+        await this.syncWalletBalance(vendorId);
+        
+        // Fetch updated wallet data
+        const { data: updatedWallet, error: updateFetchError } = await supabase
+          .from('vendor_wallets')
+          .select('*')
+          .eq('vendor_id', vendorId)
+          .single();
+
+        if (updateFetchError) {
+          console.warn('Failed to fetch updated wallet, returning existing data');
           return {
-            order_created: order?.created_at || 'N/A',
-            item_created: item.created_at,
-            line_total: item.line_total
+            success: true,
+            data: existingWallet,
+            message: 'Vendor wallet retrieved successfully (sync failed)'
           };
-        }));
+        }
+
+        return {
+          success: true,
+          data: updatedWallet,
+          message: 'Vendor wallet retrieved and synced successfully'
+        };
       }
-
-      // Calculate time-based earnings using order creation date (not item creation date)
-      const todayEarnings = deliveredOrderItems
-        .filter(item => {
-          const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
-          if (!order) return false;
-          const orderDate = order.created_at.split('T')[0];
-          return orderDate === today;
-        })
-        .reduce((sum, item) => sum + (item.line_total || 0), 0);
-
-      const weekEarnings = deliveredOrderItems
-        .filter(item => {
-          const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
-          if (!order) return false;
-          const orderDate = order.created_at.split('T')[0];
-          return orderDate >= weekStart;
-        })
-        .reduce((sum, item) => sum + (item.line_total || 0), 0);
-
-      const monthEarnings = deliveredOrderItems
-        .filter(item => {
-          const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
-          if (!order) return false;
-          const orderDate = order.created_at.split('T')[0];
-          return orderDate >= monthStart;
-        })
-        .reduce((sum, item) => sum + (item.line_total || 0), 0);
-
-      console.log('Calculated earnings:', {
-        todayEarnings,
-        weekEarnings,
-        monthEarnings,
-        totalDeliveredItems: deliveredOrderItems.length
-      });
-
-      const walletData = {
-        vendor_id: vendorId,
-        available_balance: financialSummary.success ? financialSummary.data.net_earnings : 0,
-        pending_balance: financialSummary.success ? financialSummary.data.pending_payouts : 0,
-        total_earned: financialSummary.success ? financialSummary.data.total_sales : 0,
-        today_earnings: todayEarnings,
-        week_earnings: weekEarnings,
-        month_earnings: monthEarnings,
-        total_commission_paid: financialSummary.success ? financialSummary.data.total_commission : 0,
-        minimum_payout_amount: 1000,
-        payout_frequency: 'weekly',
-        auto_payout_enabled: false,
-        last_payout_date: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
 
       return {
         success: true,
-        data: walletData,
-        message: 'Vendor wallet data calculated successfully'
+        data: existingWallet,
+        message: 'Vendor wallet retrieved successfully'
       };
 
     } catch (error: any) {
-      console.error('Error calculating vendor wallet data:', error);
+      console.error('Error getting vendor wallet data:', error);
       return {
         success: false,
-        error: error.message || 'Failed to calculate vendor wallet data',
+        error: error.message || 'Failed to get vendor wallet data',
         data: null
       };
     }
   }
 
   /**
-   * Sync wallet balance with order and payout data
+   * Sync wallet balance with order and payout data (creates/updates wallet in database)
    */
   static async syncWalletBalance(vendorId: string): Promise<ApiResponse<any>> {
     try {
-      // Call the database function to sync wallet balance
-      const { data, error } = await supabase.rpc('sync_vendor_wallet_balance', {
-        p_vendor_id: vendorId
+      console.log(`🔄 Syncing wallet balance for vendor ${vendorId}...`);
+
+      // Get financial summary using our corrected commission calculation
+      const financialSummary = await AnalyticsAPI.getVendorFinancialSummary(vendorId);
+      
+      if (!financialSummary.success) {
+        throw new Error(`Failed to get financial summary: ${financialSummary.error}`);
+      }
+
+      const summary = financialSummary.data;
+
+      // Calculate time-based earnings
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()).toISOString().split('T')[0];
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+
+      // Get delivered orders for time-based calculations
+      const { data: deliveredItems } = await supabase
+        .from('order_items')
+        .select(`
+          line_total,
+          orders!inner (
+            created_at
+          )
+        `)
+        .eq('vendor_id', vendorId)
+        .eq('item_status', 'delivered');
+
+      const deliveredOrderItems = deliveredItems || [];
+
+      // Calculate time-based earnings
+      const todayEarnings = deliveredOrderItems
+        .filter(item => {
+          const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
+          const orderDate = order?.created_at?.split('T')[0];
+          return orderDate === today;
+        })
+        .reduce((sum, item) => sum + parseFloat(item.line_total || 0), 0);
+
+      const weekEarnings = deliveredOrderItems
+        .filter(item => {
+          const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
+          const orderDate = order?.created_at?.split('T')[0];
+          return orderDate >= weekStart;
+        })
+        .reduce((sum, item) => sum + parseFloat(item.line_total || 0), 0);
+
+      const monthEarnings = deliveredOrderItems
+        .filter(item => {
+          const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
+          const orderDate = order?.created_at?.split('T')[0];
+          return orderDate >= monthStart;
+        })
+        .reduce((sum, item) => sum + parseFloat(item.line_total || 0), 0);
+
+      // Prepare wallet data for upsert
+      const walletData = {
+        vendor_id: vendorId,
+        available_balance: Math.round(summary.net_earnings * 100) / 100,
+        pending_balance: Math.round(summary.pending_payouts * 100) / 100,
+        total_earned: Math.round(summary.total_sales * 100) / 100,
+        total_commission_paid: Math.round(summary.total_commission * 100) / 100,
+        today_earnings: Math.round(todayEarnings * 100) / 100,
+        week_earnings: Math.round(weekEarnings * 100) / 100,
+        month_earnings: Math.round(monthEarnings * 100) / 100,
+        average_commission_rate: summary.commission_rate,
+        last_updated_balance_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        last_transaction_date: new Date().toISOString()
+      };
+
+      console.log(`💰 Wallet data for vendor ${vendorId}:`, {
+        available_balance: walletData.available_balance,
+        total_commission_paid: walletData.total_commission_paid,
+        total_earned: walletData.total_earned
       });
 
-      if (error) throw error;
+      // Upsert wallet data (create if not exists, update if exists)
+      const { data: upsertedWallet, error: upsertError } = await supabase
+        .from('vendor_wallets')
+        .upsert(walletData, {
+          onConflict: 'vendor_id'
+        })
+        .select()
+        .single();
+
+      if (upsertError) {
+        throw new Error(`Failed to upsert wallet: ${upsertError.message}`);
+      }
+
+      console.log(`✅ Wallet synced successfully for vendor ${vendorId}`);
 
       return {
         success: true,
-        data: null,
+        data: upsertedWallet,
         message: 'Wallet balance synchronized successfully'
       };
 
@@ -3667,7 +4207,23 @@ export class WalletAPI {
    */
   static async getPayoutHistory(vendorId: string): Promise<ApiResponse<any[]>> {
     try {
-      return await PayoutAPI.getPayouts({ vendorId });
+      // Note: PayoutAPI.getPayouts now uses recipientType filter instead of vendorId
+      // We'll need to filter by vendor after getting results, or modify the PayoutAPI
+      const response = await PayoutAPI.getPayouts({ 
+        recipientType: 'vendor' 
+      });
+      
+      if (response.success && response.data) {
+        // Filter results by vendor_id since PayoutAPI doesn't support vendor filtering directly
+        const vendorPayouts = response.data.filter(payout => payout.recipient_id === vendorId);
+        return {
+          success: true,
+          data: vendorPayouts,
+          message: `Retrieved ${vendorPayouts.length} payout records for vendor`
+        };
+      }
+      
+      return response;
     } catch (error: any) {
       console.error('Error getting payout history:', error);
       return {
@@ -3731,6 +4287,763 @@ export class WalletAPI {
       return {
         success: false,
         error: error.message || 'Failed to sync all wallets'
+      };
+    }
+  }
+}
+
+// Marketplace Stock Management API
+export class MarketplaceStockAPI {
+  /**
+   * Update stock quantity for a marketplace vendor product
+   */
+  static async updateStock(
+    marketVendorProductId: string,
+    newQuantity: number,
+    vendorId: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      // Import security utilities
+      const { InputValidator, InputSanitizer, AccessControl, SecurityAudit } = await import('./security');
+      
+      // Validate and sanitize input
+      const sanitizedQuantity = InputSanitizer.sanitizeNumber(newQuantity, 0, 999999);
+      const sanitizedProductId = InputSanitizer.sanitizeUuid(marketVendorProductId);
+      const sanitizedVendorId = InputSanitizer.sanitizeUuid(vendorId);
+      
+      // Check access permissions
+      const hasAccess = await AccessControl.checkVendorProductAccess(
+        supabase.auth.user()?.id || '', 
+        sanitizedProductId
+      );
+      
+      if (!hasAccess) {
+        await SecurityAudit.logSuspiciousMarketplaceActivity(
+          supabase.auth.user()?.id || '',
+          'unauthorized_stock_update',
+          { productId: sanitizedProductId, attemptedQuantity: sanitizedQuantity }
+        );
+        
+        return {
+          success: false,
+          error: 'Access denied'
+        };
+      }
+
+      // Update stock with automatic status update via trigger
+      const { data, error } = await supabase
+        .from('market_vendor_products')
+        .update({
+          stock_quantity: newQuantity,
+          last_stock_update: new Date().toISOString()
+        })
+        .eq('id', marketVendorProductId)
+        .eq('vendor_id', vendorId) // Ensure vendor can only update their own products
+        .select(`
+          id,
+          stock_quantity,
+          is_in_stock,
+          low_stock_threshold,
+          last_stock_update,
+          market_product:market_products (
+            name
+          )
+        `)
+        .single();
+
+      if (error) throw error;
+
+      // Check if stock is below threshold
+      const isLowStock = newQuantity <= (data.low_stock_threshold || 5);
+
+      return {
+        success: true,
+        data: {
+          ...data,
+          is_low_stock: isLowStock
+        },
+        message: `Stock updated successfully. ${isLowStock ? 'Warning: Stock is below threshold.' : ''}`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to update stock'
+      };
+    }
+  }
+
+  /**
+   * Get low stock alerts for a vendor
+   */
+  static async getLowStockAlerts(vendorId: string): Promise<ApiResponse<any[]>> {
+    try {
+      const { data, error } = await supabase
+        .from('market_vendor_products')
+        .select(`
+          id,
+          stock_quantity,
+          low_stock_threshold,
+          is_in_stock,
+          last_stock_update,
+          market_product:market_products (
+            id,
+            name,
+            images
+          )
+        `)
+        .eq('vendor_id', vendorId)
+        .eq('is_active', true)
+        .or(`stock_quantity.lte.low_stock_threshold,is_in_stock.eq.false`)
+        .order('stock_quantity', { ascending: true });
+
+      if (error) throw error;
+
+      const alerts = (data || []).map(item => ({
+        ...item,
+        alert_type: item.stock_quantity === 0 ? 'out_of_stock' : 'low_stock',
+        alert_message: item.stock_quantity === 0 
+          ? 'Out of stock' 
+          : `Low stock: ${item.stock_quantity} remaining (threshold: ${item.low_stock_threshold})`
+      }));
+
+      return {
+        success: true,
+        data: alerts,
+        message: `Found ${alerts.length} stock alerts`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get stock alerts'
+      };
+    }
+  }
+
+  /**
+   * Bulk update stock quantities
+   */
+  static async bulkUpdateStock(
+    updates: Array<{
+      marketVendorProductId: string;
+      newQuantity: number;
+    }>,
+    vendorId: string
+  ): Promise<ApiResponse<any[]>> {
+    try {
+      const results = [];
+      
+      for (const update of updates) {
+        const result = await this.updateStock(
+          update.marketVendorProductId,
+          update.newQuantity,
+          vendorId
+        );
+        results.push({
+          marketVendorProductId: update.marketVendorProductId,
+          ...result
+        });
+      }
+
+      const successCount = results.filter(r => r.success).length;
+      const failureCount = results.length - successCount;
+
+      return {
+        success: failureCount === 0,
+        data: results,
+        message: `Bulk update completed: ${successCount} successful, ${failureCount} failed`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to perform bulk stock update'
+      };
+    }
+  }
+
+  /**
+   * Get stock history for a product
+   */
+  static async getStockHistory(
+    marketVendorProductId: string,
+    vendorId: string,
+    limit: number = 50
+  ): Promise<ApiResponse<any[]>> {
+    try {
+      // This would require a stock_history table to be implemented
+      // For now, we'll return the current stock status
+      const { data, error } = await supabase
+        .from('market_vendor_products')
+        .select(`
+          id,
+          stock_quantity,
+          is_in_stock,
+          last_stock_update,
+          created_at,
+          updated_at,
+          market_product:market_products (
+            name
+          )
+        `)
+        .eq('id', marketVendorProductId)
+        .eq('vendor_id', vendorId)
+        .single();
+
+      if (error) throw error;
+
+      // Return current status as history entry
+      const history = [{
+        timestamp: data.last_stock_update || data.updated_at,
+        stock_quantity: data.stock_quantity,
+        is_in_stock: data.is_in_stock,
+        action: 'current_status',
+        product_name: data.market_product?.name
+      }];
+
+      return {
+        success: true,
+        data: history,
+        message: 'Stock history retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get stock history'
+      };
+    }
+  }
+
+  /**
+   * Set low stock threshold for a product
+   */
+  static async setLowStockThreshold(
+    marketVendorProductId: string,
+    threshold: number,
+    vendorId: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      if (threshold < 0) {
+        return {
+          success: false,
+          error: 'Threshold cannot be negative'
+        };
+      }
+
+      const { data, error } = await supabase
+        .from('market_vendor_products')
+        .update({
+          low_stock_threshold: threshold
+        })
+        .eq('id', marketVendorProductId)
+        .eq('vendor_id', vendorId)
+        .select(`
+          id,
+          stock_quantity,
+          low_stock_threshold,
+          market_product:market_products (
+            name
+          )
+        `)
+        .single();
+
+      if (error) throw error;
+
+      const isNowLowStock = data.stock_quantity <= threshold;
+
+      return {
+        success: true,
+        data: {
+          ...data,
+          is_now_low_stock: isNowLowStock
+        },
+        message: `Low stock threshold updated to ${threshold}${isNowLowStock ? '. Product is now below threshold.' : ''}`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to update low stock threshold'
+      };
+    }
+  }
+
+  /**
+   * Get stock summary for vendor dashboard
+   */
+  static async getVendorStockSummary(vendorId: string): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase
+        .from('market_vendor_products')
+        .select(`
+          id,
+          stock_quantity,
+          low_stock_threshold,
+          is_in_stock,
+          is_active
+        `)
+        .eq('vendor_id', vendorId);
+
+      if (error) throw error;
+
+      const products = data || [];
+      const totalProducts = products.length;
+      const activeProducts = products.filter(p => p.is_active).length;
+      const inStockProducts = products.filter(p => p.is_in_stock && p.is_active).length;
+      const outOfStockProducts = products.filter(p => !p.is_in_stock && p.is_active).length;
+      const lowStockProducts = products.filter(p => 
+        p.is_active && p.is_in_stock && p.stock_quantity <= (p.low_stock_threshold || 5)
+      ).length;
+
+      const totalStockValue = products
+        .filter(p => p.is_active)
+        .reduce((sum, p) => sum + p.stock_quantity, 0);
+
+      return {
+        success: true,
+        data: {
+          total_products: totalProducts,
+          active_products: activeProducts,
+          in_stock_products: inStockProducts,
+          out_of_stock_products: outOfStockProducts,
+          low_stock_products: lowStockProducts,
+          total_stock_units: totalStockValue,
+          stock_health_percentage: activeProducts > 0 ? Math.round((inStockProducts / activeProducts) * 100) : 0
+        },
+        message: 'Stock summary retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get stock summary'
+      };
+    }
+  }
+
+  /**
+   * Validate stock availability before order placement (using database function)
+   */
+  static async validateStockAvailability(
+    items: Array<{
+      marketVendorProductId: string;
+      requestedQuantity: number;
+    }>
+  ): Promise<ApiResponse<any>> {
+    try {
+      // Convert items to JSONB format for database function
+      const itemsJson = items.map(item => ({
+        market_vendor_product_id: item.marketVendorProductId,
+        quantity: item.requestedQuantity
+      }));
+
+      const { data, error } = await supabase.rpc('validate_marketplace_stock', {
+        p_items: itemsJson
+      });
+
+      if (error) throw error;
+
+      const validationResults = (data || []).map((item: any) => ({
+        marketVendorProductId: item.product_id,
+        productName: item.product_name,
+        available: item.is_available,
+        currentStock: item.available_quantity,
+        requestedQuantity: item.requested_quantity,
+        error: item.error_message
+      }));
+
+      const allAvailable = validationResults.every(item => item.available);
+
+      return {
+        success: true,
+        data: {
+          all_available: allAvailable,
+          items: validationResults
+        },
+        message: allAvailable ? 'All items are available' : 'Some items are not available'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to validate stock availability'
+      };
+    }
+  }
+
+  /**
+   * Validate and reserve stock atomically for order placement
+   */
+  static async validateAndReserveStock(
+    items: Array<{
+      marketVendorProductId: string;
+      requestedQuantity: number;
+    }>,
+    orderId: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      // Convert items to JSONB format for database function
+      const itemsJson = items.map(item => ({
+        market_vendor_product_id: item.marketVendorProductId,
+        quantity: item.requestedQuantity
+      }));
+
+      const { data, error } = await supabase.rpc('validate_and_reserve_marketplace_stock', {
+        p_items: itemsJson,
+        p_order_id: orderId
+      });
+
+      if (error) throw error;
+
+      const reservationResults = (data || []).map((item: any) => ({
+        marketVendorProductId: item.product_id,
+        productName: item.product_name,
+        available: item.is_available,
+        reserved: item.reserved,
+        currentStock: item.available_quantity,
+        requestedQuantity: item.requested_quantity,
+        error: item.error_message
+      }));
+
+      const allReserved = reservationResults.every(item => item.reserved);
+
+      return {
+        success: allReserved,
+        data: {
+          all_reserved: allReserved,
+          items: reservationResults
+        },
+        message: allReserved ? 'All stock reserved successfully' : 'Stock reservation failed'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to reserve stock'
+      };
+    }
+  }
+
+  /**
+   * Get stock notifications for a vendor
+   */
+  static async getStockNotifications(
+    vendorId: string,
+    unreadOnly: boolean = false
+  ): Promise<ApiResponse<any[]>> {
+    try {
+      let query = supabase
+        .from('stock_notifications')
+        .select(`
+          id,
+          notification_type,
+          message,
+          is_read,
+          created_at,
+          market_vendor_product:market_vendor_products (
+            id,
+            market_product:market_products (
+              name,
+              images
+            )
+          )
+        `)
+        .eq('vendor_id', vendorId)
+        .order('created_at', { ascending: false });
+
+      if (unreadOnly) {
+        query = query.eq('is_read', false);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved ${data?.length || 0} notifications`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get stock notifications'
+      };
+    }
+  }
+
+  /**
+   * Mark stock notification as read
+   */
+  static async markNotificationAsRead(
+    notificationId: string,
+    vendorId: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase
+        .from('stock_notifications')
+        .update({ is_read: true })
+        .eq('id', notificationId)
+        .eq('vendor_id', vendorId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: 'Notification marked as read'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to mark notification as read'
+      };
+    }
+  }
+
+}
+
+// Admin Analytics API
+export class AdminAnalyticsAPI {
+  /**
+   * Get comprehensive marketplace analytics
+   */
+  static async getMarketplaceAnalytics(
+    startDate?: string,
+    endDate?: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase.rpc('get_comprehensive_marketplace_analytics', {
+        p_start_date: startDate || null,
+        p_end_date: endDate || null
+      });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data?.[0] || {},
+        message: 'Marketplace analytics retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get marketplace analytics'
+      };
+    }
+  }
+
+  /**
+   * Get top performing products
+   */
+  static async getTopProducts(
+    limit: number = 10,
+    startDate?: string,
+    endDate?: string
+  ): Promise<ApiResponse<any[]>> {
+    try {
+      const { data, error } = await supabase.rpc('get_top_marketplace_products', {
+        p_limit: limit,
+        p_start_date: startDate || null,
+        p_end_date: endDate || null
+      });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved top ${data?.length || 0} products`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get top products'
+      };
+    }
+  }
+
+  /**
+   * Get vendor performance analytics
+   */
+  static async getVendorPerformance(
+    limit: number = 10,
+    startDate?: string,
+    endDate?: string
+  ): Promise<ApiResponse<any[]>> {
+    try {
+      const { data, error } = await supabase.rpc('get_vendor_performance_analytics', {
+        p_limit: limit,
+        p_start_date: startDate || null,
+        p_end_date: endDate || null
+      });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved performance data for ${data?.length || 0} vendors`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get vendor performance'
+      };
+    }
+  }
+
+  /**
+   * Get daily marketplace trends
+   */
+  static async getDailyTrends(days: number = 30): Promise<ApiResponse<any[]>> {
+    try {
+      const { data, error } = await supabase.rpc('get_marketplace_daily_trends', {
+        p_days: days
+      });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved ${days} days of trend data`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get daily trends'
+      };
+    }
+  }
+
+  /**
+   * Get category performance
+   */
+  static async getCategoryPerformance(
+    startDate?: string,
+    endDate?: string
+  ): Promise<ApiResponse<any[]>> {
+    try {
+      const { data, error } = await supabase.rpc('get_category_performance', {
+        p_start_date: startDate || null,
+        p_end_date: endDate || null
+      });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Retrieved performance data for ${data?.length || 0} categories`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get category performance'
+      };
+    }
+  }
+
+  /**
+   * Get admin stock alerts
+   */
+  static async getStockAlerts(): Promise<ApiResponse<any[]>> {
+    try {
+      const { data, error } = await supabase.rpc('get_admin_stock_alerts');
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: `Found ${data?.length || 0} stock alerts`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get stock alerts'
+      };
+    }
+  }
+
+  /**
+   * Get marketplace overview (cached view)
+   */
+  static async getMarketplaceOverview(): Promise<ApiResponse<any>> {
+    try {
+      const { data, error } = await supabase
+        .from('marketplace_overview')
+        .select('*')
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || {},
+        message: 'Marketplace overview retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get marketplace overview'
+      };
+    }
+  }
+
+  /**
+   * Get vendor request analytics
+   */
+  static async getVendorRequestAnalytics(
+    startDate?: string,
+    endDate?: string
+  ): Promise<ApiResponse<any>> {
+    try {
+      let query = supabase
+        .from('market_vendor_product_requests')
+        .select('status, created_at, reviewed_at');
+
+      if (startDate) {
+        query = query.gte('created_at', startDate);
+      }
+      if (endDate) {
+        query = query.lte('created_at', endDate);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      // Process the data to get analytics
+      const requests = data || [];
+      const totalRequests = requests.length;
+      const pendingRequests = requests.filter(r => r.status === 'pending').length;
+      const approvedRequests = requests.filter(r => r.status === 'approved').length;
+      const rejectedRequests = requests.filter(r => r.status === 'rejected').length;
+      const approvalRate = totalRequests > 0 ? (approvedRequests / totalRequests) * 100 : 0;
+
+      // Calculate average processing time for approved/rejected requests
+      const processedRequests = requests.filter(r => r.reviewed_at && r.status !== 'pending');
+      const avgProcessingTime = processedRequests.length > 0 
+        ? processedRequests.reduce((sum, r) => {
+            const processingTime = new Date(r.reviewed_at).getTime() - new Date(r.created_at).getTime();
+            return sum + processingTime;
+          }, 0) / processedRequests.length / (1000 * 60 * 60 * 24) // Convert to days
+        : 0;
+
+      return {
+        success: true,
+        data: {
+          total_requests: totalRequests,
+          pending_requests: pendingRequests,
+          approved_requests: approvedRequests,
+          rejected_requests: rejectedRequests,
+          approval_rate: Math.round(approvalRate * 100) / 100,
+          avg_processing_time_days: Math.round(avgProcessingTime * 100) / 100
+        },
+        message: 'Vendor request analytics retrieved successfully'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get vendor request analytics'
       };
     }
   }

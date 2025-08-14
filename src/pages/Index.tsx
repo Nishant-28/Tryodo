@@ -27,12 +27,12 @@ interface Product {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-  
+
   // Upside pricing fields
   final_price?: number;
   price_markup?: number;
   has_upside?: boolean;
-  
+
   // Joined data
   category?: {
     id: string;
@@ -69,7 +69,7 @@ const Index = () => {
   const categories = [
     { name: 'Display', icon: Monitor, color: 'blue' },
     { name: 'Battery', icon: Battery, color: 'green' },
-    { name: 'Back Cover', icon: Smartphone, color: 'orange' },  
+    { name: 'Back Cover', icon: Smartphone, color: 'orange' },
     { name: 'Buttons', icon: ToggleRight, color: 'green' },
   ];
 
@@ -105,7 +105,7 @@ const Index = () => {
       try {
         console.log('🚀 Initializing delivery auto-assignment system...');
         const result = await DeliveryAPI.scheduleAutoAssignment();
-        
+
         if (result.success && result.assignments > 0) {
           console.log(`✅ Auto-assignment completed: ${result.assignments} delivery partners assigned`);
         }
@@ -119,7 +119,7 @@ const Index = () => {
 
     // Set up periodic auto-assignment every 10 minutes
     const interval = setInterval(initializeAutoAssignment, 10 * 60 * 1000);
-    
+
     return () => clearInterval(interval);
   }, []);
 
@@ -219,7 +219,7 @@ const Index = () => {
   // Animate stats on page load
   useEffect(() => {
     const animateStats = () => {
-      const targetStats = { orders: 12500, customers: 5280, vendors: 240 };
+      const targetStats = { orders: 1250, customers: 58, vendors: 12 };
       const duration = 2000;
       const steps = 60;
       const stepTime = duration / steps;
@@ -258,7 +258,7 @@ const Index = () => {
     console.log('🛒 Index: Product Stock:', product.stock_quantity);
     console.log('🛒 Index: Product Active:', product.is_active);
     console.log('🛒 Index: Product In Stock:', product.is_in_stock);
-    
+
     try {
       console.log('🛒 Index: Calling addToCart function...');
       await addToCart(product.id, 1);
@@ -356,7 +356,7 @@ const Index = () => {
       </section>
 
       {/* Shop by Category Section */}
-      <section className="py-16 lg:py-20 bg-white">
+      {/* <section className="py-16 lg:py-20 bg-white">
         <div className="container mx-auto px-6">
           <div className="text-center mb-12">
             <h2 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-4">
@@ -386,10 +386,10 @@ const Index = () => {
             ))}
           </div>
         </div>
-      </section>
+      </section> */}
 
       {/* Trending Products Section */}
-      <section className="py-12 sm:py-16 lg:py-20 bg-gray-50">
+      {/* <section className="py-12 sm:py-16 lg:py-20 bg-gray-50">
         <div className="container mx-auto px-4 sm:px-6">
           <div className="text-center mb-8 sm:mb-12">
             <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 mb-3 sm:mb-4">
@@ -413,13 +413,13 @@ const Index = () => {
                 Our marketplace is ready for amazing mobile parts! Vendors can add products, and customers can start shopping.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                <Button 
-                  onClick={() => navigate('/order')} 
+                <Button
+                  onClick={() => navigate('/order')}
                   className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-2"
                 >
                   Browse Categories
                 </Button>
-                <Button 
+                <Button
                   variant="outline"
                   onClick={() => {
                     toast.info('Check the browser console and run debugCart.runAllTests() to test cart functionality');
@@ -436,7 +436,6 @@ const Index = () => {
             </div>
           ) : (
             <div className="relative">
-              {/* Horizontal Scroll Container */}
               <div className="overflow-x-auto scrollbar-hide -mx-4 sm:-mx-6">
                 <div className="flex space-x-4 sm:space-x-6 px-4 sm:px-6 pb-4">
                   {featuredProducts.map((product, index) => (
@@ -444,22 +443,22 @@ const Index = () => {
                       key={product.id}
                       className="flex-none w-64 sm:w-72 bg-white rounded-2xl shadow-soft hover:shadow-medium transition-all duration-300 group border border-gray-100 hover:border-orange-200 overflow-hidden"
                     >
-                      {/* Product Image */}
+                      {/* Product Image 
                       <div className="relative h-48 bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden">
                         <div className="absolute inset-0 flex items-center justify-center">
-                          {/* Category Badge */}
+                          {/* Category Badge 
                           <div className="absolute top-3 left-3 bg-orange-100 text-orange-800 px-2 py-1 rounded-full text-xs font-medium z-10">
                             {product.category?.name || 'Mobile Part'}
                           </div>
 
-                          {/* Stock Badge */}
+                          {/* Stock Badge }
                           {product.stock_quantity <= 5 && (
                             <div className="absolute top-3 right-3 bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs font-medium z-10">
                               Only {product.stock_quantity} left
                             </div>
                           )}
 
-                          {/* Product Icon/Image */}
+                          {/* Product Icon/Image 
                           <div className="text-6xl group-hover:scale-110 transition-transform duration-300">
                             {(() => {
                               const categoryIcons: { [key: string]: string } = {
@@ -477,24 +476,24 @@ const Index = () => {
                           </div>
                         </div>
 
-                        {/* Gradient overlay */}
+                        {/* Gradient overlay 
                         <div className="absolute inset-0 bg-gradient-to-t from-black/10 to-transparent"></div>
                       </div>
 
-                      {/* Product Info */}
+                      {/* Product Info 
                       <div className="p-5">
                         <h3 className="text-lg font-semibold text-gray-900 mb-2 line-clamp-2 leading-snug group-hover:text-orange-600 transition-colors duration-200">
-                          {product.model?.brand?.name && product.model?.model_name 
-                            ? `${product.model.brand.name} ${product.model.model_name}` 
+                          {product.model?.brand?.name && product.model?.model_name
+                            ? `${product.model.brand.name} ${product.model.model_name}`
                             : product.model?.model_name || 'Mobile Part'}
                         </h3>
 
-                        {/* Vendor name */}
+                        {/* Vendor name 
                         <p className="text-sm text-gray-600 mb-3">
                           by {product.vendor?.business_name || 'Verified Vendor'}
                         </p>
 
-                        {/* Rating and Reviews */}
+                        {/* Rating and Reviews 
                         <div className="flex items-center space-x-2 mb-3">
                           <div className="flex items-center">
                             {[...Array(5)].map((_, i) => (
@@ -509,7 +508,7 @@ const Index = () => {
                           </span>
                         </div>
 
-                        {/* Quality badge */}
+                        {/* Quality badge 
                         {product.quality_type?.name && (
                           <div className="mb-3">
                             <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
@@ -518,7 +517,7 @@ const Index = () => {
                           </div>
                         )}
 
-                        {/* Price */}
+                        {/* Price 
                         <div className="flex items-center justify-between mb-4">
                           <div className="flex items-center space-x-2">
                             <span className="text-2xl font-bold text-gray-900">
@@ -548,22 +547,21 @@ const Index = () => {
                           </div>
                         </div>
 
-                        {/* Warranty info */}
+                        {/* Warranty info 
                         {product.warranty_months > 0 && (
                           <div className="text-sm text-gray-600 mb-3">
                             ⚡ {product.warranty_months} months warranty
                           </div>
                         )}
 
-                        {/* Add to Cart Button */}
+                        {/* Add to Cart Button 
                         <Button
                           onClick={() => handleAddToCart(product)}
                           disabled={!product.is_in_stock || product.stock_quantity === 0}
-                          className={`w-full font-semibold py-3 rounded-xl shadow-soft hover:shadow-medium transform hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 touch-manipulation ${
-                            product.is_in_stock && product.stock_quantity > 0
-                              ? 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white'
-                              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          }`}
+                          className={`w-full font-semibold py-3 rounded-xl shadow-soft hover:shadow-medium transform hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 touch-manipulation ${product.is_in_stock && product.stock_quantity > 0
+                            ? 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white'
+                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                            }`}
                         >
                           {product.is_in_stock && product.stock_quantity > 0 ? (
                             <span className="flex items-center justify-center space-x-2">
@@ -582,7 +580,7 @@ const Index = () => {
                 </div>
               </div>
 
-              {/* Scroll indicators */}
+              {/* Scroll indicators 
               <div className="flex justify-center mt-6 space-x-2">
                 <div className="flex items-center space-x-1 bg-gray-100 rounded-full px-3 py-1">
                   <ArrowRight className="h-4 w-4 text-gray-400 rotate-180" />
@@ -593,10 +591,10 @@ const Index = () => {
             </div>
           )}
         </div>
-      </section>
+      </section> */}
 
       {/* Features Section */}
-      <section className="py-16 lg:py-24 bg-gray-50">
+      {/* <section className="py-16 lg:py-24 bg-gray-50">
         <div className="container mx-auto px-6">
           <div className="text-center mb-16">
             <h2 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-4">
@@ -662,10 +660,10 @@ const Index = () => {
             ))}
           </div>
         </div>
-      </section>
+      </section> */}
 
       {/* Testimonials */}
-      <section className="py-12 sm:py-16 lg:py-20">
+      {/* <section className="py-12 sm:py-16 lg:py-20">
         <div className="container-mobile mx-auto px-4">
           <div className="text-center mb-8 sm:mb-12">
             <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 mb-3 sm:mb-4">
@@ -700,7 +698,7 @@ const Index = () => {
             </div>
 
             {/* Testimonial indicators */}
-            <div className="flex justify-center mt-4 sm:mt-6 space-x-2">
+      {/* <div className="flex justify-center mt-4 sm:mt-6 space-x-2">
               {testimonials.map((_, index) => (
                 <button
                   key={index}
@@ -712,11 +710,11 @@ const Index = () => {
             </div>
           </div>
         </div>
-      </section>
+      </section> */}
 
       {/* CTA Section */}
-      <section className="py-16 lg:py-24 bg-gradient-to-r from-orange-500 to-orange-600 relative overflow-hidden">
-        {/* Organic background shapes */}
+      {/* <section className="py-16 lg:py-24 bg-gradient-to-r from-orange-500 to-orange-600 relative overflow-hidden">
+        
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute top-10 right-10 w-32 h-32 bg-white/10 rounded-full animate-pulse"></div>
           <div className="absolute bottom-10 left-10 w-48 h-48 bg-white/5 rounded-full animate-pulse" style={{ animationDelay: '2s' }}></div>
@@ -747,7 +745,7 @@ const Index = () => {
             </Button>
           </div>
         </div>
-      </section>
+      </section> */}
     </div>
   );
 };

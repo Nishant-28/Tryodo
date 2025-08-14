@@ -14,6 +14,7 @@ import { Separator } from '@/components/ui/separator';
 import Header from '@/components/Header';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
+import { useNotifications } from '@/hooks/useNotifications';
 
 interface CustomerAddress {
   id: string;

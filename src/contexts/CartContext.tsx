@@ -6,7 +6,12 @@ import { toast } from 'sonner';
 interface CartContextType {
   cart: CartSummary | null;
   loading: boolean;
-  addToCart: (productId: string, quantity?: number) => Promise<void>;
+  addToCart: (productIdOrOptions: string | { 
+    market_vendor_product_id?: string; 
+    product_id?: string; 
+    quantity?: number; 
+    product_type?: 'existing' | 'marketplace' 
+  }, quantity?: number) => Promise<void>;
   updateQuantity: (productId: string, quantity: number) => Promise<void>;
   removeFromCart: (productId: string) => Promise<void>;
   clearCart: () => Promise<void>;
@@ -138,8 +143,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [user?.id, profile?.role]); // Only depend on ID and role, not entire objects
 
   // Optimized cart operations with local state updates
-  const addToCart = useCallback(async (productId: string, quantity: number = 1) => {
-    console.log('🛒 CartContext: addToCart called', { productId, quantity });
+  const addToCart = useCallback(async (
+    productIdOrOptions: string | { 
+      market_vendor_product_id?: string; 
+      product_id?: string; 
+      quantity?: number; 
+      product_type?: 'existing' | 'marketplace' 
+    }, 
+    quantity: number = 1
+  ) => {
+    console.log('🛒 CartContext: addToCart called', { productIdOrOptions, quantity });
     console.log('🛒 CartContext: Current user:', user?.id);
     console.log('🛒 CartContext: Current profile:', profile);
     
@@ -163,7 +176,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       console.log('🛒 CartContext: Calling CartAPI.addToCart...');
-      const result = await CartAPI.addToCart(productId, quantity);
+      const result = await CartAPI.addToCart(productIdOrOptions, quantity);
       console.log('🛒 CartContext: CartAPI.addToCart result:', result);
       
       if (result.success) {

@@ -11,6 +11,7 @@ import {
   LogOut, 
   Download
 } from "lucide-react";
+import NotificationSettings from "@/components/NotificationSettings";
 
 const SettingsContent = () => {
   const { profile, updateProfile, signOut } = useAuth();
@@ -119,65 +120,8 @@ const SettingsContent = () => {
 
   return (
     <div className="space-y-6">
-      {/* Notification Settings */}
-      <Card className="bg-white rounded-2xl shadow-lg">
-        <CardHeader>
-          <CardTitle className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Bell className="h-6 w-6" />
-            Notification Settings
-          </CardTitle>
-          <CardDescription className="text-gray-600">
-            Control how and when you receive notifications
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div className="flex-1">
-                <div className="font-medium text-gray-900">Email Notifications</div>
-                <div className="text-sm text-gray-500">Receive notifications via email</div>
-              </div>
-              <Switch
-                checked={notificationSettings.email_notifications}
-                onCheckedChange={(checked) => handleNotificationChange('email_notifications', checked)}
-              />
-            </div>
-
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div className="flex-1">
-                <div className="font-medium text-gray-900">Push Notifications</div>
-                <div className="text-sm text-gray-500">Receive push notifications on your device</div>
-              </div>
-              <Switch
-                checked={notificationSettings.push_notifications}
-                onCheckedChange={(checked) => handleNotificationChange('push_notifications', checked)}
-              />
-            </div>
-
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div className="flex-1">
-                <div className="font-medium text-gray-900">Order Updates</div>
-                <div className="text-sm text-gray-500">Get notified about your order status</div>
-              </div>
-              <Switch
-                checked={notificationSettings.order_updates}
-                onCheckedChange={(checked) => handleNotificationChange('order_updates', checked)}
-              />
-            </div>
-
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div className="flex-1">
-                <div className="font-medium text-gray-900">Promotional Emails</div>
-                <div className="text-sm text-gray-500">Receive promotional offers and updates</div>
-              </div>
-              <Switch
-                checked={notificationSettings.promotional_emails}
-                onCheckedChange={(checked) => handleNotificationChange('promotional_emails', checked)}
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Enhanced Notification Settings */}
+      <NotificationSettings />
 
       {/* Account Management */}
       <Card className="bg-white rounded-2xl shadow-lg">

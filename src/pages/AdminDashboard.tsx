@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Users, Store, ShoppingBag, TrendingUp, DollarSign, Package, 
-  Smartphone, Settings, ArrowRight, AlertTriangle, Database, 
-  CheckCircle, Eye, RefreshCw, RefreshCcw, Bell, Activity, Clock, 
+import {
+  Users, Store, ShoppingBag, TrendingUp, DollarSign, Package,
+  Smartphone, Settings, ArrowRight, AlertTriangle, Database,
+  CheckCircle, Eye, RefreshCw, RefreshCcw, Bell, Activity, Clock,
   Target, Zap, BarChart3, PieChart, Calendar, Filter,
   ChevronUp, ChevronDown, AlertCircle, Star, Truck,
   HeadphonesIcon, ShoppingCart, CreditCard, Timer,
@@ -18,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Header from '@/components/Header';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
-import TryodoAPI, { TransactionAPI, CommissionAPI, PayoutAPI, VendorAPI, CategoryAPI, WalletAPI } from '@/lib/api';
+import TryodoAPI, { TransactionAPI, PayoutAPI, VendorAPI, CategoryAPI, WalletAPI, CommissionAPI } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { DeliveryAPI } from '@/lib/deliveryApi';
 import { Input } from '@/components/ui/input';
@@ -27,6 +27,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import VendorSalesSection from '@/components/VendorSalesSection';
+import CancellationAnalytics from '@/components/CancellationAnalytics';
+import PnLDashboard from '@/components/PnLDashboard';
+import SlotSectorAnalytics from '@/components/SlotSectorAnalytics';
+import HistoricalTrendsAnalytics from '@/components/HistoricalTrendsAnalytics';
+import OperationalControls from '@/components/OperationalControls';
+import FourLayerSummary from '@/components/FourLayerSummary';
 
 interface VendorSales {
   vendor_id: string;
@@ -43,46 +49,25 @@ interface DashboardStats {
   totalOrders: number;
   orderGrowth: number;
   pendingOrders: number;
-  
+
   // User Metrics
   totalCustomers: number;
   customerGrowth: number;
   totalVendors: number;
   activeVendors: number;
-  
+
   // Product & Inventory
   totalProducts: number;
   lowStockAlerts: number;
-  
+
   // Performance Metrics
   averageOrderValue: number;
   conversionRate: number;
   customerSatisfaction: number;
-  
+
   // System Health
   systemUptime: number;
   responseTime: number;
-}
-
-interface RecentActivity {
-  id: string;
-  type: 'order' | 'vendor' | 'product' | 'customer' | 'system';
-  title: string;
-  description: string;
-  timestamp: string;
-  priority: 'low' | 'medium' | 'high' | 'critical';
-  status?: string;
-  amount?: number;
-}
-
-interface QuickAction {
-  id: string;
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  action: () => void;
-  urgent?: boolean;
-  count?: number;
 }
 
 interface TransactionRecord {
@@ -214,16 +199,55 @@ interface DetailedOrderItem {
   delivery_time_days?: number;
 }
 
+interface QuickAction {
+  id: string;
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  action: () => void;
+  urgent?: boolean;
+  count?: number;
+}
+
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  
+
   // State Management
   const [timeRange, setTimeRange] = useState('7d');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
-  
+
+  // Commission and pricing states to satisfy handlers in this file
+  const [commissionForm, setCommissionForm] = useState({
+    categoryId: '',
+    commissionPercentage: '',
+    minimumCommission: '',
+    maximumCommission: '',
+    notes: ''
+  });
+  const [showCommissionForm, setShowCommissionForm] = useState(false);
+
+  const [calculatorForm, setCalculatorForm] = useState({
+    vendorId: '',
+    qualityId: '',
+    basePrice: 0,
+    commissionRate: 0,
+    upsideRate: 0,
+    effectiveFrom: '',
+    notes: ''
+  });
+  const [showVendorCommissionForm, setShowVendorCommissionForm] = useState(false);
+  const [calculatorResult, setCalculatorResult] = useState<any>(null);
+
+  const [allVendors, setAllVendors] = useState<any[]>([]);
+  const [vendorCommissions, setVendorCommissions] = useState<any[]>([]);
+  const [allQualities, setAllQualities] = useState<any[]>([]);
+  const [allCategories, setAllCategories] = useState<any[]>([]);
+  const [qualityPerformance, setQualityPerformance] = useState<any[]>([]);
+  const [vendorCommissionSummary, setVendorCommissionSummary] = useState<any[]>([]);
+
   // Data State
   const [stats, setStats] = useState<DashboardStats>({
     totalRevenue: 0,
@@ -243,10 +267,9 @@ const AdminDashboard = () => {
     systemUptime: 99.8,
     responseTime: 245
   });
-  
-  const [recentActivities, setRecentActivities] = useState<RecentActivity[]>([]);
+
   const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
-  
+
   // Database Setup Status
   const [dbSetupStatus, setDbSetupStatus] = useState<{
     categoriesExists: boolean;
@@ -259,7 +282,7 @@ const AdminDashboard = () => {
   });
 
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
-  const [commissionRules, setCommissionRules] = useState<CommissionRule[]>([]);
+
   const [vendorSales, setVendorSales] = useState<VendorSales[]>([]);
   const [payouts, setPayouts] = useState<PayoutRecord[]>([]);
   const [platformStats, setPlatformStats] = useState<PlatformStats | null>(null);
@@ -269,6 +292,9 @@ const AdminDashboard = () => {
   const [selectedOrder, setSelectedOrder] = useState<DetailedOrder | null>(null);
   const [showOrderDetails, setShowOrderDetails] = useState(false);
   const [vendorSalesSummary, setVendorSalesSummary] = useState<VendorSales[]>([]);
+
+  // Activity feed for live events
+  const [activityFeed, setActivityFeed] = useState<Array<{ time: string; type: string; message: string }>>([]);
 
   // Filter states
   const [transactionFilters, setTransactionFilters] = useState({
@@ -288,51 +314,23 @@ const AdminDashboard = () => {
     limit: 50
   });
 
-  // Commission rule form state
-  const [commissionForm, setCommissionForm] = useState({
-    categoryId: '',
-    commissionPercentage: '',
-    minimumCommission: '',
-    maximumCommission: '',
-    notes: ''
-  });
-
   // Add vendor analytics states
   const [allVendorAnalytics, setAllVendorAnalytics] = useState<any[]>([]);
   const [loadingVendorAnalytics, setLoadingVendorAnalytics] = useState(false);
   const [vendorAnalyticsError, setVendorAnalyticsError] = useState<string | null>(null);
 
-  // Commission management states
-  const [vendorCommissions, setVendorCommissions] = useState<any[]>([]);
-  const [allVendors, setAllVendors] = useState<any[]>([]);
-  const [allQualities, setAllQualities] = useState<any[]>([]);
-  const [allCategories, setAllCategories] = useState<any[]>([]);
-  const [qualityPerformance, setQualityPerformance] = useState<any[]>([]);
-  const [vendorCommissionSummary, setVendorCommissionSummary] = useState<any[]>([]);
-  const [showCommissionForm, setShowCommissionForm] = useState(false);
-  const [showVendorCommissionForm, setShowVendorCommissionForm] = useState(false);
-  const [commissionFilters, setCommissionFilters] = useState({
-    vendorId: '',
-    qualityId: ''
-  });
-  const [calculatorForm, setCalculatorForm] = useState({
-    vendorId: '',
-    qualityId: '',
-    basePrice: 0,
-    commissionRate: 0,
-    upsideRate: 0,
-    effectiveFrom: '',
-    notes: ''
-  });
-  const [calculatorResult, setCalculatorResult] = useState<any>(null);
-
   const { toast } = useToast();
+
+  // Refs for debounce and SLA change tracking
+  const ordersDebounceRef = useRef<number | null>(null);
+  const itemsDebounceRef = useRef<number | null>(null);
+  const prevDelayedRef = useRef<number>(0);
 
   // Real-time Data Fetching
   const fetchDashboardData = useCallback(async () => {
     try {
       setRefreshing(true);
-      
+
       // Fetch data in parallel for better performance
       const [
         ordersData,
@@ -349,8 +347,8 @@ const AdminDashboard = () => {
       ]);
 
       // Calculate derived metrics
-      const averageOrderValue = ordersData.totalOrders > 0 
-        ? revenueData.totalRevenue / ordersData.totalOrders 
+      const averageOrderValue = ordersData.totalOrders > 0
+        ? revenueData.totalRevenue / ordersData.totalOrders
         : 0;
 
       setStats({
@@ -366,12 +364,9 @@ const AdminDashboard = () => {
         responseTime: 245
       });
 
-      // Fetch recent activities
-      await fetchRecentActivities();
-      
       // Fetch detailed orders for recent activity tab
       await fetchDetailedOrders();
-      
+
       setLastUpdated(new Date());
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -391,7 +386,7 @@ const AdminDashboard = () => {
 
     const totalOrders = orders?.length || 0;
     const pendingOrders = orders?.filter(o => o.order_status === 'pending').length || 0;
-    
+
     // Calculate growth (placeholder logic)
     const orderGrowth = 12.5; // Would calculate from historical data
 
@@ -431,9 +426,9 @@ const AdminDashboard = () => {
       supabase.from('vendors').select('*', { count: 'exact', head: true }).eq('is_active', true)
     ]);
 
-    return { 
-      totalVendors: totalVendors || 0, 
-      activeVendors: activeVendors || 0 
+    return {
+      totalVendors: totalVendors || 0,
+      activeVendors: activeVendors || 0
     };
   };
 
@@ -452,36 +447,11 @@ const AdminDashboard = () => {
     };
   };
 
-  const fetchRecentActivities = async () => {
-    // Fetch recent orders, vendor registrations, etc.
-    const { data: recentOrders } = await supabase
-      .from('orders')
-      .select(`
-        id, order_number, total_amount, order_status, created_at,
-        customers!inner(profiles!inner(full_name))
-      `)
-      .order('created_at', { ascending: false })
-      .limit(5);
-
-    const activities: RecentActivity[] = recentOrders?.map(order => ({
-      id: order.id,
-      type: 'order' as const,
-      title: `New Order ${order.order_number}`,
-      description: `₹${order.total_amount?.toLocaleString()} from ${order.customers?.profiles?.[0]?.full_name || 'Customer'}`,
-      timestamp: order.created_at,
-      priority: order.order_status === 'pending' ? 'high' : 'medium',
-      status: order.order_status,
-      amount: order.total_amount
-    })) || [];
-
-    setRecentActivities(activities);
-  };
-
   const fetchDetailedOrders = async () => {
     try {
       setDetailedOrdersLoading(true);
-      
-      // Build query based on filters
+
+      // Build query based on filters - simplified to avoid complex join issues
       let query = supabase
         .from('orders')
         .select(`
@@ -504,60 +474,27 @@ const AdminDashboard = () => {
           cancellation_reason,
           delivery_address_id,
           slot_id,
-          sector_id,
-          customers!inner(
-            id,
-            profile_id,
-            profiles!inner(
-              full_name,
-              phone,
-              email
-            )
-          ),
-          customer_addresses(
-            address_box,
-            area,
-            city,
-            pincode
-          ),
-          delivery_slots(
-            slot_name,
-            start_time,
-            end_time
-          ),
-          sectors(
-            name
-          ),
-          delivery_partner_orders(
-            delivery_partner_id,
-            status,
-            delivery_partners(
-              profiles(
-                full_name,
-                phone
-              )
-            )
-          )
+          sector_id
         `)
         .order('created_at', { ascending: false })
         .limit(orderFilters.limit);
 
       // Apply filters
-      // if (orderFilters.startDate) {
-      //   query = query.gte('created_at', orderFilters.startDate);
-      // }
-      // if (orderFilters.endDate) {
-      //   query = query.lte('created_at', orderFilters.endDate + 'T23:59:59');
-      // }
-      // if (orderFilters.orderStatus) {
-      //   query = query.eq('order_status', orderFilters.orderStatus);
-      // }
-      // if (orderFilters.paymentStatus) {
-      //   query = query.eq('payment_status', orderFilters.paymentStatus);
-      // }
-      // if (orderFilters.searchTerm) {
-      //   query = query.or(`order_number.ilike.%${orderFilters.searchTerm}%,customers.profiles.full_name.ilike.%${orderFilters.searchTerm}%`);
-      // }
+      if (orderFilters.startDate) {
+        query = query.gte('created_at', orderFilters.startDate);
+      }
+      if (orderFilters.endDate) {
+        query = query.lte('created_at', orderFilters.endDate + 'T23:59:59');
+      }
+      if (orderFilters.orderStatus) {
+        query = query.eq('order_status', orderFilters.orderStatus);
+      }
+      if (orderFilters.paymentStatus) {
+        query = query.eq('payment_status', orderFilters.paymentStatus);
+      }
+      if (orderFilters.searchTerm) {
+        query = query.ilike('order_number', `%${orderFilters.searchTerm}%`);
+      }
 
       const { data: ordersData, error: ordersError } = await query;
       console.log("Fetched orders data:", ordersData);
@@ -571,49 +508,110 @@ const AdminDashboard = () => {
         return;
       }
 
-      // Fetch order items for all orders
+      // Fetch related data in parallel
       const orderIds = ordersData.map(order => order.id);
-      const { data: orderItemsData, error: itemsError } = await supabase
-        .from('order_items')
-        .select(`
-          id,
-          order_id,
-          vendor_id,
-          product_name,
-          product_description,
-          category_name,
-          quality_type_name,
-          unit_price,
-          quantity,
-          line_total,
-          item_status,
-          vendor_confirmed_at,
-          vendor_notes,
-          picked_up_at,
-          warranty_months,
-          estimated_delivery_days,
-          vendors!inner(
+      const customerIds = [...new Set(ordersData.map(order => order.customer_id).filter(Boolean))];
+      const addressIds = [...new Set(ordersData.map(order => order.delivery_address_id).filter(Boolean))];
+      const slotIds = [...new Set(ordersData.map(order => order.slot_id).filter(Boolean))];
+      const sectorIds = [...new Set(ordersData.map(order => order.sector_id).filter(Boolean))];
+
+      const [
+        orderItemsResult,
+        customersResult,
+        addressesResult,
+        slotsResult,
+        sectorsResult
+      ] = await Promise.all([
+        // Fetch order items
+        supabase
+          .from('order_items')
+          .select(`
             id,
-            business_name,
-            contact_person,
-            phone,
-            email,
-            business_city,
-            business_state,
-            rating,
-            total_reviews
-          )
-        `)
-        .in('order_id', orderIds);
+            order_id,
+            vendor_id,
+            product_name,
+            product_description,
+            category_name,
+            quality_type_name,
+            unit_price,
+            quantity,
+            line_total,
+            item_status,
+            vendor_confirmed_at,
+            vendor_notes,
+            picked_up_at,
+            warranty_months,
+            estimated_delivery_days,
+            vendors(
+              id,
+              business_name,
+              contact_person,
+              phone,
+              email,
+              business_city,
+              business_state,
+              rating,
+              total_reviews
+            )
+          `)
+          .in('order_id', orderIds),
 
-      if (itemsError) {
-        console.error("Error fetching order items:", itemsError);
-        throw itemsError;
+        // Fetch customers with profiles
+        customerIds.length > 0 ? supabase
+          .from('customers')
+          .select(`
+            id,
+            profile_id,
+            profiles(
+              full_name,
+              phone,
+              email
+            )
+          `)
+          .in('id', customerIds) : Promise.resolve({ data: [], error: null }),
+
+        // Fetch addresses
+        addressIds.length > 0 ? supabase
+          .from('customer_addresses')
+          .select('id, address_box, area, city, pincode')
+          .in('id', addressIds) : Promise.resolve({ data: [], error: null }),
+
+        // Fetch delivery slots
+        slotIds.length > 0 ? supabase
+          .from('delivery_slots')
+          .select('id, slot_name, start_time, end_time')
+          .in('id', slotIds) : Promise.resolve({ data: [], error: null }),
+
+        // Fetch sectors
+        sectorIds.length > 0 ? supabase
+          .from('sectors')
+          .select('id, name')
+          .in('id', sectorIds) : Promise.resolve({ data: [], error: null })
+      ]);
+
+      // Check for errors
+      if (orderItemsResult.error) {
+        console.error("Error fetching order items:", orderItemsResult.error);
+        throw orderItemsResult.error;
       }
-      console.log("Fetched order items data:", orderItemsData);
+      if (customersResult.error) {
+        console.error("Error fetching customers:", customersResult.error);
+      }
+      if (addressesResult.error) {
+        console.error("Error fetching addresses:", addressesResult.error);
+      }
 
-      // Group order items by order_id
-      const itemsByOrder = (orderItemsData || []).reduce((acc: any, item: any) => {
+      console.log("Fetched data:", {
+        orders: ordersData.length,
+        orderItems: orderItemsResult.data?.length || 0,
+        customers: customersResult.data?.length || 0,
+        addresses: addressesResult.data?.length || 0,
+        slots: slotsResult.data?.length || 0,
+        sectors: sectorsResult.data?.length || 0
+      });
+
+      // Create lookup maps for related data
+      const itemsByOrder = (orderItemsResult.data || []).reduce((acc: any, item: any) => {
         if (!acc[item.order_id]) {
           acc[item.order_id] = [];
         }
@@ -621,15 +619,20 @@ const AdminDashboard = () => {
         return acc;
       }, {});
 
+      const customersMap = new Map((customersResult.data || []).map(c => [c.id, c]));
+      const addressesMap = new Map((addressesResult.data || []).map(a => [a.id, a]));
+      const slotsMap = new Map((slotsResult.data || []).map(s => [s.id, s]));
+      const sectorsMap = new Map((sectorsResult.data || []).map(s => [s.id, s]));
+
       // Calculate commission for each order (simplified calculation)
       const processedOrders: DetailedOrder[] = ordersData.map((order: any) => {
-        const customer = order.customers?.[0];
+        const customer = customersMap.get(order.customer_id);
         const customerProfile = customer?.profiles?.[0];
-        const deliveryAddress = order.customer_addresses?.[0];
-        const slotInfo = order.delivery_slots?.[0];
-        const sectorInfo = order.sectors?.[0];
-        const deliveryPartner = order.delivery_partner_orders?.[0]?.delivery_partners?.profiles?.[0];
-        
+        const deliveryAddress = addressesMap.get(order.delivery_address_id);
+        const slotInfo = slotsMap.get(order.slot_id);
+        const sectorInfo = sectorsMap.get(order.sector_id);
+        const deliveryPartner = null; // Will implement delivery partner lookup later
+
         const orderItems: DetailedOrderItem[] = (itemsByOrder[order.id] || []).map((item: any) => ({
           id: item.id,
           product_name: item.product_name,
@@ -658,8 +661,13 @@ const AdminDashboard = () => {
           delivery_time_days: item.estimated_delivery_days
         }));
 
-        // Calculate commission (assuming 10% commission rate)
-        const commissionEarned = order.total_amount * 0.1;
+        // Calculate commission per order item (not just total amount)
+        let commissionEarned = 0;
+        orderItems.forEach(item => {
+          // This is a simplified calculation - in production, you'd want to
+          // look up the actual commission rate for each product's category/quality
+          commissionEarned += item.line_total * 0.1; // Default 10% per item
+        });
 
         // Determine tracking status
         let trackingStatus = 'Order Placed';
@@ -734,9 +742,9 @@ const AdminDashboard = () => {
           }
           salesByVendor[item.vendor.id].orders += 1;
           salesByVendor[item.vendor.id].gmv += item.line_total;
-          // Assuming commission is calculated per order, distribute proportionally to item or recalculate
-          // For simplicity, let's say commission is a fixed percentage of line_total for now
-          salesByVendor[item.vendor.id].commission += item.line_total * 0.1; // Example: 10% commission
+          // Calculate commission per item - this should ideally use the actual commission rules
+          // For now, using a simplified calculation that considers the item individually
+          salesByVendor[item.vendor.id].commission += item.line_total * 0.1; // Simplified 10% per item
         });
       });
       setVendorSalesSummary(Object.values(salesByVendor));
@@ -792,26 +800,12 @@ const AdminDashboard = () => {
         count: 0
       },
       {
-        id: 'auto-assign',
-        title: 'Auto-Assign Delivery',
-        description: 'Automatically assign delivery partners to slots',
-        icon: <Target className="h-6 w-6" />,
-        action: handleAutoAssignDeliveryPartners,
-        urgent: true
-      },
-      {
-        id: 'remove-assignments',
-        title: 'Reset Assignments',
-        description: 'Remove existing assignments for testing',
-        icon: <RefreshCcw className="h-6 w-6" />,
-        action: handleRemoveAssignments
-      },
-      {
-        id: 'categories',
-        title: 'Categories',
-        description: 'Manage product categories and qualities',
-        icon: <Package className="h-6 w-6" />,
-        action: () => navigate('/admin/categories')
+        id: 'customers',
+        title: 'Customer Management',
+        description: 'Manage customers, orders and analytics',
+        icon: <Users className="h-6 w-6" />,
+        action: () => navigate('/admin/customer-management'),
+        count: stats.totalCustomers
       },
       {
         id: 'commission',
@@ -820,16 +814,15 @@ const AdminDashboard = () => {
         icon: <DollarSign className="h-6 w-6" />,
         action: () => navigate('/admin/commission-rules')
       },
-
-      {
-        id: 'payouts',
-        title: 'Payout Management',
-        description: 'Process and manage payouts',
-        icon: <DollarSign className="h-6 w-6" />,
-        action: () => navigate('/admin/payouts')
-      }
+      // {
+      //   id: 'payouts',
+      //   title: 'Payout Management',
+      //   description: 'Process and manage payouts',
+      //   icon: <DollarSign className="h-6 w-6" />,
+      //   action: () => navigate('/admin/payouts')
+      // }
     ]);
-  }, [navigate, stats.totalVendors]);
+  }, [navigate, stats.totalVendors, stats.totalCustomers]);
 
   // Initialize and setup intervals
   useEffect(() => {
@@ -838,8 +831,7 @@ const AdminDashboard = () => {
         checkDatabaseSetup(),
         fetchDashboardData(),
         loadFinancialData(),
-        loadAllVendorAnalytics(),
-        loadCommissionData()
+        loadAllVendorAnalytics()
       ]);
     };
 
@@ -858,14 +850,92 @@ const AdminDashboard = () => {
   const formatCurrency = (amount: number) => `₹${amount.toLocaleString('en-IN')}`;
   const formatPercentage = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
   const getGrowthColor = (growth: number) => growth >= 0 ? 'text-green-600' : 'text-red-600';
-  const getGrowthIcon = (growth: number) => growth >= 0 
-    ? <ChevronUp className="h-4 w-4" /> 
+  const getGrowthIcon = (growth: number) => growth >= 0
+    ? <ChevronUp className="h-4 w-4" />
     : <ChevronDown className="h-4 w-4" />;
+
+  // SLA badge helper
+  const getSlaBadge = (o: DetailedOrder) => {
+    const eta = o.estimated_delivery_date ? new Date(o.estimated_delivery_date).getTime() : null;
+    if (!eta) return null;
+    const diffMs = eta - Date.now();
+    const mins = Math.ceil(diffMs / 60000);
+    if (mins >= 30) return <Badge variant="outline">ETA {mins}m</Badge>;
+    if (mins > 0) return <Badge variant="secondary">ETA {mins}m</Badge>;
+    return <Badge variant="destructive">SLA Breach {Math.abs(mins)}m</Badge>;
+  };
+
+  // Derived live counters
+  const liveOnlyOrders = detailedOrders.filter(o => ['pending', 'confirmed', 'processing', 'packed', 'picked_up', 'out_for_delivery'].includes(o.order_status));
+  const nowTs = Date.now();
+  const newIn5mCount = detailedOrders.filter(o => nowTs - new Date(o.created_at).getTime() <= 5 * 60 * 1000).length;
+  const delayedCount = detailedOrders.filter(o => {
+    const eta = o.estimated_delivery_date ? new Date(o.estimated_delivery_date).getTime() : null;
+    return eta && o.order_status !== 'delivered' && nowTs > eta;
+  }).length;
+  const unassignedCount = detailedOrders.filter(o => !o.delivery_partner && o.order_status !== 'cancelled' && o.order_status !== 'delivered').length;
+
+  // Notify when delayed orders increase
+  useEffect(() => {
+    if (delayedCount > prevDelayedRef.current) {
+      toast({ title: 'SLA At Risk', description: `${delayedCount} orders delayed`, variant: 'destructive' });
+    }
+    prevDelayedRef.current = delayedCount;
+  }, [delayedCount]);
+
+  // Realtime subscription for live orders
+  useEffect(() => {
+    const channel = supabase
+      .channel('live-orders')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
+        // toast on new orders
+        const evt = (payload as any).eventType;
+        if (evt === 'INSERT') {
+          const orderNo = (payload as any).new?.order_number;
+          toast({ title: 'New Order', description: orderNo ? `Order ${orderNo} received` : 'New order received' });
+        }
+        if (ordersDebounceRef.current) window.clearTimeout(ordersDebounceRef.current);
+        ordersDebounceRef.current = window.setTimeout(() => {
+          fetchDetailedOrders();
+          setLastUpdated(new Date());
+        }, 300);
+        setActivityFeed(prev => ([{ time: new Date().toLocaleTimeString(), type: 'orders', message: `${evt} on orders` }, ...prev]).slice(0, 20));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, (payload) => {
+        if (itemsDebounceRef.current) window.clearTimeout(itemsDebounceRef.current);
+        itemsDebounceRef.current = window.setTimeout(() => {
+          fetchDetailedOrders();
+          setLastUpdated(new Date());
+        }, 300);
+        const evt = (payload as any).eventType;
+        setActivityFeed(prev => ([{ time: new Date().toLocaleTimeString(), type: 'order_items', message: `${evt} on order_items` }, ...prev]).slice(0, 20));
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchDetailedOrders]);
+
+  // Quick status update action
+  const updateOrderStatus = async (orderId: string, nextStatus: string) => {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ order_status: nextStatus, updated_at: new Date().toISOString() })
+        .eq('id', orderId);
+      if (error) throw error;
+      toast({ title: 'Order Updated', description: `Status changed to ${nextStatus}` });
+      await fetchDetailedOrders();
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Failed to update order', variant: 'destructive' });
+    }
+  };
 
   // Database Setup Notification Component
   const DatabaseSetupNotification = () => {
     const { categoriesExists, categoryQualitiesExists, isChecking } = dbSetupStatus;
-    
+
     if (isChecking) {
       return (
         <Alert className="mb-6 border-blue-200 bg-blue-50">
@@ -891,8 +961,8 @@ const AdminDashboard = () => {
                 Some required database tables are missing. Please run the setup script to enable full functionality.
               </div>
               <div className="flex flex-wrap gap-2 pt-2">
-                <Button 
-                  size="sm" 
+                <Button
+                  size="sm"
                   variant="outline"
                   className="border-orange-300 text-orange-700 hover:bg-orange-100"
                   onClick={() => navigate('/admin/database-setup')}
@@ -913,14 +983,33 @@ const AdminDashboard = () => {
   const loadFinancialData = async () => {
     try {
       const [platformStatsRes, transactionsRes, payoutsRes, dailySummaryRes] = await Promise.all([
-        TryodoAPI.Analytics.getPlatformFinancialSummary(),
+        TransactionAPI.getDailyTransactionSummary(), // Changed from TryodoAPI.Analytics.getPlatformFinancialSummary
         TransactionAPI.getTransactions(),
-        PayoutAPI.getPayouts(user!.id),
-        TryodoAPI.Analytics.getDailyOrderSummary()
+        PayoutAPI.getPayouts({}), // Changed from PayoutAPI.getPayouts(user!.id)
+        TransactionAPI.getDailyTransactionSummary() // Changed from TryodoAPI.Analytics.getDailyOrderSummary
       ]);
 
       if (platformStatsRes.success) {
-        setPlatformStats(platformStatsRes.data);
+        // Assuming platformStatsRes.data is an array of daily summaries, aggregate them
+        const totalCommissionEarned = platformStatsRes.data?.reduce((sum, day) => sum + (day.total_commission || 0), 0) || 0;
+        const totalTransactionsProcessed = platformStatsRes.data?.reduce((sum, day) => sum + (day.total_transactions || 0), 0) || 0;
+
+        // For simplicity, setting today/week/month/year based on last entry or aggregation
+        const latestSummary = platformStatsRes.data?.[0];
+        setPlatformStats({
+          total_commission_earned: totalCommissionEarned,
+          today_commission: latestSummary?.total_commission || 0,
+          week_commission: totalCommissionEarned, // More complex logic needed for real week/month/year
+          month_commission: totalCommissionEarned,
+          year_commission: totalCommissionEarned,
+          total_transactions_processed: totalTransactionsProcessed,
+          today_transactions: latestSummary?.total_transactions || 0,
+          week_transactions: totalTransactionsProcessed,
+          month_transactions: totalTransactionsProcessed,
+        });
+
+      } else {
+        console.error('Error loading platform financial summary:', platformStatsRes.error); // Keep error logging if error property exists for the ApiResponse type
       }
       if (transactionsRes.success) {
         setTransactions(transactionsRes.data);
@@ -943,7 +1032,7 @@ const AdminDashboard = () => {
 
   const handleCreateCommissionRule = async () => {
     console.log('🚀 Commission Rule creation started', { commissionForm, user: user?.id });
-    
+
     if (!commissionForm.categoryId || !commissionForm.commissionPercentage) {
       console.log('❌ Form validation failed', commissionForm);
       toast({
@@ -967,7 +1056,7 @@ const AdminDashboard = () => {
 
       // Since commission_rules table doesn't exist, we'll simulate the functionality
       // In a real implementation, you would need to create the commission_rules table first
-      
+
       const newRule = {
         id: crypto.randomUUID(),
         category_id: commissionForm.categoryId,
@@ -1016,7 +1105,7 @@ const AdminDashboard = () => {
   const handleProcessPayout = async (payoutId: string, status: string) => {
     try {
       const result = await PayoutAPI.updatePayoutStatus(payoutId, status as any, undefined, user!.id);
-      
+
       if (result.success) {
         toast({
           title: "Success",
@@ -1061,7 +1150,7 @@ const AdminDashboard = () => {
           try {
             const response = await TryodoAPI.Analytics.getVendorFinancialSummary(vendor.id);
             const walletResponse = await WalletAPI.getVendorWallet(vendor.id); // Corrected WalletAPI call
-            
+
             const analytics = response.success ? response.data : {
               total_sales: 0,
               total_commission: 0,
@@ -1129,29 +1218,29 @@ const AdminDashboard = () => {
   // Helper function to calculate vendor performance score
   const calculateVendorPerformanceScore = (analytics: any, vendor: any): number => {
     if (!analytics || !vendor) return 0;
-    
+
     let score = 0;
-    
+
     // Sales volume (40% weight)
     const salesScore = Math.min((analytics.total_sales || 0) / 100000 * 40, 40);
     score += salesScore;
-    
+
     // Order count (20% weight)
     const orderScore = Math.min((analytics.total_orders || 0) / 100 * 20, 20);
     score += orderScore;
-    
+
     // Product count (15% weight)
     const productScore = Math.min((analytics.total_products || 0) / 50 * 15, 15);
     score += productScore;
-    
+
     // Rating (15% weight)
     const ratingScore = ((vendor?.rating || 0) / 5) * 15;
     score += ratingScore;
-    
+
     // Verification status (10% weight)
     const verificationScore = vendor?.is_verified ? 10 : 0;
     score += verificationScore;
-    
+
     return Math.round(score);
   };
 
@@ -1165,7 +1254,7 @@ const AdminDashboard = () => {
       });
 
       const result = await DeliveryAPI.autoAssignDeliveryPartners();
-      
+
       if (result.success) {
         toast({
           title: "Auto-Assignment Complete",
@@ -1201,7 +1290,7 @@ const AdminDashboard = () => {
 
       // Remove assignment for Evening Express slot
       const result = await DeliveryAPI.removeSlotAssignment('ac0f3026-1d09-4224-b3e1-b5a14017b3b8');
-      
+
       if (result.success) {
         toast({
           title: "Assignments Removed",
@@ -1228,15 +1317,15 @@ const AdminDashboard = () => {
 
   // Commission management handlers
   const handleEditVendorCommission = (commission: any) => {
-          setCalculatorForm({
-        vendorId: commission.vendor_id,
-        qualityId: commission.quality_id,
-        basePrice: 1000,
-        commissionRate: commission.commission_rate,
-        upsideRate: commission.upside_rate,
-        effectiveFrom: commission.effective_from || '',
-        notes: commission.notes || ''
-      });
+    setCalculatorForm({
+      vendorId: commission.vendor_id,
+      qualityId: commission.quality_id,
+      basePrice: 1000,
+      commissionRate: commission.commission_rate,
+      upsideRate: commission.upside_rate,
+      effectiveFrom: commission.effective_from || '',
+      notes: commission.notes || ''
+    });
     setShowVendorCommissionForm(true);
   };
 
@@ -1290,7 +1379,7 @@ const AdminDashboard = () => {
 
       // Since vendor_commissions table doesn't exist, we'll simulate the functionality
       // In a real implementation, you would need to create the vendor_commissions table first
-      
+
       const newCommission = {
         id: crypto.randomUUID(),
         vendor_id: calculatorForm.vendorId,
@@ -1342,12 +1431,12 @@ const AdminDashboard = () => {
   const loadCommissionData = async () => {
     try {
       console.log('🔄 Loading commission data...');
-      
+
       // Load all vendors separately with better error handling
       const loadAllVendors = async () => {
         try {
           console.log('📋 Loading all vendors...');
-          
+
           // Try to get all active vendors, not just verified ones
           const { data: allVendorData, error: allVendorError } = await supabase
             .from('vendors')
@@ -1439,7 +1528,7 @@ const AdminDashboard = () => {
       if (qualityPerformanceRes.success) {
         setQualityPerformance(qualityPerformanceRes.data || []);
       } else {
-        console.error('❌ Failed to load quality performance:', qualityPerformanceRes.error);
+        console.error('❌ Failed to load quality performance:', qualityPerformanceRes.message); // Changed from .error
       }
 
       if (vendorSummaryRes.success) {
@@ -1455,7 +1544,7 @@ const AdminDashboard = () => {
         }
         setVendorCommissionSummary(summary);
       } else {
-        console.error('❌ Failed to load vendor summary:', vendorSummaryRes.error);
+        console.error('❌ Failed to load vendor summary:', vendorSummaryRes.message); // Changed from .error
       }
     } catch (error) {
       console.error('💥 Error loading commission data:', error);
@@ -1480,8 +1569,8 @@ const AdminDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header onCartClick={() => {}} />
-      
+      <Header onCartClick={() => { }} />
+
       <main className="container mx-auto px-4 py-8">
         {/* Header Section */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8">
@@ -1489,24 +1578,13 @@ const AdminDashboard = () => {
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Admin Dashboard</h1>
             <p className="text-gray-600">Real-time business overview and management</p>
           </div>
-          
+
           <div className="flex items-center gap-4 mt-4 sm:mt-0">
             <div className="flex items-center gap-2 text-sm text-gray-500">
               <Activity className="h-4 w-4" />
               <span>Last updated: {lastUpdated.toLocaleTimeString()}</span>
             </div>
-            
-            {/* <select
-              value={timeRange}
-              onChange={(e) => setTimeRange(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="24h">Last 24 hours</option>
-              <option value="7d">Last 7 days</option>
-              <option value="30d">Last 30 days</option>
-              <option value="90d">Last 90 days</option>
-            </select> */}
-            
+
             <Button
               variant="outline"
               size="sm"
@@ -1523,93 +1601,98 @@ const AdminDashboard = () => {
         {/* Database Setup Notification */}
         <DatabaseSetupNotification />
 
-        {/* Critical Alerts */}
-        {/* {(stats.pendingOrders > 10 || stats.lowStockAlerts > 0) && (
-          <Alert className="mb-6 border-red-200 bg-red-50">
-            <AlertCircle className="h-4 w-4 text-red-600" />
-            <AlertDescription>
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="font-medium text-red-800">Attention Required:</span>
-                  <span className="text-red-700 ml-2">
-                    {stats.pendingOrders > 10 && `${stats.pendingOrders} pending orders`}
-                    {stats.pendingOrders > 10 && stats.lowStockAlerts > 0 && ', '}
-                    {stats.lowStockAlerts > 0 && `${stats.lowStockAlerts} low stock alerts`}
-                  </span>
-                </div>
-                <Button size="sm" className="bg-red-600 hover:bg-red-700">
-                  Take Action
-                </Button>
-              </div>
-            </AlertDescription>
-          </Alert>
-        )} */}
-
         <Tabs defaultValue="overview" className="space-y-6">
           {/* Mobile-first tabs with improved layout */}
           <div className="block sm:hidden mb-4">
             <TabsList className="flex flex-wrap gap-1 p-1 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl shadow-soft h-auto">
-              <TabsTrigger 
-                value="overview" 
+              <TabsTrigger
+                value="overview"
                 className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
               >
                 <div className="flex flex-col items-center gap-1">
                   <BarChart3 className="h-3 w-3" />
-                  <span>Overview</span>
+                  <span>Home</span>
                 </div>
               </TabsTrigger>
-              <TabsTrigger 
-                value="recent-activity" 
+              <TabsTrigger
+                value="slot-analytics"
                 className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
               >
                 <div className="flex flex-col items-center gap-1">
-                  <Activity className="h-3 w-3" />
-                  <span>Activity</span>
+                  <MapPin className="h-3 w-3" />
+                  <span>4-Layer</span>
                 </div>
               </TabsTrigger>
-              <TabsTrigger 
-                value="transactions" 
+              <TabsTrigger
+                value="operations"
+                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <Zap className="h-3 w-3" />
+                  <span>Ops</span>
+                </div>
+              </TabsTrigger>
+              <TabsTrigger
+                value="trends"
+                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <Calendar className="h-3 w-3" />
+                  <span>Trends</span>
+                </div>
+              </TabsTrigger>
+              <TabsTrigger
+                value="transactions"
                 className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
               >
                 <div className="flex flex-col items-center gap-1">
                   <CreditCard className="h-3 w-3" />
-                  <span>Transactions</span>
+                  <span>Trans</span>
                 </div>
               </TabsTrigger>
-              <TabsTrigger 
-                value="commissions" 
-                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
-              >
-                <div className="flex flex-col items-center gap-1">
-                  <DollarSign className="h-3 w-3" />
-                  <span>Commissions</span>
-                </div>
-              </TabsTrigger>
-              <TabsTrigger 
-                value="payouts" 
-                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
-              >
-                <div className="flex flex-col items-center gap-1">
-                  <Truck className="h-3 w-3" />
-                  <span>Payouts</span>
-                </div>
-              </TabsTrigger>
-              <TabsTrigger 
-                value="vendor-sales" 
+              <TabsTrigger
+                value="vendor-sales"
                 className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
               >
                 <div className="flex flex-col items-center gap-1">
                   <Store className="h-3 w-3" />
-                  <span>Vendor Sales</span>
+                  <span>V Sales</span>
                 </div>
               </TabsTrigger>
-              <TabsTrigger 
-                value="management" 
+              <TabsTrigger
+                value="pnl-dashboard"
+                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <PieChart className="h-3 w-3" />
+                  <span>P&L</span>
+                </div>
+              </TabsTrigger>
+              <TabsTrigger
+                value="cancellations"
+                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <XCircle className="h-3 w-3" />
+                  <span>Cancel</span>
+                </div>
+              </TabsTrigger>
+              <TabsTrigger
+                value="management"
                 className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
               >
                 <div className="flex flex-col items-center gap-1">
                   <Settings className="h-3 w-3" />
-                  <span>Management</span>
+                  <span>Manage</span>
+                </div>
+              </TabsTrigger>
+              <TabsTrigger
+                value="live"
+                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <Activity className="h-3 w-3" />
+                  <span>Live</span>
                 </div>
               </TabsTrigger>
             </TabsList>
@@ -1617,27 +1700,36 @@ const AdminDashboard = () => {
 
           {/* Desktop tabs */}
           <div className="hidden sm:block">
-            <TabsList className="grid w-full grid-cols-7 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
+            <TabsList className="grid w-full grid-cols-10 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
               <TabsTrigger value="overview" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Overview
               </TabsTrigger>
-              <TabsTrigger value="recent-activity" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
-                Recent Activity
+              <TabsTrigger value="slot-analytics" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                4-Layer Analytics
+              </TabsTrigger>
+              <TabsTrigger value="operations" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                Operations
+              </TabsTrigger>
+              <TabsTrigger value="trends" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                Trends
+              </TabsTrigger>
+              <TabsTrigger value="pnl-dashboard" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                P&L Dashboard
               </TabsTrigger>
               <TabsTrigger value="transactions" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Transactions
               </TabsTrigger>
-              <TabsTrigger value="commissions" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
-                Commissions
-              </TabsTrigger>
-              <TabsTrigger value="payouts" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
-                Payouts
-              </TabsTrigger>
               <TabsTrigger value="vendor-sales" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Vendor Sales
               </TabsTrigger>
+              <TabsTrigger value="cancellations" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                Cancellations
+              </TabsTrigger>
               <TabsTrigger value="management" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Management
+              </TabsTrigger>
+              <TabsTrigger value="live" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                Live Orders
               </TabsTrigger>
             </TabsList>
           </div>
@@ -1787,371 +1879,26 @@ const AdminDashboard = () => {
               </Card>
             </div>
 
-            {/* Quick Actions & Recent Activity */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Quick Actions */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Zap className="h-5 w-5 text-blue-600" />
-                    Quick Actions
-                  </CardTitle>
-                  <CardDescription>
-                    Urgent tasks requiring your attention
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {quickActions.map((action) => (
-                    <div
-                      key={action.id}
-                      className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer hover:bg-gray-50 transition-colors ${
-                        action.urgent ? 'border-red-200 bg-red-50' : 'border-gray-200'
-                      }`}
-                      onClick={action.action}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-full ${action.urgent ? 'bg-red-100' : 'bg-blue-100'}`}>
-                          {action.icon}
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-900">{action.title}</p>
-                          <p className="text-sm text-gray-600">{action.description}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {action.count !== undefined && (
-                          <Badge variant={action.urgent ? 'destructive' : 'secondary'}>
-                            {action.count}
-                          </Badge>
-                        )}
-                        <ArrowRight className="h-4 w-4 text-gray-400" />
-                      </div>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
+            {/* 4-Layer Analytics Summary */}
+            <FourLayerSummary />
 
-              {/* Recent Activity */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Activity className="h-5 w-5 text-green-600" />
-                    Recent Activity
-                  </CardTitle>
-                  <CardDescription>
-                    Latest platform activities and updates
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {recentActivities.map((activity) => (
-                    <div key={activity.id} className="flex items-start gap-3">
-                      <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${
-                        activity.priority === 'critical' ? 'bg-red-500' :
-                        activity.priority === 'high' ? 'bg-orange-500' :
-                        activity.priority === 'medium' ? 'bg-blue-500' : 'bg-gray-400'
-                      }`}></div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-gray-900 text-sm">{activity.title}</p>
-                        <p className="text-gray-600 text-xs">{activity.description}</p>
-                        <p className="text-gray-400 text-xs">
-                          {new Date(activity.timestamp).toLocaleString()}
-                        </p>
-                      </div>
-                      {activity.status && (
-                        <Badge variant="outline" className="text-xs">
-                          {activity.status}
-                        </Badge>
-                      )}
-                    </div>
-                  ))}
-                  {recentActivities.length === 0 && (
-                    <p className="text-gray-500 text-center py-4">No recent activities</p>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+
           </TabsContent>
 
-          <TabsContent value="recent-activity" className="space-y-6">
-            {/* Filters and Controls */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="h-5 w-5 text-blue-600" />
-                  Recent Order Activity
-                </CardTitle>
-                <CardDescription>
-                  Comprehensive view of all orders with detailed vendor, customer, and product information
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                  <div>
-                    <Label htmlFor="orderStartDate">Start Date</Label>
-                    <Input
-                      id="orderStartDate"
-                      type="date"
-                      value={orderFilters.startDate}
-                      onChange={(e) => setOrderFilters(prev => ({ ...prev, startDate: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="orderEndDate">End Date</Label>
-                    <Input
-                      id="orderEndDate"
-                      type="date"
-                      value={orderFilters.endDate}
-                      onChange={(e) => setOrderFilters(prev => ({ ...prev, endDate: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="orderStatus">Order Status</Label>
-                    <Select value={orderFilters.orderStatus || "all"} onValueChange={(value) => setOrderFilters(prev => ({ ...prev, orderStatus: value === "all" ? "" : value }))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="All Statuses" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Statuses</SelectItem>
-                        <SelectItem value="pending">Pending</SelectItem>
-                        <SelectItem value="confirmed">Confirmed</SelectItem>
-                        <SelectItem value="processing">Processing</SelectItem>
-                        <SelectItem value="packed">Packed</SelectItem>
-                        <SelectItem value="picked_up">Picked Up</SelectItem>
-                        <SelectItem value="out_for_delivery">Out for Delivery</SelectItem>
-                        <SelectItem value="delivered">Delivered</SelectItem>
-                        <SelectItem value="cancelled">Cancelled</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor="searchOrders">Search</Label>
-                    <Input
-                      id="searchOrders"
-                      placeholder="Order number or customer name"
-                      value={orderFilters.searchTerm}
-                      onChange={(e) => setOrderFilters(prev => ({ ...prev, searchTerm: e.target.value }))}
-                    />
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button onClick={fetchDetailedOrders} disabled={detailedOrdersLoading}>
-                    {detailedOrdersLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                    Refresh Orders
-                  </Button>
-                  <Button variant="outline" onClick={() => setOrderFilters({
-                    startDate: '',
-                    endDate: '',
-                    orderStatus: '',
-                    paymentStatus: '',
-                    searchTerm: '',
-                    vendorFilter: '',
-                    limit: 50
-                  })}>
-                    Clear Filters
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+          <TabsContent value="slot-analytics" className="space-y-6">
+            <SlotSectorAnalytics />
+          </TabsContent>
 
-            {/* Orders List */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span>Orders ({detailedOrders.length})</span>
-                  <Badge variant="secondary">
-                    Total Revenue: ₹{detailedOrders.reduce((sum, order) => sum + order.total_amount, 0).toLocaleString()}
-                  </Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {detailedOrdersLoading ? (
-                  <div className="flex justify-center items-center py-12">
-                    <Loader2 className="h-8 w-8 animate-spin" />
-                    <span className="ml-2">Loading orders...</span>
-                  </div>
-                ) : detailedOrders.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
-                    <Package className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                    <p>No orders found</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {detailedOrders.map((order) => (
-                      <Card key={order.id} className="border-l-4 border-l-blue-500 hover:shadow-md transition-shadow">
-                        <CardContent className="p-6">
-                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            {/* Order Info */}
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between">
-                                <h3 className="font-semibold text-lg">{order.order_number}</h3>
-                                <Badge variant={
-                                  order.order_status === 'delivered' ? 'default' :
-                                  order.order_status === 'cancelled' ? 'destructive' :
-                                  order.order_status === 'pending' ? 'secondary' : 'outline'
-                                }>
-                                  {order.tracking_status}
-                                </Badge>
-                              </div>
-                              
-                              <div className="space-y-2 text-sm">
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">Total Amount:</span>
-                                  <span className="font-semibold">₹{order.total_amount.toLocaleString()}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">Payment:</span>
-                                  <Badge variant={order.payment_status === 'paid' ? 'default' : 'secondary'}>
-                                    {order.payment_status} • {order.payment_method}
-                                  </Badge>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">Commission:</span>
-                                  <span className="font-semibold text-green-600">₹{order.commission_earned.toLocaleString()}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">Created:</span>
-                                  <span>{new Date(order.created_at).toLocaleString()}</span>
-                                </div>
-                                {order.slot_info && (
-                                  <div className="flex justify-between">
-                                    <span className="text-gray-600">Delivery Slot:</span>
-                                    <span className="text-xs">{order.slot_info.slot_name}</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
+          <TabsContent value="operations" className="space-y-6">
+            <OperationalControls />
+          </TabsContent>
 
-                            {/* Customer Info */}
-                            <div className="space-y-3">
-                              <h4 className="font-semibold text-md flex items-center gap-2">
-                                <Users className="h-4 w-4 text-blue-600" />
-                                Customer Details
-                              </h4>
-                              <div className="space-y-2 text-sm">
-                                <div>
-                                  <span className="text-gray-600">Name:</span>
-                                  <p className="font-medium">{order.customer_name}</p>
-                                </div>
-                                <div>
-                                  <span className="text-gray-600">Phone:</span>
-                                  <p className="font-medium">{order.customer_phone}</p>
-                                </div>
-                                {order.customer_email && (
-                                  <div>
-                                    <span className="text-gray-600">Email:</span>
-                                    <p className="font-medium">{order.customer_email}</p>
-                                  </div>
-                                )}
-                                {order.delivery_address && (
-                                  <div>
-                                    <span className="text-gray-600">Address:</span>
-                                    <p className="text-xs leading-relaxed">
-                                      {order.delivery_address.address_box}, {order.delivery_address.area}<br />
-                                      {order.delivery_address.city} - {order.delivery_address.pincode}
-                                    </p>
-                                  </div>
-                                )}
-                                {order.delivery_partner && (
-                                  <div>
-                                    <span className="text-gray-600">Delivery Partner:</span>
-                                    <p className="font-medium">{order.delivery_partner.name}</p>
-                                    <p className="text-xs">{order.delivery_partner.phone}</p>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
+          <TabsContent value="trends" className="space-y-6">
+            <HistoricalTrendsAnalytics />
+          </TabsContent>
 
-                            {/* Products & Vendors */}
-                            <div className="space-y-3">
-                              <h4 className="font-semibold text-md flex items-center gap-2">
-                                <Store className="h-4 w-4 text-green-600" />
-                                Products & Vendors ({order.order_items.length})
-                              </h4>
-                              <div className="space-y-3 max-h-48 overflow-y-auto">
-                                {order.order_items.map((item) => (
-                                  <div key={item.id} className="border rounded-lg p-3 bg-gray-50">
-                                    <div className="space-y-2">
-                                      <div className="flex justify-between items-start">
-                                        <div className="flex-1">
-                                          <p className="font-medium text-sm">{item.product_name}</p>
-                                          {item.product_description && (
-                                            <p className="text-xs text-gray-600 line-clamp-2">{item.product_description}</p>
-                                          )}
-                                          {item.quality_type_name && (
-                                            <Badge variant="outline" className="text-xs mt-1">
-                                              {item.quality_type_name}
-                                            </Badge>
-                                          )}
-                                        </div>
-                                        <div className="text-right">
-                                          <p className="font-semibold text-sm">₹{item.line_total.toLocaleString()}</p>
-                                          <p className="text-xs text-gray-600">{item.quantity}x ₹{item.unit_price}</p>
-                                        </div>
-                                      </div>
-                                      
-                                      <div className="border-t pt-2">
-                                        <div className="flex items-center justify-between">
-                                          <div>
-                                            <p className="font-medium text-xs text-blue-600">{item.vendor.business_name}</p>
-                                            <p className="text-xs text-gray-600">{item.vendor.phone}</p>
-                                            {item.vendor.business_city && (
-                                              <p className="text-xs text-gray-500">{item.vendor.business_city}, {item.vendor.business_state}</p>
-                                            )}
-                                          </div>
-                                          <div className="text-right">
-                                            <Badge variant={
-                                              item.item_status === 'delivered' ? 'default' :
-                                              item.item_status === 'confirmed' ? 'secondary' :
-                                              item.item_status === 'pending' ? 'outline' : 'secondary'
-                                            } className="text-xs">
-                                              {item.item_status}
-                                            </Badge>
-                                            {item.vendor.rating && (
-                                              <div className="flex items-center mt-1">
-                                                <Star className="h-3 w-3 text-yellow-500 mr-1" />
-                                                <span className="text-xs">{item.vendor.rating}</span>
-                                              </div>
-                                            )}
-                                          </div>
-                                        </div>
-                                        
-                                        {item.vendor_confirmed_at && (
-                                          <p className="text-xs text-green-600 mt-1">
-                                            ✓ Confirmed: {new Date(item.vendor_confirmed_at).toLocaleString()}
-                                          </p>
-                                        )}
-                                        {item.vendor_notes && (
-                                          <p className="text-xs text-gray-600 mt-1 italic">
-                                            Note: {item.vendor_notes}
-                                          </p>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                              
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                onClick={() => {
-                                  setSelectedOrder(order);
-                                  setShowOrderDetails(true);
-                                }}
-                                className="w-full"
-                              >
-                                <Eye className="h-4 w-4 mr-2" />
-                                View Full Details
-                              </Button>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+          <TabsContent value="pnl-dashboard" className="space-y-6">
+            <PnLDashboard />
           </TabsContent>
 
           <TabsContent value="transactions" className="space-y-6">
@@ -2215,7 +1962,7 @@ const AdminDashboard = () => {
                     <p className="text-xs text-muted-foreground">
                       {platformStats.total_transactions_processed} total transactions
                     </p>
-                  </CardContent>Transaction 
+                  </CardContent>Transaction
                 </Card>
               </div>
             )}
@@ -2288,10 +2035,9 @@ const AdminDashboard = () => {
                   {transactions.slice(0, 10).map((transaction) => (
                     <div key={transaction.id} className="flex items-center justify-between p-4 border rounded-lg">
                       <div className="flex items-center space-x-4">
-                        <div className={`w-3 h-3 rounded-full ${
-                          transaction.transaction_status === 'completed' ? 'bg-green-500' :
+                        <div className={`w-3 h-3 rounded-full ${transaction.transaction_status === 'completed' ? 'bg-green-500' :
                           transaction.transaction_status === 'pending' ? 'bg-yellow-500' : 'bg-red-500'
-                        }`}></div>
+                          }`}></div>
                         <div>
                           <p className="font-medium">{transaction.transaction_number}</p>
                           <p className="text-sm text-gray-600">{transaction.description}</p>
@@ -2369,12 +2115,11 @@ const AdminDashboard = () => {
                       .filter(vendor => vendor.analytics?.total_sales > 0)
                       .sort((a, b) => (b.analytics?.total_sales || 0) - (a.analytics?.total_sales || 0))
                       .slice(0, 5)
-                                              .map((vendor, index) => (
+                      .map((vendor, index) => (
                         <div key={vendor.id || vendor.vendor?.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                           <div className="flex items-center gap-3">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm ${
-                              index === 0 ? 'bg-yellow-500' : index === 1 ? 'bg-gray-400' : index === 2 ? 'bg-orange-400' : 'bg-blue-500'
-                            }`}>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm ${index === 0 ? 'bg-yellow-500' : index === 1 ? 'bg-gray-400' : index === 2 ? 'bg-orange-400' : 'bg-blue-500'
+                              }`}>
                               {index + 1}
                             </div>
                             <div>
@@ -2410,8 +2155,8 @@ const AdminDashboard = () => {
                     <BarChart3 className="h-5 w-5 text-blue-600" />
                     Detailed Vendor Analytics
                   </div>
-                  <Button 
-                    onClick={loadAllVendorAnalytics} 
+                  <Button
+                    onClick={loadAllVendorAnalytics}
                     disabled={loadingVendorAnalytics}
                     size="sm"
                     variant="outline"
@@ -2460,7 +2205,7 @@ const AdminDashboard = () => {
                           // Support both vendor.vendor and direct vendor properties
                           const vendor = vendorData.vendor || vendorData;
                           const performanceScore = calculateVendorPerformanceScore(analytics, vendor);
-                          
+
                           return (
                             <tr key={vendor?.id || vendorData.id} className="border-b hover:bg-gray-50 transition-colors">
                               <td className="p-4">
@@ -2500,12 +2245,11 @@ const AdminDashboard = () => {
                               </td>
                               <td className="p-4 text-center">
                                 <div className="flex items-center justify-center">
-                                  <div className={`w-16 h-2 rounded-full ${
-                                    performanceScore >= 80 ? 'bg-green-500' :
+                                  <div className={`w-16 h-2 rounded-full ${performanceScore >= 80 ? 'bg-green-500' :
                                     performanceScore >= 60 ? 'bg-yellow-500' :
-                                    performanceScore >= 40 ? 'bg-orange-500' : 'bg-red-500'
-                                  }`}>
-                                    <div 
+                                      performanceScore >= 40 ? 'bg-orange-500' : 'bg-red-500'
+                                    }`}>
+                                    <div
                                       className="h-full bg-white rounded-full transition-all duration-300"
                                       style={{ width: `${Math.max(0, 100 - performanceScore)}%` }}
                                     ></div>
@@ -2518,7 +2262,7 @@ const AdminDashboard = () => {
                         })}
                       </tbody>
                     </table>
-                    
+
                     {allVendorAnalytics.length === 0 && (
                       <div className="text-center py-12 text-gray-500">
                         <Store className="h-12 w-12 mx-auto mb-4 text-gray-300" />
@@ -2532,610 +2276,8 @@ const AdminDashboard = () => {
             </Card>
           </TabsContent>
 
-          <TabsContent value="commissions" className="space-y-6">
-            {/* Commission Management Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900">Commission Management</h2>
-                <p className="text-gray-600">Manage vendor-quality based commission rates and analytics</p>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  onClick={() => setShowCommissionForm(true)}
-                  className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Commission Rule
-                </Button>
-              </div>
-            </div>
-
-            {/* Commission Overview Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-gray-600">Total Commission Earned</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-green-600">
-                    ₹{(platformStats?.total_commission_earned || 0).toLocaleString()}
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">All time</p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-gray-600">This Month</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-blue-600">
-                    ₹{(platformStats?.month_commission || 0).toLocaleString()}
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">{platformStats?.month_transactions || 0} transactions</p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-gray-600">Active Vendors</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-purple-600">
-                    {vendorCommissions.filter(vc => vc.is_active).length}
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">With custom rates</p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-gray-600">Avg Commission Rate</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-orange-600">
-                    {vendorCommissions.length > 0 
-                      ? (vendorCommissions.reduce((sum, vc) => sum + vc.commission_rate, 0) / vendorCommissions.length).toFixed(1)
-                      : 0}%
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">Across all qualities</p>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Commission Management Tabs */}
-            <Tabs defaultValue="vendor-commissions" className="space-y-6">
-              <TabsList className="grid w-full grid-cols-4">
-                <TabsTrigger value="vendor-commissions">Vendor Commissions</TabsTrigger>
-                <TabsTrigger value="analytics">Analytics</TabsTrigger>
-                <TabsTrigger value="calculator">Calculator</TabsTrigger>
-                <TabsTrigger value="rules">General Rules</TabsTrigger>
-              </TabsList>
-
-              {/* Vendor-Quality Commission Management */}
-              <TabsContent value="vendor-commissions" className="space-y-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Store className="h-5 w-5 text-blue-600" />
-                      Vendor-Quality Commission Rates
-                    </CardTitle>
-                    <CardDescription>
-                      Set specific commission and upside rates for each vendor-quality combination
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {/* Filter Controls */}
-                    <div className="flex flex-wrap gap-4 mb-6">
-                      <select
-                        value={commissionFilters.vendorId}
-                        onChange={(e) => setCommissionFilters(prev => ({ ...prev, vendorId: e.target.value }))}
-                        className="px-3 py-2 border border-gray-300 rounded-md text-sm"
-                      >
-                        <option value="">All Vendors ({allVendors.length})</option>
-                        {allVendors.map((vendor) => (
-                          <option key={vendor.id} value={vendor.id}>
-                            {vendor.business_name || vendor.name || `Vendor ${vendor.id.slice(0, 8)}` || 'Unknown Vendor'}
-                          </option>
-                        ))}
-                      </select>
-                      
-                      <select
-                        value={commissionFilters.qualityId}
-                        onChange={(e) => setCommissionFilters(prev => ({ ...prev, qualityId: e.target.value }))}
-                        className="px-3 py-2 border border-gray-300 rounded-md text-sm"
-                      >
-                        <option value="">All Qualities</option>
-                        {allQualities.map((quality) => (
-                          <option key={quality.id} value={quality.id}>{quality.quality_name}</option>
-                        ))}
-                      </select>
-
-                      <Button
-                        onClick={() => setShowVendorCommissionForm(true)}
-                        size="sm"
-                        className="bg-green-600 hover:bg-green-700"
-                      >
-                        <Plus className="h-4 w-4 mr-2" />
-                        Add Vendor Commission
-                      </Button>
-                    </div>
-
-                    {/* Vendor Commission Table */}
-                    <div className="overflow-x-auto">
-                      <table className="w-full border-collapse">
-                        <thead>
-                          <tr className="border-b bg-gray-50">
-                            <th className="text-left p-3 font-semibold">Vendor</th>
-                            <th className="text-left p-3 font-semibold">Quality</th>
-                            <th className="text-right p-3 font-semibold">Commission %</th>
-                            <th className="text-right p-3 font-semibold">Upside %</th>
-                            <th className="text-center p-3 font-semibold">Status</th>
-                            <th className="text-right p-3 font-semibold">Example (₹1000)</th>
-                            <th className="text-center p-3 font-semibold">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {vendorCommissions
-                            .filter(vc => !commissionFilters.vendorId || vc.vendor_id === commissionFilters.vendorId)
-                            .filter(vc => !commissionFilters.qualityId || vc.quality_id === commissionFilters.qualityId)
-                            .map((commission) => {
-                              const commissionAmount = 1000 * (commission.commission_rate / 100);
-                              const upsideAmount = 1000 * (commission.upside_rate / 100);
-                              const platformEarning = commissionAmount + upsideAmount;
-                              
-                              return (
-                                <tr key={commission.id} className="border-b hover:bg-gray-50">
-                                  <td className="p-3">
-                                    <div>
-                                      <p className="font-semibold">{commission.vendor?.business_name || 'Unknown Vendor'}</p>
-                                      <p className="text-xs text-gray-500">{commission.vendor?.id || commission.vendor_id}</p>
-                                    </div>
-                                  </td>
-                                  <td className="p-3">
-                                    <div>
-                                      <p className="font-medium">{commission.quality?.quality_name}</p>
-                                      <p className="text-xs text-gray-500">{commission.quality?.quality_description}</p>
-                                    </div>
-                                  </td>
-                                  <td className="p-3 text-right">
-                                    <span className="font-semibold text-red-600">{commission.commission_rate}%</span>
-                                  </td>
-                                  <td className="p-3 text-right">
-                                    <span className="font-semibold text-blue-600">{commission.upside_rate}%</span>
-                                  </td>
-                                  <td className="p-3 text-center">
-                                    <Badge variant={commission.is_active ? "default" : "secondary"}>
-                                      {commission.is_active ? "Active" : "Inactive"}
-                                    </Badge>
-                                  </td>
-                                  <td className="p-3 text-right">
-                                    <div className="text-xs">
-                                      <p>Platform: <span className="font-semibold text-green-600">₹{platformEarning}</span></p>
-                                      <p>Vendor: <span className="font-semibold text-blue-600">₹{1000 - commissionAmount}</span></p>
-                                      <p>Customer: <span className="font-semibold">₹{1000 + upsideAmount}</span></p>
-                                    </div>
-                                  </td>
-                                  <td className="p-3 text-center">
-                                    <div className="flex justify-center gap-2">
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => handleEditVendorCommission(commission)}
-                                      >
-                                        <Edit3 className="h-3 w-3" />
-                                      </Button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                        </tbody>
-                      </table>
-                      
-                      {vendorCommissions.length === 0 && (
-                        <div className="text-center py-12 text-gray-500">
-                          <DollarSign className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                          <p className="text-lg font-semibold mb-2">No vendor commissions configured</p>
-                          <p className="text-sm">Add commission rates for vendor-quality combinations to get started.</p>
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              {/* Commission Analytics */}
-              <TabsContent value="analytics" className="space-y-6">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Top Performing Qualities */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <TrendingUp className="h-5 w-5 text-green-600" />
-                        Top Performing Qualities
-                      </CardTitle>
-                      <CardDescription>Revenue and commission by quality type</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        {qualityPerformance.slice(0, 5).map((quality, index) => (
-                          <div key={quality.quality_id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                            <div className="flex items-center gap-3">
-                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm ${
-                                index === 0 ? 'bg-yellow-500' : index === 1 ? 'bg-gray-400' : index === 2 ? 'bg-orange-400' : 'bg-blue-500'
-                              }`}>
-                                {index + 1}
-                              </div>
-                              <div>
-                                <p className="font-semibold">{quality.quality_name}</p>
-                                <p className="text-xs text-gray-600">{quality.vendor_count} vendors</p>
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <p className="font-bold text-green-600">₹{quality.total_sales?.toLocaleString()}</p>
-                              <p className="text-xs text-gray-600">Commission: ₹{quality.total_commission?.toLocaleString()}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {/* Vendor Commission Summary */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Store className="h-5 w-5 text-blue-600" />
-                        Vendor Commission Summary
-                      </CardTitle>
-                      <CardDescription>Commission breakdown by vendor</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        {vendorCommissionSummary.slice(0, 5).map((vendor) => (
-                          <div key={vendor.vendor_id} className="flex items-center justify-between p-3 border rounded-lg">
-                            <div>
-                              <p className="font-semibold">{vendor.business_name || 'Unknown Vendor'}</p>
-                              <p className="text-xs text-gray-600">{vendor.quality_count || 0} quality rates</p>
-                            </div>
-                            <div className="text-right">
-                              <p className="font-bold text-purple-600">₹{(vendor.total_commission || 0)?.toLocaleString()}</p>
-                              <p className="text-xs text-gray-600">Avg: {vendor.avg_commission_rate || 0}%</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              </TabsContent>
-
-              {/* Commission Calculator */}
-              <TabsContent value="calculator" className="space-y-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <PieChart className="h-5 w-5 text-purple-600" />
-                      Commission Calculator
-                    </CardTitle>
-                    <CardDescription>
-                      Calculate pricing breakdown for any vendor-quality combination
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {/* Calculator Form */}
-                      <div className="space-y-4">
-                        <div>
-                          <Label htmlFor="calc-vendor">Select Vendor</Label>
-                          <select
-                            id="calc-vendor"
-                            value={calculatorForm.vendorId}
-                            onChange={(e) => setCalculatorForm(prev => ({ ...prev, vendorId: e.target.value }))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                          >
-                            <option value="">Choose vendor...</option>
-                            {allVendors.map((vendor) => (
-                              <option key={vendor.id} value={vendor.id}>
-                                {vendor.business_name || vendor.name || `Vendor ${vendor.id.slice(0, 8)}` || 'Unknown Vendor'}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <Label htmlFor="calc-quality">Select Quality</Label>
-                          <select
-                            id="calc-quality"
-                            value={calculatorForm.qualityId}
-                            onChange={(e) => setCalculatorForm(prev => ({ ...prev, qualityId: e.target.value }))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                          >
-                            <option value="">Choose quality...</option>
-                            {allQualities.map((quality) => (
-                              <option key={quality.id} value={quality.id}>{quality.quality_name}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <Label htmlFor="calc-price">Base Price (₹)</Label>
-                          <Input
-                            id="calc-price"
-                            type="number"
-                            value={calculatorForm.basePrice}
-                            onChange={(e) => setCalculatorForm(prev => ({ ...prev, basePrice: parseFloat(e.target.value) || 0 }))}
-                            placeholder="Enter base price"
-                          />
-                        </div>
-
-                        <Button 
-                          onClick={handleCalculateCommission}
-                          disabled={!calculatorForm.vendorId || !calculatorForm.qualityId || !calculatorForm.basePrice}
-                          className="w-full"
-                        >
-                          Calculate Breakdown
-                        </Button>
-                      </div>
-
-                      {/* Calculator Results */}
-                      <div className="space-y-4">
-                        {calculatorResult && (
-                          <div className="p-4 bg-gray-50 rounded-lg">
-                            <h4 className="font-semibold mb-4 text-gray-900">Pricing Breakdown</h4>
-                            
-                            <div className="space-y-3">
-                              <div className="flex justify-between">
-                                <span className="text-gray-600">Base Price:</span>
-                                <span className="font-semibold">₹{calculatorResult.basePrice.toLocaleString()}</span>
-                              </div>
-                              
-                              <div className="flex justify-between text-red-600">
-                                <span>Commission ({calculatorResult.commissionRate}%):</span>
-                                <span className="font-semibold">-₹{calculatorResult.commissionAmount.toLocaleString()}</span>
-                              </div>
-                              
-                              <div className="flex justify-between text-blue-600">
-                                <span>Upside ({calculatorResult.upsideRate}%):</span>
-                                <span className="font-semibold">+₹{calculatorResult.upsideAmount.toLocaleString()}</span>
-                              </div>
-                              
-                              <hr className="my-2" />
-                              
-                              <div className="flex justify-between text-lg font-bold">
-                                <span>Customer Pays:</span>
-                                <span className="text-green-600">₹{calculatorResult.finalSellingPrice.toLocaleString()}</span>
-                              </div>
-                              
-                              <div className="flex justify-between text-lg font-bold">
-                                <span>Vendor Earns:</span>
-                                <span className="text-blue-600">₹{calculatorResult.vendorNetEarning.toLocaleString()}</span>
-                              </div>
-                              
-                              <div className="flex justify-between text-lg font-bold">
-                                <span>Platform Earns:</span>
-                                <span className="text-purple-600">₹{calculatorResult.platformEarning.toLocaleString()}</span>
-                              </div>
-                              
-                              <div className="flex justify-between text-sm text-gray-600">
-                                <span>Platform Margin:</span>
-                                <span>{calculatorResult.platformMarginPercentage.toFixed(1)}%</span>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        
-                        {!calculatorResult && (
-                          <div className="p-8 text-center text-gray-500">
-                            <PieChart className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                            <p>Select vendor, quality, and enter price to see breakdown</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              {/* General Commission Rules */}
-              <TabsContent value="rules" className="space-y-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>General Commission Rules</CardTitle>
-                    <CardDescription>
-                      Default commission rates for categories (fallback when no vendor-specific rate exists)
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      {commissionRules.map((rule) => (
-                        <div key={rule.id} className="flex items-center justify-between p-4 border rounded-lg">
-                          <div>
-                            <h4 className="font-semibold">{rule.category?.name || 'Unknown Category'}</h4>
-                            <p className="text-sm text-gray-600">
-                              {rule.commission_percentage}% commission
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              Min: ₹{rule.minimum_commission}
-                              {rule.maximum_commission && ` | Max: ₹${rule.maximum_commission}`}
-                            </p>
-                          </div>
-                          <Badge variant={rule.is_active ? "default" : "secondary"}>
-                            {rule.is_active ? "Active" : "Inactive"}
-                          </Badge>
-                        </div>
-                      ))}
-                      {commissionRules.length === 0 && (
-                        <div className="text-center py-8 text-gray-500">
-                          No commission rules configured
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
-          </TabsContent>
-
-          {/* <TabsContent value="wallets" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Wallet Management Removed</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8">
-                  <p className="text-gray-500 mb-4">
-                    Wallet functionality has been removed from the system.
-                  </p>
-                  <p className="text-sm text-gray-400">
-                    Financial tracking is now handled through direct transactions and payouts.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent> */}
-
-          <TabsContent value="payouts" className="space-y-6">
-            {/* Payout Analytics */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Pending Payouts</CardTitle>
-                  <Clock className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{payouts.filter(p => p.payout_status === 'pending').length}</div>
-                  <p className="text-xs text-muted-foreground">
-                    ₹{payouts.filter(p => p.payout_status === 'pending').reduce((sum, p) => sum + p.payout_amount, 0).toLocaleString()} total
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Completed Today</CardTitle>
-                  <CheckCircle className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">
-                    {payouts.filter(p => 
-                      p.payout_status === 'completed' && 
-                      new Date(p.created_at).toDateString() === new Date().toDateString()
-                    ).length}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    ₹{payouts.filter(p => 
-                      p.payout_status === 'completed' && 
-                      new Date(p.created_at).toDateString() === new Date().toDateString()
-                    ).reduce((sum, p) => sum + p.payout_amount, 0).toLocaleString()} paid out
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">
-                    {payouts.length > 0 ? 
-                      ((payouts.filter(p => p.payout_status === 'completed').length / payouts.length) * 100).toFixed(1) : 0
-                    }%
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {payouts.filter(p => p.payout_status === 'completed').length} of {payouts.length} completed
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Payout Management */}
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <CardTitle>Recent Payouts</CardTitle>
-                    <CardDescription>
-                      Latest payout requests requiring attention
-                    </CardDescription>
-                  </div>
-                  <Button onClick={() => navigate('/admin/payouts')} variant="outline">
-                    View All Payouts
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {payouts.slice(0, 5).map((payout) => (
-                    <div key={payout.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
-                      <div className="flex items-center space-x-4">
-                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
-                          {payout.payout_status === 'pending' && <Clock className="h-5 w-5 text-blue-600" />}
-                          {payout.payout_status === 'processing' && <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />}
-                          {payout.payout_status === 'completed' && <CheckCircle className="h-5 w-5 text-green-600" />}
-                          {payout.payout_status === 'failed' && <XCircle className="h-5 w-5 text-red-600" />}
-                        </div>
-                        <div>
-                          <h4 className="font-semibold">{payout.payout_number}</h4>
-                          <p className="text-sm text-gray-600">
-                            {payout.recipient_type === 'vendor' ? 'Vendor' : 'Delivery Partner'} • {payout.payout_method.replace('_', ' ')}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            Created: {new Date(payout.created_at).toLocaleDateString('en-IN', {
-                              year: 'numeric',
-                              month: 'short',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-4">
-                        <div className="text-right">
-                          <p className="font-semibold text-lg">₹{payout.payout_amount.toLocaleString()}</p>
-                          <Badge variant={
-                            payout.payout_status === 'completed' ? 'default' :
-                            payout.payout_status === 'pending' ? 'secondary' :
-                            payout.payout_status === 'processing' ? 'outline' : 'destructive'
-                          }>
-                            {payout.payout_status}
-                          </Badge>
-                        </div>
-                        {payout.payout_status === 'pending' && (
-                          <div className="flex space-x-2">
-                            <Button 
-                              size="sm" 
-                              onClick={() => handleProcessPayout(payout.id, 'processing')}
-                            >
-                              <Check className="h-4 w-4 mr-1" />
-                              Approve
-                            </Button>
-                            <Button 
-                              size="sm" 
-                              variant="outline"
-                              onClick={() => handleProcessPayout(payout.id, 'cancelled')}
-                            >
-                              <X className="h-4 w-4 mr-1" />
-                              Reject
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                  {payouts.length === 0 && (
-                    <div className="text-center py-8 text-gray-500">
-                      <Clock className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                      <h3 className="text-lg font-medium text-gray-900 mb-2">No payouts found</h3>
-                      <p className="text-gray-500">Payouts will appear here when vendors and delivery partners request them.</p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+          <TabsContent value="cancellations" className="space-y-6">
+            <CancellationAnalytics />
           </TabsContent>
 
           <TabsContent value="management" className="space-y-6">
@@ -3211,12 +2353,32 @@ const AdminDashboard = () => {
                     <ArrowRight className="h-4 w-4 text-gray-400" />
                   </CardTitle>
                   <CardDescription>
-                    Approve and manage vendor accounts, commissions, and performance
+                    Approve and manage vendor accounts and performance
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-gray-600">
-                    Review vendor applications, manage approvals, and set commission rates
+                    Review vendor applications and manage approvals
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/admin/manage-commissions')}>
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <DollarSign className="h-5 w-5 text-emerald-600" />
+                      Manage Commissions
+                    </div>
+                    <ArrowRight className="h-4 w-4 text-gray-400" />
+                  </CardTitle>
+                  <CardDescription>
+                    Configure commission rates, analytics, and vendor-quality pricing
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-600">
+                    Set commission rules, calculate pricing breakdowns, and analyze performance
                   </p>
                 </CardContent>
               </Card>
@@ -3261,24 +2423,43 @@ const AdminDashboard = () => {
                 </CardContent>
               </Card>
 
-              <Card className="hover:shadow-md transition-shadow cursor-pointer opacity-75">
+              <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/admin/payouts')}>
                 <CardHeader className="pb-4">
                   <CardTitle className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Truck className="h-5 w-5 text-orange-600" />
-                      Delivery Management
+                      <CreditCard className="h-5 w-5 text-green-600" />
+                      Manage Payouts
                     </div>
                     <ArrowRight className="h-4 w-4 text-gray-400" />
                   </CardTitle>
                   <CardDescription>
-                    Manage delivery partners and logistics
+                    Process and manage vendor and delivery partner payouts
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-gray-600">
-                    Monitor delivery performance and partner management
+                    Review, approve, and track payment disbursements
                   </p>
-                  <Badge variant="secondary" className="mt-2">Coming Soon</Badge>
+                </CardContent>
+              </Card>
+
+              <Card className="hover:shadow-md transition-shadow cursor-pointer " onClick={() => navigate('/admin/customer-management')}>
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Truck className="h-5 w-5 text-orange-600" />
+                      Manage Customers
+                    </div>
+                    <ArrowRight className="h-4 w-4 text-gray-400" />
+                  </CardTitle>
+                  <CardDescription>
+                    Manage customers and their orders
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-600">
+                    Manage customers and their orders
+                  </p>
                 </CardContent>
               </Card>
 
@@ -3302,192 +2483,256 @@ const AdminDashboard = () => {
                   <Badge variant="secondary" className="mt-2">Coming Soon</Badge>
                 </CardContent>
               </Card>
+
+              <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/admin/delivery-partners')}>
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Truck className="h-5 w-5 text-green-600" />
+                      Manage Delivery Partner
+                    </div>
+                    <ArrowRight className="h-4 w-4 text-gray-400" />
+                  </CardTitle>
+                  <CardDescription>
+                    Manage delivery partners and zones
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-600">
+                    Review, approve, and manage delivery partner accounts and areas.
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/admin/commission-rules')}>
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <DollarSign className="h-5 w-5 text-emerald-600" />
+                      Manage Category Commissions
+                    </div>
+                    <ArrowRight className="h-4 w-4 text-gray-400" />
+                  </CardTitle>
+                  <CardDescription>
+                    Configure commission rates, analytics, and vendor-quality pricing
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-600">
+                    Set commission rules, calculate pricing breakdowns, and analyze performance
+                  </p>
+                </CardContent>
+              </Card>
             </div>
+
+            {/* Marketplace Management Section */}
+            <div className="mt-8">
+              <h3 className="text-xl font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <Package className="h-5 w-5 text-blue-600" />
+                Marketplace Management
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/admin/market/categories')}>
+                  <CardHeader className="pb-4">
+                    <CardTitle className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Package className="h-5 w-5 text-blue-600" />
+                        Market Categories
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-gray-400" />
+                    </CardTitle>
+                    <CardDescription>
+                      Manage marketplace product categories and hierarchies
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-gray-600">
+                      Create and organize categories for marketplace products with SEO optimization
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/admin/market/brands')}>
+                  <CardHeader className="pb-4">
+                    <CardTitle className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Package className="h-5 w-5 text-purple-600" />
+                        Market Brands
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-gray-400" />
+                    </CardTitle>
+                    <CardDescription>
+                      Manage marketplace brands and their guidelines
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-gray-600">
+                      Add and manage brands for marketplace products with logos and guidelines
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/admin/market/products')}>
+                  <CardHeader className="pb-4">
+                    <CardTitle className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Package className="h-5 w-5 text-green-600" />
+                        Market Products
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-gray-400" />
+                    </CardTitle>
+                    <CardDescription>
+                      Manage the master product catalog for marketplace
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-gray-600">
+                      Create and manage products that vendors can request to sell with specifications and images
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/admin/market/vendor-requests')}>
+                  <CardHeader className="pb-4">
+                    <CardTitle className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Package className="h-5 w-5 text-orange-600" />
+                        Vendor Requests
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-gray-400" />
+                    </CardTitle>
+                    <CardDescription>
+                      Review and approve vendor product requests
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-gray-600">
+                      Manage vendor applications to sell marketplace products with approval workflow
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="hover:shadow-md transition-shadow cursor-pointer opacity-50">
+                  <CardHeader className="pb-4">
+                    <CardTitle className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Package className="h-5 w-5 text-red-600" />
+                        Market Analytics
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-gray-400" />
+                    </CardTitle>
+                    <CardDescription>
+                      View marketplace performance and analytics
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-gray-600">
+                      Monitor marketplace sales, vendor performance, and trends
+                    </p>
+                    <Badge variant="secondary" className="mt-2">Coming Soon</Badge>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="live" className="space-y-6">
+            {/* Live Metrics Chips */}
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline">Live: {liveOnlyOrders.length}</Badge>
+              <Badge variant="outline">New (5m): {newIn5mCount}</Badge>
+              <Badge variant={delayedCount ? 'destructive' : 'secondary'}>Delayed: {delayedCount}</Badge>
+              <Badge variant={unassignedCount ? 'secondary' : 'outline'}>Unassigned: {unassignedCount}</Badge>
+              <Button size="sm" onClick={handleAutoAssignDeliveryPartners} className="ml-auto">
+                <Zap className="h-4 w-4 mr-1" /> Auto-Assign
+              </Button>
+            </div>
+
+            {/* Status Board */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[
+                { key: 'pending', label: 'Pending' },
+                { key: 'confirmed', label: 'Confirmed' },
+                { key: 'processing', label: 'Processing' },
+                { key: 'packed', label: 'Packed' },
+                { key: 'picked_up', label: 'Picked Up' },
+                { key: 'out_for_delivery', label: 'Out for Delivery' }
+              ].map((col) => {
+                const orders = liveOnlyOrders.filter(o => o.order_status === col.key);
+                return (
+                  <Card key={col.key}>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center justify-between">
+                        <span>{col.label}</span>
+                        <Badge variant="secondary">{orders.length}</Badge>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {orders.slice(0, 10).map((o) => {
+                        const itemVendors = new Set(o.order_items.map(i => i.vendor.id));
+                        const isNew = Date.now() - new Date(o.created_at).getTime() < 60 * 1000;
+                        const nextMap: Record<string, string> = {
+                          pending: 'confirmed',
+                          confirmed: 'processing',
+                          processing: 'packed',
+                          packed: 'picked_up',
+                          picked_up: 'out_for_delivery',
+                          out_for_delivery: 'delivered'
+                        };
+                        const next = nextMap[o.order_status];
+                        return (
+                          <div key={o.id} className={`p-3 border rounded-lg ${isNew ? 'bg-blue-50' : 'bg-white'}`}>
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <div className="font-semibold">{o.order_number}</div>
+                                <div className="text-xs text-gray-600">{new Date(o.created_at).toLocaleString()}</div>
+                                <div className="mt-1 flex items-center gap-2">
+                                  <span className="text-sm font-medium">₹{o.total_amount.toLocaleString()}</span>
+                                  {getSlaBadge(o)}
+                                  <Badge variant="outline">{itemVendors.size} vendor(s)</Badge>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button size="sm" variant="outline" onClick={() => { setSelectedOrder(o); setShowOrderDetails(true); }}>View</Button>
+                                {next && (
+                                  <Button size="sm" onClick={() => updateOrderStatus(o.id, next)}>Advance</Button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {orders.length === 0 && (
+                        <div className="text-center py-8 text-gray-500">No orders</div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+
+            {/* Activity Feed */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Live Activity</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {activityFeed.length === 0 && (
+                    <div className="text-gray-500 text-sm">No recent activity</div>
+                  )}
+                  {activityFeed.map((e, idx) => (
+                    <div key={idx} className="text-sm flex items-center justify-between border-b last:border-b-0 py-1">
+                      <span className="text-gray-600">{e.message}</span>
+                      <span className="text-gray-400">{e.time}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </main>
-
-      {/* Commission Rule Form Modal */}
-      <Dialog open={showCommissionForm} onOpenChange={setShowCommissionForm}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Add Commission Rule</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="category">Category</Label>
-              <Select 
-                value={commissionForm.categoryId} 
-                onValueChange={(value) => setCommissionForm(prev => ({ ...prev, categoryId: value }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent>
-                  {allCategories.map((category) => (
-                    <SelectItem key={category.id} value={category.id}>
-                      {category.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="commissionPercentage">Commission Percentage</Label>
-              <Input
-                id="commissionPercentage"
-                type="number"
-                placeholder="e.g., 15"
-                value={commissionForm.commissionPercentage}
-                onChange={(e) => setCommissionForm(prev => ({ ...prev, commissionPercentage: e.target.value }))}
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="minimumCommission">Minimum Commission (₹)</Label>
-              <Input
-                id="minimumCommission"
-                type="number"
-                placeholder="e.g., 50"
-                value={commissionForm.minimumCommission}
-                onChange={(e) => setCommissionForm(prev => ({ ...prev, minimumCommission: e.target.value }))}
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="maximumCommission">Maximum Commission (₹)</Label>
-              <Input
-                id="maximumCommission"
-                type="number"
-                placeholder="e.g., 500"
-                value={commissionForm.maximumCommission}
-                onChange={(e) => setCommissionForm(prev => ({ ...prev, maximumCommission: e.target.value }))}
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="notes">Notes</Label>
-              <Textarea
-                id="notes"
-                placeholder="Optional notes about this rule"
-                value={commissionForm.notes}
-                onChange={(e) => setCommissionForm(prev => ({ ...prev, notes: e.target.value }))}
-              />
-            </div>
-            
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => setShowCommissionForm(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleCreateCommissionRule}>
-                <Save className="h-4 w-4 mr-2" />
-                Create Rule
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Vendor Commission Form Modal */}
-      <Dialog open={showVendorCommissionForm} onOpenChange={setShowVendorCommissionForm}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Add Vendor Commission</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="vendor">Vendor</Label>
-              <Select 
-                value={calculatorForm.vendorId} 
-                onValueChange={(value) => setCalculatorForm(prev => ({ ...prev, vendorId: value }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select vendor" />
-                </SelectTrigger>
-                <SelectContent>
-                  {allVendors.map((vendor) => (
-                    <SelectItem key={vendor.id} value={vendor.id}>
-                      {vendor.business_name || vendor.name || `Vendor ${vendor.id.slice(0, 8)}` || 'Unknown Vendor'}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="quality">Quality</Label>
-              <Select 
-                value={calculatorForm.qualityId} 
-                onValueChange={(value) => setCalculatorForm(prev => ({ ...prev, qualityId: value }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select quality" />
-                </SelectTrigger>
-                <SelectContent>
-                  {allQualities.map((quality) => (
-                    <SelectItem key={quality.id} value={quality.id}>
-                      {quality.quality_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="commissionRate">Commission Rate (%)</Label>
-              <Input
-                id="commissionRate"
-                type="number"
-                placeholder="e.g., 12"
-                value={calculatorForm.commissionRate || ''}
-                onChange={(e) => setCalculatorForm(prev => ({ ...prev, commissionRate: parseFloat(e.target.value) || 0 }))}
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="upsideRate">Upside Rate (%)</Label>
-              <Input
-                id="upsideRate"
-                type="number"
-                placeholder="e.g., 5"
-                value={calculatorForm.upsideRate || ''}
-                onChange={(e) => setCalculatorForm(prev => ({ ...prev, upsideRate: parseFloat(e.target.value) || 0 }))}
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="effectiveFrom">Effective From</Label>
-              <Input
-                id="effectiveFrom"
-                type="date"
-                value={calculatorForm.effectiveFrom || ''}
-                onChange={(e) => setCalculatorForm(prev => ({ ...prev, effectiveFrom: e.target.value }))}
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="notes">Notes</Label>
-              <Textarea
-                id="notes"
-                placeholder="Optional notes about this commission"
-                value={calculatorForm.notes || ''}
-                onChange={(e) => setCalculatorForm(prev => ({ ...prev, notes: e.target.value }))}
-              />
-            </div>
-            
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => setShowVendorCommissionForm(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleCreateVendorCommission}>
-                <Save className="h-4 w-4 mr-2" />
-                Create Commission
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Detailed Order Modal */}
       <Dialog open={showOrderDetails} onOpenChange={setShowOrderDetails}>
@@ -3498,7 +2743,7 @@ const AdminDashboard = () => {
               Order Details - {selectedOrder?.order_number}
             </DialogTitle>
           </DialogHeader>
-          
+
           {selectedOrder && (
             <div className="space-y-6">
               {/* Order Summary */}
@@ -3532,7 +2777,7 @@ const AdminDashboard = () => {
                         <span>{new Date(selectedOrder.updated_at).toLocaleString()}</span>
                       </div>
                     </div>
-                    
+
                     <div className="space-y-3">
                       <div className="flex justify-between">
                         <span className="font-medium">Subtotal:</span>
@@ -3585,7 +2830,7 @@ const AdminDashboard = () => {
                         </div>
                       )}
                     </div>
-                    
+
                     {selectedOrder.delivery_address && (
                       <div>
                         <span className="font-medium">Delivery Address:</span>
@@ -3628,13 +2873,13 @@ const AdminDashboard = () => {
                                 )}
                                 <Badge variant={
                                   item.item_status === 'delivered' ? 'default' :
-                                  item.item_status === 'confirmed' ? 'secondary' : 'outline'
+                                    item.item_status === 'confirmed' ? 'secondary' : 'outline'
                                 }>
                                   {item.item_status}
                                 </Badge>
                               </div>
                             </div>
-                            
+
                             <div className="text-right">
                               <p className="text-lg font-semibold">₹{item.line_total.toLocaleString()}</p>
                               <p className="text-sm text-gray-600">{item.quantity} × ₹{item.unit_price.toLocaleString()}</p>
@@ -3645,7 +2890,7 @@ const AdminDashboard = () => {
                               )}
                             </div>
                           </div>
-                          
+
                           {/* Vendor Details */}
                           <div className="border-t mt-4 pt-4">
                             <h5 className="font-medium text-sm text-blue-600 mb-2">Vendor Details</h5>
@@ -3672,7 +2917,7 @@ const AdminDashboard = () => {
                                   </div>
                                 )}
                               </div>
-                              
+
                               <div className="space-y-2">
                                 {item.vendor.business_city && (
                                   <div>
@@ -3706,7 +2951,7 @@ const AdminDashboard = () => {
                                 )}
                               </div>
                             </div>
-                            
+
                             {item.vendor_notes && (
                               <div className="mt-3 p-2 bg-yellow-50 rounded border-l-4 border-yellow-400">
                                 <span className="text-xs font-medium text-yellow-800">Vendor Notes:</span>
@@ -3741,7 +2986,7 @@ const AdminDashboard = () => {
                           </div>
                         </div>
                       )}
-                      
+
                       {selectedOrder.slot_info && (
                         <div>
                           <span className="font-medium">Delivery Slot:</span>
@@ -3753,21 +2998,21 @@ const AdminDashboard = () => {
                           </div>
                         </div>
                       )}
-                      
+
                       {selectedOrder.sector_info && (
                         <div>
                           <span className="font-medium">Delivery Sector:</span>
                           <p className="mt-2">{selectedOrder.sector_info.sector_name}</p>
                         </div>
                       )}
-                      
+
                       {selectedOrder.estimated_delivery_date && (
                         <div>
                           <span className="font-medium">Estimated Delivery:</span>
                           <p className="mt-2">{new Date(selectedOrder.estimated_delivery_date).toLocaleDateString()}</p>
                         </div>
                       )}
-                      
+
                       {selectedOrder.actual_delivery_date && (
                         <div>
                           <span className="font-medium">Actual Delivery:</span>
@@ -3792,7 +3037,7 @@ const AdminDashboard = () => {
                         <p className="mt-1 p-3 bg-blue-50 rounded-lg">{selectedOrder.notes}</p>
                       </div>
                     )}
-                    
+
                     {selectedOrder.cancellation_reason && (
                       <div>
                         <span className="font-medium">Cancellation Reason:</span>
@@ -3810,4 +3055,4 @@ const AdminDashboard = () => {
   );
 };
 
-export default AdminDashboard; 
+export default AdminDashboard;

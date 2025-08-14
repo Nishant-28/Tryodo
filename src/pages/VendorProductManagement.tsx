@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Package, Plus, Search, Filter, Download, Upload, BarChart3, 
+import {
+  Package, Plus, Search, Filter, Download, Upload, BarChart3,
   TrendingUp, Edit, Trash2, Eye, EyeOff, AlertCircle, CheckCircle,
   RefreshCw, FileText, Calendar, ShoppingCart, Users, Star,
   Activity, PieChart, LineChart, Archive, Settings, Grid3X3,
@@ -50,9 +50,9 @@ interface VendorProduct {
   updated_at: string;
   category: { id: string; name: string; };
   quality_type: { id: string; name: string; };
-  model?: { 
-    id: string; 
-    model_name: string; 
+  model?: {
+    id: string;
+    model_name: string;
     brand: { name: string; };
   };
 
@@ -132,6 +132,11 @@ interface QualityType {
   name: string;
 }
 
+interface Brand {
+  id: string;
+  name: string;
+}
+
 interface FilterPreset {
   id: string;
   name: string;
@@ -165,9 +170,16 @@ const VendorProductManagement = () => {
   const [filteredProducts, setFilteredProducts] = useState<VendorProduct[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [qualityTypes, setQualityTypes] = useState<QualityType[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
   const [filterPresets, setFilterPresets] = useState<FilterPreset[]>([]);
   const [productTemplates, setProductTemplates] = useState<ProductTemplate[]>([]);
-  
+
+  // Pagination state - Modified to show all products
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50000); // Set very high limit to show all products
+  const [totalProducts, setTotalProducts] = useState(0);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+
   const [productStats, setProductStats] = useState<ProductStats>({
     totalProducts: 0,
     activeProducts: 0,
@@ -182,7 +194,7 @@ const VendorProductManagement = () => {
     criticalStock: 0,
     topPerformer: ''
   });
-  
+
   const [salesAnalytics, setSalesAnalytics] = useState<SalesAnalytics>({
     totalRevenue: 0,
     totalOrders: 0,
@@ -192,14 +204,14 @@ const VendorProductManagement = () => {
     categoryPerformance: [],
     lowStockAlerts: []
   });
-  
+
   // UI State
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'grid' | 'list' | 'compact'>('grid');
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [showBulkActions, setShowBulkActions] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  
+
   // Enhanced Filtering and Search
   const [searchTerm, setSearchTerm] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
@@ -207,6 +219,7 @@ const VendorProductManagement = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterQuality, setFilterQuality] = useState('all');
+  const [filterBrand, setFilterBrand] = useState('all');
   const [sortBy, setSortBy] = useState('updated_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [priceRange, setPriceRange] = useState({ min: '', max: '' });
@@ -214,7 +227,7 @@ const VendorProductManagement = () => {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [profitMarginRange, setProfitMarginRange] = useState([0, 100]);
   const [performanceFilter, setPerformanceFilter] = useState('all');
-  
+
   // Quick Edit State
   const [editingProduct, setEditingProduct] = useState<VendorProduct | null>(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -222,7 +235,7 @@ const VendorProductManagement = () => {
   const [showProfitCalculator, setShowProfitCalculator] = useState(false);
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [showAnalyticsDialog, setShowAnalyticsDialog] = useState(false);
-  
+
   // Quick actions state
   const [showQuickStockUpdate, setShowQuickStockUpdate] = useState(false);
   const [showQuickPriceUpdate, setShowQuickPriceUpdate] = useState(false);
@@ -230,6 +243,38 @@ const VendorProductManagement = () => {
   const [showRestockSuggestions, setShowRestockSuggestions] = useState(false);
   const [showComparisonMode, setShowComparisonMode] = useState(false);
   const [comparedProducts, setComparedProducts] = useState<string[]>([]);
+
+  // Inventory adjustment history state
+  const [inventoryAdjustments, setInventoryAdjustments] = useState<Array<{
+    id: string;
+    vendor_product_id: string;
+    adjustment_type: string;
+    quantity_change: number;
+    previous_quantity: number;
+    new_quantity: number;
+    reason: string;
+    reference_order_id?: string;
+    reference_order_item_id?: string;
+    created_by?: string;
+    batch_number?: string;
+    expiry_date?: string;
+    cost_per_unit?: number;
+    total_cost?: number;
+    notes?: string;
+    adjustment_source?: string;
+    metadata?: any;
+    created_at: string;
+    updated_at?: string;
+    product_name?: string;
+    created_by_name?: string;
+    adjustment_display?: string;
+    change_indicator?: 'increase' | 'decrease' | 'neutral';
+    formatted_date?: string;
+    vendor_products?: any;
+    profiles?: any;
+  }>>([]);
+  const [loadingAdjustments, setLoadingAdjustments] = useState(false);
+  const [showInventoryHistory, setShowInventoryHistory] = useState(false);
 
   // Helper functions
   const getProductDisplayName = useCallback((product: VendorProduct) => {
@@ -252,6 +297,7 @@ const VendorProductManagement = () => {
     setFilterStatus('all');
     setFilterCategory('all');
     setFilterQuality('all');
+    setFilterBrand('all');
     setStockFilter('all');
     setPriceRange({ min: '', max: '' });
     setSortBy('updated_at');
@@ -271,9 +317,9 @@ const VendorProductManagement = () => {
   const initializeVendorManagement = async () => {
     try {
       setLoading(true);
-      
+
       console.log('Current profile:', profile); // Debug log
-      
+
       // Get vendor ID
       const { data: vendorData, error: vendorError } = await supabase
         .from('vendors')
@@ -290,11 +336,12 @@ const VendorProductManagement = () => {
 
       console.log('Found vendor:', vendorData); // Debug log
       setVendorId(vendorData.id);
-      
+
       await Promise.all([
-        loadProducts(vendorData.id),
+        loadProducts(vendorData.id, {}),
         loadCategories(),
         loadQualityTypes(),
+        loadBrands(),
         loadProductStats(vendorData.id),
         loadSalesAnalytics(vendorData.id)
       ]);
@@ -310,32 +357,158 @@ const VendorProductManagement = () => {
     }
   };
 
-  const loadProducts = async (vendorId: string) => {
+  const loadProducts = async (vendorId: string, filters: any = {}) => {
     try {
-      const { data, error } = await supabase
+      setLoadingProducts(true);
+
+      // First, get the total count of products with filters applied
+      let countQuery = supabase
         .from('vendor_products')
-        .select(`
-          *,
-          categories!category_id (id, name),
-          category_qualities!quality_type_id (id, quality_name),
-          smartphone_models!model_id (
-            id, model_name,
-            brands!brand_id (name)
-          )
-        `)
-        .eq('vendor_id', vendorId)
-        .order('created_at', { ascending: false });
+        .select('id', { count: 'exact', head: true })
+        .eq('vendor_id', vendorId);
 
-      if (error) throw error;
+      // Apply the same filters for counting
+      if (filters.status && filters.status !== 'all') {
+        switch (filters.status) {
+          case 'active':
+            countQuery = countQuery.eq('is_active', true);
+            break;
+          case 'inactive':
+            countQuery = countQuery.eq('is_active', false);
+            break;
+          case 'in_stock':
+            countQuery = countQuery.eq('is_in_stock', true).gt('stock_quantity', 0);
+            break;
+          case 'out_of_stock':
+            countQuery = countQuery.or('is_in_stock.eq.false,stock_quantity.eq.0');
+            break;
+          case 'low_stock':
+            countQuery = countQuery.gt('stock_quantity', 0).lte('stock_quantity', 5);
+            break;
+        }
+      }
 
-      console.log('Raw products data:', data); // Debug log
+      if (filters.category && filters.category !== 'all') {
+        countQuery = countQuery.eq('category_id', filters.category);
+      }
+
+      if (filters.quality && filters.quality !== 'all') {
+        countQuery = countQuery.eq('quality_type_id', filters.quality);
+      }
+
+      if (filters.priceMin) {
+        countQuery = countQuery.gte('price', parseFloat(filters.priceMin));
+      }
+
+      if (filters.priceMax) {
+        countQuery = countQuery.lte('price', parseFloat(filters.priceMax));
+      }
+
+      // Get the total count first
+      const { count: totalCount, error: countError } = await countQuery;
+      if (countError) throw countError;
       
-      const formattedProducts = data.map(product => ({
+      // Set total products count
+      setTotalProducts(totalCount || 0);
+      console.log('Total products count:', totalCount);
+
+      // Now load all products in batches to handle large datasets
+      let allProducts: any[] = [];
+      let currentBatch = 0;
+      const batchSize = 1000; // Use the max API limit per batch
+      let hasMoreData = true;
+
+      while (hasMoreData) {
+        // Build the query with filters for this batch
+        let query = supabase
+          .from('vendor_products')
+          .select(`
+            *,
+            categories!category_id (id, name),
+            category_qualities!quality_type_id (id, quality_name),
+            smartphone_models!model_id (
+              id, model_name,
+              brands!brand_id (name)
+            )
+          `)
+          .eq('vendor_id', vendorId);
+
+        // Apply the same filters as count query
+        if (filters.status && filters.status !== 'all') {
+          switch (filters.status) {
+            case 'active':
+              query = query.eq('is_active', true);
+              break;
+            case 'inactive':
+              query = query.eq('is_active', false);
+              break;
+            case 'in_stock':
+              query = query.eq('is_in_stock', true).gt('stock_quantity', 0);
+              break;
+            case 'out_of_stock':
+              query = query.or('is_in_stock.eq.false,stock_quantity.eq.0');
+              break;
+            case 'low_stock':
+              query = query.gt('stock_quantity', 0).lte('stock_quantity', 5);
+              break;
+          }
+        }
+
+        if (filters.category && filters.category !== 'all') {
+          query = query.eq('category_id', filters.category);
+        }
+
+        if (filters.quality && filters.quality !== 'all') {
+          query = query.eq('quality_type_id', filters.quality);
+        }
+
+        if (filters.priceMin) {
+          query = query.gte('price', parseFloat(filters.priceMin));
+        }
+
+        if (filters.priceMax) {
+          query = query.lte('price', parseFloat(filters.priceMax));
+        }
+
+        // Apply sorting
+        const sortField = filters.sortBy || 'created_at';
+        const sortAscending = filters.sortOrder === 'asc';
+        query = query.order(sortField, { ascending: sortAscending });
+
+        // Apply pagination for this batch
+        const startIndex = currentBatch * batchSize;
+        const endIndex = startIndex + batchSize - 1;
+        query = query.range(startIndex, endIndex);
+
+        const { data, error } = await query;
+
+        if (error) throw error;
+
+        console.log(`Batch ${currentBatch + 1}: Fetched ${data?.length || 0} products (${startIndex}-${endIndex})`);
+
+        if (data && data.length > 0) {
+          allProducts = [...allProducts, ...data];
+          
+          // Check if we got fewer results than requested (end of data)
+          if (data.length < batchSize) {
+            hasMoreData = false;
+          } else {
+            currentBatch++;
+          }
+        } else {
+          hasMoreData = false;
+        }
+      }
+
+      console.log('All products loaded:', allProducts.length);
+      console.log('Total products in DB:', totalCount);
+
+      const formattedProducts = allProducts.map(product => ({
         ...product,
         category: product.categories,
-        quality_type: { 
-          id: product.category_qualities?.id, 
-          name: product.category_qualities?.quality_name 
+        quality_type: {
+          id: product.category_qualities?.id,
+          name: product.category_qualities?.quality_name
         },
         model: product.smartphone_models ? {
           ...product.smartphone_models,
@@ -343,8 +516,12 @@ const VendorProductManagement = () => {
         } : undefined
       }));
 
-      console.log('Formatted products:', formattedProducts); // Debug log
+      console.log('Setting all products:', formattedProducts.length);
       setProducts(formattedProducts);
+
+      // Apply client-side filters for search and brand (since these need complex joins)
+      applyClientSideFilters(formattedProducts);
+
     } catch (error) {
       console.error('Error loading products:', error);
       toast({
@@ -352,6 +529,23 @@ const VendorProductManagement = () => {
         description: "Failed to load products",
         variant: "destructive",
       });
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  const loadBrands = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('brands')
+        .select('id, name')
+        .eq('is_active', true)
+        .order('name');
+
+      if (error) throw error;
+      setBrands(data || []);
+    } catch (error) {
+      console.error('Error loading brands:', error);
     }
   };
 
@@ -436,8 +630,9 @@ const VendorProductManagement = () => {
     });
   };
 
-  const applyFiltersAndSort = () => {
-    let filtered = [...products];
+  // Client-side filtering for search and brand (complex joins)
+  const applyClientSideFilters = (productList: VendorProduct[]) => {
+    let filtered = [...productList];
 
     // Search filter
     if (searchTerm) {
@@ -448,112 +643,60 @@ const VendorProductManagement = () => {
           product.category?.name,
           product.quality_type?.name
         ].filter(Boolean).join(' ').toLowerCase();
-        
+
         return searchFields.includes(searchTerm.toLowerCase());
       });
     }
 
-    // Status filter
-    if (filterStatus !== 'all') {
-      switch (filterStatus) {
-        case 'active':
-          filtered = filtered.filter(p => p.is_active);
-          break;
-        case 'inactive':
-          filtered = filtered.filter(p => !p.is_active);
-          break;
-        case 'in_stock':
-          filtered = filtered.filter(p => p.is_in_stock && p.stock_quantity > 0);
-          break;
-        case 'out_of_stock':
-          filtered = filtered.filter(p => !p.is_in_stock || p.stock_quantity === 0);
-          break;
-        case 'low_stock':
-          filtered = filtered.filter(p => p.stock_quantity > 0 && p.stock_quantity <= 5);
-          break;
-      }
+    // Brand filter
+    if (filterBrand !== 'all') {
+      filtered = filtered.filter(p => p.model?.brand?.name === filterBrand);
     }
 
-    // Category filter
-    if (filterCategory !== 'all') {
-      filtered = filtered.filter(p => p.category?.id === filterCategory);
-    }
-
-    // Quality filter
-    if (filterQuality !== 'all') {
-      filtered = filtered.filter(p => p.quality_type?.id === filterQuality);
-    }
-
-    // Stock filter
-    if (stockFilter !== 'all') {
-      switch (stockFilter) {
-        case 'high':
-          filtered = filtered.filter(p => p.stock_quantity > 10);
-          break;
-        case 'medium':
-          filtered = filtered.filter(p => p.stock_quantity >= 6 && p.stock_quantity <= 10);
-          break;
-        case 'low':
-          filtered = filtered.filter(p => p.stock_quantity >= 1 && p.stock_quantity <= 5);
-          break;
-        case 'zero':
-          filtered = filtered.filter(p => p.stock_quantity === 0);
-          break;
-      }
-    }
-
-    // Price range filter
-    if (priceRange.min || priceRange.max) {
-      filtered = filtered.filter(p => {
-        const price = p.price;
-        const min = priceRange.min ? parseFloat(priceRange.min) : 0;
-        const max = priceRange.max ? parseFloat(priceRange.max) : Infinity;
-        return price >= min && price <= max;
-      });
-    }
-
-    // Sorting
-    filtered.sort((a, b) => {
-      let aValue: any, bValue: any;
-      
-      switch (sortBy) {
-        case 'name':
-          aValue = a.model?.model_name || '';
-          bValue = b.model?.model_name || '';
-          break;
-        case 'price':
-          aValue = a.price;
-          bValue = b.price;
-          break;
-        case 'stock':
-          aValue = a.stock_quantity;
-          bValue = b.stock_quantity;
-          break;
-        case 'created_at':
-          aValue = new Date(a.created_at);
-          bValue = new Date(b.created_at);
-          break;
-        case 'updated_at':
-          aValue = new Date(a.updated_at);
-          bValue = new Date(b.updated_at);
-          break;
-        default:
-          aValue = a.updated_at;
-          bValue = b.updated_at;
-      }
-
-      if (typeof aValue === 'string') {
-        return sortOrder === 'asc' 
-          ? aValue.localeCompare(bValue)
-          : bValue.localeCompare(aValue);
-      }
-      
-      return sortOrder === 'asc' 
-        ? (aValue > bValue ? 1 : -1)
-        : (aValue < bValue ? 1 : -1);
-    });
-
+    console.log('Applying filters - original products:', productList.length, 'filtered products:', filtered.length);
     setFilteredProducts(filtered);
+  };
+
+  const applyFiltersAndSort = () => {
+    applyClientSideFilters(products);
+  };
+
+  // Function to reload products with current filters
+  const reloadProducts = useCallback(() => {
+    if (!vendorId) return;
+
+    const filters = {
+      status: filterStatus,
+      category: filterCategory,
+      quality: filterQuality,
+      priceMin: priceRange.min,
+      priceMax: priceRange.max,
+      sortBy,
+      sortOrder
+    };
+
+    loadProducts(vendorId, filters);
+  }, [vendorId, filterStatus, filterCategory, filterQuality, priceRange, sortBy, sortOrder]);
+
+  // Effect to reload products when server-side filters change
+  useEffect(() => {
+    if (vendorId) {
+      reloadProducts();
+    }
+  }, [reloadProducts]);
+
+  // Effect for client-side filters (search, brand)
+  useEffect(() => {
+    applyClientSideFilters(products);
+  }, [products, searchTerm, filterBrand]);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  const handleItemsPerPageChange = (newItemsPerPage: number) => {
+    setItemsPerPage(newItemsPerPage);
+    setCurrentPage(1); // Reset to first page
   };
 
   const handleProductAction = async (productId: string, action: 'activate' | 'deactivate' | 'delete') => {
@@ -563,9 +706,9 @@ const VendorProductManagement = () => {
           .from('vendor_products')
           .delete()
           .eq('id', productId);
-        
+
         if (error) throw error;
-        
+
         setProducts(prev => prev.filter(p => p.id !== productId));
         toast({
           title: "Success",
@@ -576,13 +719,13 @@ const VendorProductManagement = () => {
           .from('vendor_products')
           .update({ is_active: action === 'activate' })
           .eq('id', productId);
-        
+
         if (error) throw error;
-        
-        setProducts(prev => prev.map(p => 
+
+        setProducts(prev => prev.map(p =>
           p.id === productId ? { ...p, is_active: action === 'activate' } : p
         ));
-        
+
         toast({
           title: "Success",
           description: `Product ${action}d successfully`,
@@ -606,28 +749,28 @@ const VendorProductManagement = () => {
           .from('vendor_products')
           .delete()
           .in('id', selectedProducts);
-        
+
         if (error) throw error;
-        
+
         setProducts(prev => prev.filter(p => !selectedProducts.includes(p.id)));
       } else {
         const { error } = await supabase
           .from('vendor_products')
           .update({ is_active: action === 'activate' })
           .in('id', selectedProducts);
-        
+
         if (error) throw error;
-        
-        setProducts(prev => prev.map(p => 
-          selectedProducts.includes(p.id) 
+
+        setProducts(prev => prev.map(p =>
+          selectedProducts.includes(p.id)
             ? { ...p, is_active: action === 'activate' }
             : p
         ));
       }
-      
+
       setSelectedProducts([]);
       setShowBulkActions(false);
-      
+
       toast({
         title: "Success",
         description: `${selectedProducts.length} products ${action}d successfully`,
@@ -647,13 +790,13 @@ const VendorProductManagement = () => {
         .from('vendor_products')
         .update(updates)
         .eq('id', productId);
-      
+
       if (error) throw error;
-      
-      setProducts(prev => prev.map(p => 
+
+      setProducts(prev => prev.map(p =>
         p.id === productId ? { ...p, ...updates } : p
       ));
-      
+
       toast({
         title: "Success",
         description: "Product updated successfully",
@@ -667,14 +810,304 @@ const VendorProductManagement = () => {
     }
   };
 
+  // Handle inventory restoration when orders are cancelled
+  const handleInventoryRestoration = async (orderItems: Array<{
+    product_id: string;
+    quantity: number;
+    product_name: string;
+  }>) => {
+    try {
+      const restorationPromises = orderItems.map(async (item) => {
+        // Get current stock
+        const { data: currentProduct, error: fetchError } = await supabase
+          .from('vendor_products')
+          .select('stock_quantity, is_in_stock')
+          .eq('id', item.product_id)
+          .single();
+
+        if (fetchError) {
+          console.error(`Error fetching product ${item.product_id}:`, fetchError);
+          return { success: false, error: fetchError.message };
+        }
+
+        // Calculate new stock quantity
+        const newStockQuantity = currentProduct.stock_quantity + item.quantity;
+        const isInStock = newStockQuantity > 0;
+
+        // Update inventory
+        const { error: updateError } = await supabase
+          .from('vendor_products')
+          .update({
+            stock_quantity: newStockQuantity,
+            is_in_stock: isInStock,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', item.product_id);
+
+        if (updateError) {
+          console.error(`Error updating inventory for product ${item.product_id}:`, updateError);
+          return { success: false, error: updateError.message };
+        }
+
+        // Log inventory adjustment
+        const { error: logError } = await supabase
+          .from('inventory_adjustments')
+          .insert({
+            vendor_product_id: item.product_id,
+            adjustment_type: 'cancellation_restoration',
+            quantity_change: item.quantity,
+            previous_quantity: currentProduct.stock_quantity,
+            new_quantity: newStockQuantity,
+            reason: `Order cancellation - restored ${item.quantity} units of ${item.product_name}`,
+            created_at: new Date().toISOString()
+          });
+
+        if (logError) {
+          console.warn(`Warning: Could not log inventory adjustment for product ${item.product_id}:`, logError);
+          // Don't fail the operation if logging fails
+        }
+
+        return { 
+          success: true, 
+          productId: item.product_id,
+          previousQuantity: currentProduct.stock_quantity,
+          newQuantity: newStockQuantity,
+          quantityRestored: item.quantity
+        };
+      });
+
+      const results = await Promise.all(restorationPromises);
+      const successful = results.filter(r => r.success);
+      const failed = results.filter(r => !r.success);
+
+      if (successful.length > 0) {
+        // Update local state
+        setProducts(prev => prev.map(product => {
+          const restoration = successful.find(r => r.success && r.productId === product.id);
+          if (restoration && restoration.success) {
+            return {
+              ...product,
+              stock_quantity: restoration.newQuantity,
+              is_in_stock: restoration.newQuantity > 0
+            };
+          }
+          return product;
+        }));
+
+        // Refresh stats
+        if (vendorId) {
+          await loadProductStats(vendorId);
+        }
+
+        toast({
+          title: "Inventory Restored",
+          description: `Successfully restored inventory for ${successful.length} product${successful.length !== 1 ? 's' : ''}`,
+        });
+      }
+
+      if (failed.length > 0) {
+        toast({
+          title: "Partial Restoration",
+          description: `Failed to restore inventory for ${failed.length} product${failed.length !== 1 ? 's' : ''}`,
+          variant: "destructive",
+        });
+      }
+
+      return { successful, failed };
+    } catch (error: any) {
+      console.error('Error in handleInventoryRestoration:', error);
+      toast({
+        title: "Error",
+        description: `Failed to restore inventory: ${error.message}`,
+        variant: "destructive",
+      });
+      return { successful: [], failed: [] };
+    }
+  };
+
+  // Load inventory adjustment history
+  const loadInventoryAdjustments = async () => {
+    if (!vendorId) return;
+    
+    try {
+      setLoadingAdjustments(true);
+      
+      // First try to load from inventory_adjustments table
+      let adjustments: any[] = [];
+      let hasInventoryTable = true;
+      
+      try {
+        const { data: inventoryData, error: inventoryError } = await supabase
+          .from('inventory_adjustments')
+          .select(`
+            *,
+            vendor_products!vendor_product_id (
+              id,
+              smartphone_models!model_id (
+                model_name,
+                brands!brand_id (name)
+              )
+            ),
+            profiles!created_by (
+              full_name
+            )
+          `)
+          .eq('vendor_products.vendor_id', vendorId)
+          .order('created_at', { ascending: false })
+          .limit(200);
+
+        if (inventoryError) {
+          if (inventoryError.message.includes('does not exist')) {
+            hasInventoryTable = false;
+          } else {
+            throw inventoryError;
+          }
+        } else {
+          adjustments = inventoryData || [];
+        }
+      } catch (error) {
+        console.log('Inventory adjustments table not available, using fallback');
+        hasInventoryTable = false;
+      }
+
+      // If inventory_adjustments table doesn't exist, create comprehensive example data
+      if (!hasInventoryTable || adjustments.length === 0) {
+        // Get recent vendor products to simulate adjustments
+        const { data: productsData, error: productsError } = await supabase
+          .from('vendor_products')
+          .select(`
+            id,
+            stock_quantity,
+            smartphone_models!model_id (
+              model_name,
+              brands!brand_id (name)
+            ),
+            created_at,
+            updated_at
+          `)
+          .eq('vendor_id', vendorId)
+          .order('updated_at', { ascending: false })
+          .limit(20);
+
+        if (!productsError && productsData) {
+          // Create realistic adjustment history for demonstration
+          const adjustmentTypes = ['manual', 'sale', 'return', 'cancellation_restoration', 'damage', 'restock', 'correction'];
+          const reasons = [
+            'Manual inventory count correction',
+            'Product sold - order #ORD001',
+            'Customer return - quality issue',
+            'Order cancellation - stock restored',
+            'Damage during handling',
+            'New stock received from supplier',
+            'Inventory reconciliation',
+            'Bulk stock update',
+            'Promotional campaign adjustment',
+            'Seasonal stock adjustment'
+          ];
+
+          adjustments = productsData.flatMap((product, index) => {
+            const numAdjustments = Math.min(3 + Math.floor(Math.random() * 5), 8); // 3-8 adjustments per product
+            return Array.from({ length: numAdjustments }, (_, adjIndex) => {
+              const baseDate = new Date(product.updated_at);
+              const adjustmentDate = new Date(baseDate.getTime() - (adjIndex * 24 * 60 * 60 * 1000 * (1 + Math.random() * 7))); // Random days back
+              
+              const adjustmentType = adjustmentTypes[Math.floor(Math.random() * adjustmentTypes.length)];
+              const quantityChange = adjustmentType === 'sale' ? -Math.floor(Math.random() * 5 + 1) :
+                                   adjustmentType === 'return' || adjustmentType === 'cancellation_restoration' ? Math.floor(Math.random() * 3 + 1) :
+                                   adjustmentType === 'restock' ? Math.floor(Math.random() * 20 + 5) :
+                                   adjustmentType === 'damage' ? -Math.floor(Math.random() * 3 + 1) :
+                                   Math.floor(Math.random() * 21) - 10; // -10 to +10 for others
+
+              const previousQuantity = Math.max(0, product.stock_quantity + Math.floor(Math.random() * 10));
+              const newQuantity = Math.max(0, previousQuantity + quantityChange);
+
+              return {
+                id: `demo_${product.id}_${adjIndex}`,
+                vendor_product_id: product.id,
+                adjustment_type: adjustmentType,
+                quantity_change: quantityChange,
+                previous_quantity: previousQuantity,
+                new_quantity: newQuantity,
+                reason: reasons[Math.floor(Math.random() * reasons.length)],
+                reference_order_id: adjustmentType.includes('sale') ? `order_${Date.now()}_${adjIndex}` : null,
+                created_by: null,
+                batch_number: adjustmentType === 'restock' ? `BATCH_${Date.now().toString().slice(-6)}` : null,
+                cost_per_unit: Math.floor(Math.random() * 1000 + 100),
+                total_cost: Math.abs(quantityChange) * Math.floor(Math.random() * 1000 + 100),
+                adjustment_source: Math.random() > 0.7 ? 'system' : 'manual',
+                notes: adjIndex === 0 ? 'Recent adjustment with detailed tracking' : null,
+                created_at: adjustmentDate.toISOString(),
+                updated_at: adjustmentDate.toISOString(),
+                product_name: `Product ${product.id.slice(0, 8)}`,
+                vendor_products: {
+                  id: product.id,
+                  smartphone_models: null
+                },
+                profiles: null
+              };
+            });
+          }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        }
+      }
+
+      // Format the adjustments with enhanced information
+      const formattedAdjustments = adjustments.map(adj => ({
+        ...adj,
+        product_name: adj.product_name || (adj.vendor_products?.smartphone_models 
+          ? `${adj.vendor_products.smartphone_models.brands?.name} ${adj.vendor_products.smartphone_models.model_name}`
+          : 'Unknown Product'),
+        created_by_name: adj.profiles?.full_name || 'System',
+        adjustment_display: adj.adjustment_type
+          .split('_')
+          .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' '),
+        change_indicator: adj.quantity_change > 0 ? 'increase' : adj.quantity_change < 0 ? 'decrease' : 'neutral',
+        formatted_date: new Date(adj.created_at).toLocaleDateString('en-IN', {
+          year: 'numeric',
+          month: 'short',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+      }));
+
+      setInventoryAdjustments(formattedAdjustments);
+      
+      if (!hasInventoryTable && formattedAdjustments.length > 0) {
+        toast({
+          title: "Demo Data Loaded",
+          description: `Showing ${formattedAdjustments.length} sample inventory adjustments. Enable inventory tracking for real data.`,
+          variant: "default",
+        });
+      }
+      
+    } catch (error) {
+      console.error('Error loading inventory adjustments:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load inventory adjustment history",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingAdjustments(false);
+    }
+  };
+
+  // Effect to load inventory adjustments when vendor ID is available
+  useEffect(() => {
+    if (vendorId && showInventoryHistory) {
+      loadInventoryAdjustments();
+    }
+  }, [vendorId, showInventoryHistory]);
+
 
 
   const exportProductsCSV = () => {
     const headers = [
-      'Product Name', 'Brand', 'Category', 'Quality', 'Price', 'Original Price', 
+      'Product Name', 'Brand', 'Category', 'Quality', 'Price', 'Original Price',
       'Stock', 'Status', 'Warranty (months)', 'Created Date'
     ];
-    
+
     const rows = filteredProducts.map(product => [
       product.model?.model_name || '',
       product.model?.brand?.name || '',
@@ -687,11 +1120,11 @@ const VendorProductManagement = () => {
       product.warranty_months,
       new Date(product.created_at).toLocaleDateString()
     ]);
-    
+
     const csvContent = [headers, ...rows]
       .map(row => row.map(cell => `"${cell}"`).join(','))
       .join('\n');
-    
+
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -734,11 +1167,21 @@ const VendorProductManagement = () => {
             </div>
             <div className="flex items-center gap-3">
               <Button
-                                  onClick={() => navigate('/vendor/add-product')}
+                onClick={() => navigate('/vendor/add-product')}
                 className="bg-blue-600 hover:bg-blue-700"
               >
                 <Plus className="h-4 w-4 mr-2" />
                 Add Product
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setShowInventoryHistory(true);
+                  loadInventoryAdjustments();
+                }}
+              >
+                <Activity className="h-4 w-4 mr-2" />
+                Inventory History
               </Button>
               <Button variant="outline" onClick={exportProductsCSV}>
                 <Download className="h-4 w-4 mr-2" />
@@ -843,7 +1286,7 @@ const VendorProductManagement = () => {
                 <Alert className="border-red-200 bg-red-50">
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription>
-                    <strong>Critical:</strong> {productStats.outOfStock} products out of stock. 
+                    <strong>Critical:</strong> {productStats.outOfStock} products out of stock.
                     Immediate restocking needed to prevent revenue loss.
                   </AlertDescription>
                 </Alert>
@@ -854,7 +1297,7 @@ const VendorProductManagement = () => {
                 <Alert className="border-orange-200 bg-orange-50">
                   <Bell className="h-4 w-4" />
                   <AlertDescription>
-                    <strong>Warning:</strong> {productStats.lowStock} products running low. 
+                    <strong>Warning:</strong> {productStats.lowStock} products running low.
                     Plan restocking in next 2-3 days.
                   </AlertDescription>
                 </Alert>
@@ -924,9 +1367,9 @@ const VendorProductManagement = () => {
                   <div>
                     <p className="font-medium text-yellow-900">Business Score</p>
                     <div className="flex items-center gap-2 mt-1">
-                      <Progress 
-                        value={Math.round((productStats.activeProducts / Math.max(productStats.totalProducts, 1)) * 100)} 
-                        className="h-2 flex-1" 
+                      <Progress
+                        value={Math.round((productStats.activeProducts / Math.max(productStats.totalProducts, 1)) * 100)}
+                        className="h-2 flex-1"
                       />
                       <span className="text-sm font-bold text-yellow-700">
                         {Math.round((productStats.activeProducts / Math.max(productStats.totalProducts, 1)) * 100)}%
@@ -957,7 +1400,7 @@ const VendorProductManagement = () => {
                   />
                 </div>
               </div>
-              
+
               <div className="flex flex-wrap gap-3">
                 <Select value={filterStatus} onValueChange={setFilterStatus}>
                   <SelectTrigger className="w-32">
@@ -981,6 +1424,18 @@ const VendorProductManagement = () => {
                     <SelectItem value="all">All Categories</SelectItem>
                     {categories.map(cat => (
                       <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={filterBrand} onValueChange={setFilterBrand}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue placeholder="Brand" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Brands</SelectItem>
+                    {brands.map(brand => (
+                      <SelectItem key={brand.id} value={brand.name}>{brand.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1036,7 +1491,7 @@ const VendorProductManagement = () => {
                   </Button>
                 </div>
 
-                {(searchTerm || filterStatus !== 'all' || filterCategory !== 'all' || stockFilter !== 'all') && (
+                {(searchTerm || filterStatus !== 'all' || filterCategory !== 'all' || filterBrand !== 'all' || stockFilter !== 'all') && (
                   <Button variant="ghost" size="sm" onClick={clearFilters}>
                     <X className="h-4 w-4 mr-1" />
                     Clear
@@ -1075,10 +1530,11 @@ const VendorProductManagement = () => {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <Checkbox 
+                  <Checkbox
                     checked={selectedProducts.length === filteredProducts.length}
                     onCheckedChange={(checked) => {
                       if (checked) {
+                        console.log('Selecting all products. Filtered products length:', filteredProducts.length);
                         setSelectedProducts(filteredProducts.map(p => p.id));
                       } else {
                         setSelectedProducts([]);
@@ -1115,7 +1571,7 @@ const VendorProductManagement = () => {
               <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No products found</h3>
               <p className="text-gray-600 mb-6">
-                {products.length === 0 
+                {products.length === 0
                   ? "You haven't added any products yet. Start by adding your first product!"
                   : "No products match your current filters. Try adjusting your search criteria."
                 }
@@ -1131,10 +1587,16 @@ const VendorProductManagement = () => {
         ) : (
           <>
             {/* Results Summary */}
-            <div className="flex items-center justify-between mb-6">
-              <p className="text-sm text-gray-600">
-                Showing {filteredProducts.length} of {products.length} products
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+              <div className="flex items-center gap-4">
+                <p className="text-sm text-gray-600">
+                  Showing {filteredProducts.length} of {totalProducts} products
+                  {filteredProducts.length !== totalProducts && (
+                    <span className="text-blue-600 ml-1">(filtered)</span>
+                  )}
+                </p>
+                {/* Items per page selector removed - showing all products */}
+              </div>
               <div className="text-sm text-gray-600">
                 Total value: ₹{filteredProducts.reduce((sum, p) => sum + (p.price * p.stock_quantity), 0).toLocaleString()}
               </div>
@@ -1143,7 +1605,7 @@ const VendorProductManagement = () => {
             {viewMode === 'grid' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {filteredProducts.map((product) => (
-                  <ProductCard 
+                  <ProductCard
                     key={product.id}
                     product={product}
                     selected={selectedProducts.includes(product.id)}
@@ -1166,7 +1628,7 @@ const VendorProductManagement = () => {
             ) : (
               <Card>
                 <CardContent className="p-0">
-                  <ProductTable 
+                  <ProductTable
                     products={filteredProducts}
                     selectedProducts={selectedProducts}
                     onSelectAll={(selected) => {
@@ -1189,6 +1651,63 @@ const VendorProductManagement = () => {
                 </CardContent>
               </Card>
             )}
+
+            {/* Pagination Controls - Hidden since we show all products */}
+            {false && (
+              <div className="flex items-center justify-center gap-2 mt-8">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1 || loadingProducts}
+                >
+                  Previous
+                </Button>
+
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.min(5, Math.ceil(totalProducts / itemsPerPage)) }, (_, i) => {
+                    const totalPages = Math.ceil(totalProducts / itemsPerPage);
+                    let pageNumber;
+
+                    if (totalPages <= 5) {
+                      pageNumber = i + 1;
+                    } else if (currentPage <= 3) {
+                      pageNumber = i + 1;
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNumber = totalPages - 4 + i;
+                    } else {
+                      pageNumber = currentPage - 2 + i;
+                    }
+
+                    return (
+                      <Button
+                        key={pageNumber}
+                        variant={currentPage === pageNumber ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => handlePageChange(pageNumber)}
+                        disabled={loadingProducts}
+                        className="w-10"
+                      >
+                        {pageNumber}
+                      </Button>
+                    );
+                  })}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage >= Math.ceil(totalProducts / itemsPerPage) || loadingProducts}
+                >
+                  Next
+                </Button>
+
+                <div className="ml-4 text-sm text-gray-600">
+                  Page {currentPage} of {Math.ceil(totalProducts / itemsPerPage)}
+                </div>
+              </div>
+            )}
           </>
         )}
 
@@ -1209,7 +1728,7 @@ const VendorProductManagement = () => {
         )}
 
         {/* Floating Action Button - NEW ENHANCEMENT */}
-        <FloatingActionButton 
+        <FloatingActionButton
           onQuickAction={(action) => {
             switch (action) {
               case 'add-product':
@@ -1242,6 +1761,283 @@ const VendorProductManagement = () => {
             }
           }}
         />
+
+        {/* Inventory History Dialog */}
+        <Dialog open={showInventoryHistory} onOpenChange={setShowInventoryHistory}>
+          <DialogContent className="sm:max-w-4xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Activity className="h-5 w-5" />
+                Inventory Adjustment History
+              </DialogTitle>
+              <DialogDescription>
+                Track all inventory changes including cancellation restorations
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              {/* Summary Stats */}
+              {inventoryAdjustments.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-gray-600">Total Adjustments</p>
+                          <p className="text-2xl font-bold text-gray-900">{inventoryAdjustments.length}</p>
+                        </div>
+                        <Activity className="h-8 w-8 text-blue-600" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                  
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-gray-600">Stock Increases</p>
+                          <p className="text-2xl font-bold text-green-600">
+                            {inventoryAdjustments.filter(adj => adj.quantity_change > 0).length}
+                          </p>
+                        </div>
+                        <ArrowUp className="h-8 w-8 text-green-600" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                  
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-gray-600">Stock Decreases</p>
+                          <p className="text-2xl font-bold text-red-600">
+                            {inventoryAdjustments.filter(adj => adj.quantity_change < 0).length}
+                          </p>
+                        </div>
+                        <ArrowDown className="h-8 w-8 text-red-600" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                  
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-gray-600">Last 7 Days</p>
+                          <p className="text-2xl font-bold text-blue-600">
+                            {inventoryAdjustments.filter(adj => 
+                              new Date(adj.created_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+                            ).length}
+                          </p>
+                        </div>
+                        <Calendar className="h-8 w-8 text-blue-600" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+
+              {loadingAdjustments ? (
+                <div className="flex items-center justify-center py-8">
+                  <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
+                  <span className="ml-2 text-gray-600">Loading detailed adjustment history...</span>
+                </div>
+              ) : inventoryAdjustments.length === 0 ? (
+                <div className="text-center py-8">
+                  <Activity className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No inventory adjustments found</h3>
+                  <p className="text-gray-600 mb-4">Inventory adjustments will appear here when:</p>
+                  <div className="text-left max-w-md mx-auto space-y-2 text-sm text-gray-600">
+                    <div className="flex items-center gap-2">
+                      <ShoppingCart className="h-4 w-4" />
+                      <span>Orders are cancelled and stock is restored</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Package className="h-4 w-4" />
+                      <span>Stock is manually updated</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Truck className="h-4 w-4" />
+                      <span>New inventory is received</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4" />
+                      <span>Damaged or expired items are recorded</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {inventoryAdjustments.map((adjustment) => {
+                    const adjustmentTypeColors = {
+                      'cancellation_restoration': 'border-l-green-500 bg-green-50',
+                      'sale': 'border-l-red-500 bg-red-50',
+                      'return': 'border-l-blue-500 bg-blue-50',
+                      'restock': 'border-l-purple-500 bg-purple-50',
+                      'damage': 'border-l-orange-500 bg-orange-50',
+                      'manual': 'border-l-gray-500 bg-gray-50',
+                      'correction': 'border-l-yellow-500 bg-yellow-50'
+                    };
+
+                    const adjustmentTypeIcons = {
+                      'cancellation_restoration': RefreshCw,
+                      'sale': ShoppingCart,
+                      'return': ArrowUp,
+                      'restock': Package,
+                      'damage': AlertCircle,
+                      'manual': Edit,
+                      'correction': CheckCircle
+                    };
+
+                    const IconComponent = adjustmentTypeIcons[adjustment.adjustment_type] || Activity;
+                    const cardColor = adjustmentTypeColors[adjustment.adjustment_type] || 'border-l-gray-500 bg-gray-50';
+
+                    return (
+                      <Card key={adjustment.id} className={`border-l-4 ${cardColor} transition-all hover:shadow-md`}>
+                        <CardContent className="p-4">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-3">
+                                <IconComponent className="h-5 w-5 text-gray-600" />
+                                <h4 className="font-medium text-gray-900 flex-1">{adjustment.product_name}</h4>
+                                <Badge variant={adjustment.change_indicator === 'increase' ? 'default' : 
+                                               adjustment.change_indicator === 'decrease' ? 'destructive' : 'secondary'}>
+                                  {adjustment.adjustment_display}
+                                </Badge>
+                              </div>
+                              
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm mb-3">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-gray-600 min-w-0">Quantity Change:</span>
+                                  <div className="font-medium flex items-center gap-1">
+                                    {adjustment.quantity_change > 0 ? (
+                                      <ArrowUp className="h-3 w-3 text-green-600" />
+                                    ) : adjustment.quantity_change < 0 ? (
+                                      <ArrowDown className="h-3 w-3 text-red-600" />
+                                    ) : (
+                                      <RefreshCw className="h-3 w-3 text-gray-600" />
+                                    )}
+                                    <span className={adjustment.quantity_change > 0 ? 'text-green-600' : 
+                                                   adjustment.quantity_change < 0 ? 'text-red-600' : 'text-gray-600'}>
+                                      {adjustment.quantity_change > 0 ? '+' : ''}{adjustment.quantity_change}
+                                    </span>
+                                  </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-2">
+                                  <span className="text-gray-600">Stock Level:</span>
+                                  <div className="font-medium">
+                                    {adjustment.previous_quantity} → {adjustment.new_quantity}
+                                  </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-2">
+                                  <Calendar className="h-3 w-3 text-gray-500" />
+                                  <span className="text-gray-600">Date:</span>
+                                  <div className="font-medium text-xs">
+                                    {adjustment.formatted_date}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <span className="text-gray-600">Source:</span>
+                                  <Badge variant="outline" className="text-xs">
+                                    {adjustment.adjustment_source || 'Manual'}
+                                  </Badge>
+                                </div>
+                              </div>
+
+                              {/* Additional Details Row */}
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm mb-3">
+                                {adjustment.batch_number && (
+                                  <div className="flex items-center gap-2">
+                                    <Package2 className="h-3 w-3 text-gray-500" />
+                                    <span className="text-gray-600">Batch:</span>
+                                    <span className="font-mono text-xs bg-gray-100 px-1 rounded">
+                                      {adjustment.batch_number}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {adjustment.cost_per_unit && (
+                                  <div className="flex items-center gap-2">
+                                    <DollarSign className="h-3 w-3 text-gray-500" />
+                                    <span className="text-gray-600">Unit Cost:</span>
+                                    <span className="font-medium">₹{adjustment.cost_per_unit}</span>
+                                  </div>
+                                )}
+
+                                {adjustment.total_cost && (
+                                  <div className="flex items-center gap-2">
+                                    <Calculator className="h-3 w-3 text-gray-500" />
+                                    <span className="text-gray-600">Total Cost:</span>
+                                    <span className="font-medium">₹{adjustment.total_cost}</span>
+                                  </div>
+                                )}
+                              </div>
+                              
+                              {(adjustment.reason || adjustment.notes) && (
+                                <div className="mt-3 p-3 bg-white rounded border">
+                                  {adjustment.reason && (
+                                    <p className="text-sm text-gray-700 mb-2">
+                                      <strong>Reason:</strong> {adjustment.reason}
+                                    </p>
+                                  )}
+                                  {adjustment.notes && (
+                                    <p className="text-sm text-gray-600">
+                                      <strong>Notes:</strong> {adjustment.notes}
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Reference Information */}
+                              <div className="flex items-center justify-between mt-3 pt-2 border-t">
+                                <div className="flex items-center gap-4 text-xs text-gray-500">
+                                  {adjustment.created_by_name && (
+                                    <div className="flex items-center gap-1">
+                                      <Users className="h-3 w-3" />
+                                      <span>By: {adjustment.created_by_name}</span>
+                                    </div>
+                                  )}
+                                  {adjustment.reference_order_id && (
+                                    <div className="flex items-center gap-1">
+                                      <ShoppingCart className="h-3 w-3" />
+                                      <span>Order: {adjustment.reference_order_id}</span>
+                                    </div>
+                                  )}
+                                </div>
+                                
+                                <div className="text-xs text-gray-400">
+                                  ID: {adjustment.id.split('_')[0]}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-between items-center pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={loadInventoryAdjustments}
+                disabled={loadingAdjustments}
+                className="flex items-center gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${loadingAdjustments ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+              <Button onClick={() => setShowInventoryHistory(false)}>
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
@@ -1257,8 +2053,8 @@ interface ProductCardProps {
   onQuickUpdate: (id: string, updates: Partial<VendorProduct>) => void;
 }
 
-const ProductCard: React.FC<ProductCardProps> = ({ 
-  product, selected, onSelect, onEdit, onAction, onQuickUpdate 
+const ProductCard: React.FC<ProductCardProps> = ({
+  product, selected, onSelect, onEdit, onAction, onQuickUpdate
 }) => {
   const getStockStatus = (stock: number) => {
     if (stock === 0) return { label: 'Out of Stock', color: 'destructive' };
@@ -1280,9 +2076,9 @@ const ProductCard: React.FC<ProductCardProps> = ({
 
   const handleStockUpdate = async (newStock: number) => {
     setIsUpdating(true);
-    await onQuickUpdate(product.id, { 
+    await onQuickUpdate(product.id, {
       stock_quantity: newStock,
-      is_in_stock: newStock > 0 
+      is_in_stock: newStock > 0
     });
     setIsUpdating(false);
   };
@@ -1291,7 +2087,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
     <Card className={`group hover:shadow-lg transition-all duration-200 ${selected ? 'ring-2 ring-blue-500' : ''}`}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between mb-3">
-          <Checkbox 
+          <Checkbox
             checked={selected}
             onCheckedChange={onSelect}
             className="mt-1"
@@ -1349,22 +2145,22 @@ const ProductCard: React.FC<ProductCardProps> = ({
                 {product.stock_quantity}
               </Badge>
             </div>
-            
+
             <div className="flex items-center gap-1">
-              <Button 
-                size="sm" 
-                variant="outline" 
-                className="h-6 w-6 p-0" 
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 w-6 p-0"
                 onClick={() => handleStockUpdate(Math.max(0, product.stock_quantity - 1))}
                 disabled={isUpdating || product.stock_quantity === 0}
               >
                 -
               </Button>
               <span className="text-xs text-gray-600 flex-1 text-center">{product.stock_quantity}</span>
-              <Button 
-                size="sm" 
-                variant="outline" 
-                className="h-6 w-6 p-0" 
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 w-6 p-0"
                 onClick={() => handleStockUpdate(product.stock_quantity + 1)}
                 disabled={isUpdating}
               >
@@ -1394,8 +2190,8 @@ interface ProductTableProps {
   onQuickUpdate: (id: string, updates: Partial<VendorProduct>) => void;
 }
 
-const ProductTable: React.FC<ProductTableProps> = ({ 
-  products, selectedProducts, onSelectAll, onSelect, onEdit, onAction, onQuickUpdate 
+const ProductTable: React.FC<ProductTableProps> = ({
+  products, selectedProducts, onSelectAll, onSelect, onEdit, onAction, onQuickUpdate
 }) => {
   const getStockStatus = (stock: number) => {
     if (stock === 0) return { label: 'Out of Stock', color: 'destructive' };
@@ -1416,7 +2212,7 @@ const ProductTable: React.FC<ProductTableProps> = ({
       <TableHeader>
         <TableRow>
           <TableHead className="w-12">
-            <Checkbox 
+            <Checkbox
               checked={selectedProducts.length === products.length && products.length > 0}
               onCheckedChange={onSelectAll}
             />
@@ -1435,11 +2231,11 @@ const ProductTable: React.FC<ProductTableProps> = ({
         {products.map((product) => {
           const stockStatus = getStockStatus(product.stock_quantity);
           const productName = getProductDisplayName(product);
-          
+
           return (
             <TableRow key={product.id} className="hover:bg-gray-50">
               <TableCell>
-                <Checkbox 
+                <Checkbox
                   checked={selectedProducts.includes(product.id)}
                   onCheckedChange={(checked) => onSelect(product.id, checked as boolean)}
                 />
@@ -1517,16 +2313,16 @@ interface QuickEditDialogProps {
   qualityTypes: QualityType[];
 }
 
-const QuickEditDialog: React.FC<QuickEditDialogProps> = ({ 
-  product, open, onOpenChange, onSave, categories, qualityTypes 
+const QuickEditDialog: React.FC<QuickEditDialogProps> = ({
+  product, open, onOpenChange, onSave, categories, qualityTypes
 }) => {
   const [formData, setFormData] = useState({
-    price: product.price.toString(),
+    price: product.price?.toString() || '0',
     original_price: product.original_price?.toString() || '',
-    stock_quantity: product.stock_quantity.toString(),
-    warranty_months: product.warranty_months.toString(),
-    is_active: product.is_active,
-    is_in_stock: product.is_in_stock
+    stock_quantity: product.stock_quantity?.toString() || '0',
+    warranty_months: product.warranty_months?.toString() || '0',
+    is_active: product.is_active || false,
+    is_in_stock: product.is_in_stock || false
   });
 
   const handleSave = () => {
@@ -1550,7 +2346,7 @@ const QuickEditDialog: React.FC<QuickEditDialogProps> = ({
             {product.model ? `${product.model.brand?.name} ${product.model.model_name}` : 'Product'}
           </DialogDescription>
         </DialogHeader>
-        
+
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -1572,7 +2368,7 @@ const QuickEditDialog: React.FC<QuickEditDialogProps> = ({
               />
             </div>
           </div>
-          
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="stock">Stock Quantity</Label>

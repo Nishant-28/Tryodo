@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Search, ShoppingCart, User, Menu, LogOut, Settings, Shield, Store, Building, UserCircle, Bug, Package, BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from '@/contexts/AuthContext';
+import { shouldRefreshSession } from '@/lib/authUtils';
 import { toast } from 'sonner';
 import {
   DropdownMenu,
@@ -20,8 +21,27 @@ interface HeaderProps {
 }
 
 const Header = ({ cartItems = 0, onCartClick, hideCartOnMobile = true }: HeaderProps) => {
-  const { user, profile, signOut, loading } = useAuth();
+  const { user, profile, signOut, loading, refreshSession } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const checkAndRefreshSession = async () => {
+      if (user && shouldRefreshSession()) {
+        console.log('🔄 Header: Auto-refreshing session due to proximity to expiry');
+        try {
+          await refreshSession();
+        } catch (error) {
+          console.error('❌ Header: Session refresh failed:', error);
+        }
+      }
+    };
+
+    // Check on mount and every 5 minutes
+    checkAndRefreshSession();
+    const interval = setInterval(checkAndRefreshSession, 5 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, [user, refreshSession]);
 
   const handleSignOut = async () => {
     try {
@@ -57,7 +77,7 @@ const Header = ({ cartItems = 0, onCartClick, hideCartOnMobile = true }: HeaderP
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <Link to="/login" className="touch-manipulation">
-                <img src="/Tryodo-Icon.png" alt="Tryodo Logo" className="h-12 sm:h-16 w-auto" />
+                <img src="/Tryodo-Icon.png" alt="Tryodo Logo" className="h-8 sm:h-12 w-auto" />
               </Link>
               <div className="hidden sm:block">
                 <span className="text-sm text-gray-500 font-medium">Electronics Marketplace</span>
@@ -93,7 +113,7 @@ const Header = ({ cartItems = 0, onCartClick, hideCartOnMobile = true }: HeaderP
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm border-b border-gray-100 shadow-sm">
-      <div className="container mx-auto px-4 py-4">
+      <div className="container mx-auto px-4 py-2">
         <div className="flex items-center justify-between">
           {/* Logo */}
           <div className="flex items-center space-x-3">
@@ -106,7 +126,7 @@ const Header = ({ cartItems = 0, onCartClick, hideCartOnMobile = true }: HeaderP
               }
               className="touch-manipulation"
             >
-              <img src="/Tryodo_Full_LOGO.png" alt="Tryodo Logo" className="h-12 sm:h-16 w-auto" />
+              <img src="/Tryodo_Full_LOGO.png" alt="Tryodo Logo" className="h-8 sm:h-12 w-auto" />
             </Link>
             <div className="hidden sm:block">
               <span className="text-sm text-gray-500 font-medium">Electronics Marketplace</span>

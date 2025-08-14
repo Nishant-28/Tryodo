@@ -168,6 +168,10 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+    dedupe: ['react', 'react-dom'],
+  },
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'embla-carousel-react', 'embla-carousel', 'embla-carousel-reactive-utils']
   },
   build: {
     target: 'esnext',

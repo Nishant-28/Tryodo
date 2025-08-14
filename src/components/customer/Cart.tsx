@@ -8,6 +8,7 @@ import LoadingSpinner from '@/components/LoadingSpinner';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { RainbowButton } from '@/components/magicui/rainbow-button';
+import { hapticFeedback } from '@/lib/haptic';
 
 interface CartProps {
   isOpen: boolean;
@@ -47,16 +48,19 @@ export function Cart({ isOpen, onClose }: CartProps) {
   }, [isOpen, onClose]);
 
   const handleQuantityChange = async (productId: string, newQuantity: number) => {
+    hapticFeedback.quantity();
     await updateQuantity(productId, newQuantity);
   };
 
   const handleRemoveItem = async (productId: string) => {
+    hapticFeedback.delete();
     await removeFromCart(productId);
   };
 
   const handleCheckout = async () => {
     if (items.length === 0) return;
     
+    hapticFeedback.checkout();
     setIsCheckingOut(true);
     
     // Simulate loading delay for better UX
@@ -100,7 +104,10 @@ export function Cart({ isOpen, onClose }: CartProps) {
           <Button
             variant="ghost"
             size="icon"
-            onClick={onClose}
+            onClick={() => {
+              hapticFeedback.navigation();
+              onClose();
+            }}
             className="hover:bg-gray-100 rounded-full transition-colors"
           >
             <X className="w-5 h-5" />
@@ -118,80 +125,143 @@ export function Cart({ isOpen, onClose }: CartProps) {
               <ShoppingCart className="w-16 h-16 text-gray-300 mb-6" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">Your cart is empty</h3>
               <p className="text-gray-500 mb-6">Discover amazing products and add them to your cart</p>
-              <Button onClick={onClose} className="px-6 py-2">
+              <Button onClick={() => {
+                hapticFeedback.navigation();
+                onClose();
+              }} className="px-6 py-2">
                 Continue Shopping
               </Button>
             </div>
           ) : (
             <div className="space-y-4">
-              {items.map((item) => (
-                <div key={item.id} className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-shadow">
-                  <div className="flex gap-4">
-                    {/* Product Details - Removed Image Section */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-start mb-2">
-                        <h3 className="font-medium text-gray-900 truncate">
-                          {item.name}
-                        </h3>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleRemoveItem(item.productId)}
-                          className="h-6 w-6 text-red-500 hover:text-red-700 hover:bg-red-50"
-                        >
-                          <X className="w-4 h-4" />
-                        </Button>
-                      </div>
+              {/* Group items by vendor for better organization */}
+              {Object.entries(
+                items.reduce((groups, item) => {
+                  const vendorKey = `${item.vendorId}-${item.vendor}`;
+                  if (!groups[vendorKey]) {
+                    groups[vendorKey] = {
+                      vendor: item.vendor,
+                      vendorId: item.vendorId,
+                      items: []
+                    };
+                  }
+                  groups[vendorKey].items.push(item);
+                  return groups;
+                }, {} as Record<string, { vendor: string; vendorId: string; items: typeof items }>)
+              ).map(([vendorKey, group]) => (
+                <div key={vendorKey} className="space-y-3">
+                  {/* Vendor Header */}
+                  <div className="flex items-center gap-2 px-2">
+                    <div className="h-px bg-gray-200 flex-1" />
+                    <span className="text-sm font-medium text-gray-600 bg-gray-50 px-3 py-1 rounded-full">
+                      {group.vendor}
+                    </span>
+                    <div className="h-px bg-gray-200 flex-1" />
+                  </div>
 
-                      <p className="text-sm text-gray-600 mb-2 truncate">{item.vendor}</p>
-
-                      {/* Badges */}
-                      <div className="flex flex-wrap gap-1 mb-3">
-                        {item.qualityName && (
-                          <Badge variant="secondary" className="text-xs">
-                            {item.qualityName}
-                          </Badge>
+                  {/* Vendor Items */}
+                  {group.items.map((item) => (
+                    <div key={item.id} className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-shadow">
+                      <div className="flex gap-4">
+                        {/* Product Image */}
+                        {item.image && (
+                          <div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
+                            <img
+                              src={item.image}
+                              alt={item.name}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                e.currentTarget.src = '/placeholder.svg';
+                              }}
+                            />
+                          </div>
                         )}
-                        {item.warranty > 0 && (
-                          <Badge variant="outline" className="text-xs">
-                            {item.warranty} months
-                          </Badge>
-                        )}
-                      </div>
 
-                      {/* Price and Quantity Controls */}
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold text-blue-600 text-lg">
-                          ₹{(item.price * item.quantity).toFixed(2)}
-                        </span>
-                        
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => handleQuantityChange(item.productId, Math.max(1, item.quantity - 1))}
-                            disabled={item.quantity <= 1}
-                            className="h-8 w-8"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </Button>
-                          
-                          <span className="w-8 text-center font-medium">
-                            {item.quantity}
-                          </span>
-                          
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => handleQuantityChange(item.productId, item.quantity + 1)}
-                            className="h-8 w-8"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </Button>
+                        {/* Product Details */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between items-start mb-2">
+                            <h3 className="font-medium text-gray-900 truncate">
+                              {item.name}
+                            </h3>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleRemoveItem(item.productId)}
+                              className="h-6 w-6 text-red-500 hover:text-red-700 hover:bg-red-50"
+                            >
+                              <X className="w-4 h-4" />
+                            </Button>
+                          </div>
+
+                          {/* Product Type and Details */}
+                          <div className="flex flex-wrap gap-1 mb-3">
+                            {/* Product Type Badge */}
+                            <Badge 
+                              variant={item.productType === 'marketplace' ? 'default' : 'secondary'} 
+                              className="text-xs"
+                            >
+                              {item.productType === 'marketplace' ? 'Marketplace' : 'Direct'}
+                            </Badge>
+                            
+                            {item.qualityName && (
+                              <Badge variant="secondary" className="text-xs">
+                                {item.qualityName}
+                              </Badge>
+                            )}
+                            {item.warranty > 0 && (
+                              <Badge variant="outline" className="text-xs">
+                                {item.warranty} months
+                              </Badge>
+                            )}
+                            {item.deliveryTime > 0 && (
+                              <Badge variant="outline" className="text-xs">
+                                {item.deliveryTime} {item.productType === 'marketplace' ? 'days' : 'days'}
+                              </Badge>
+                            )}
+                          </div>
+
+                          {/* Price and Quantity Controls */}
+                          <div className="flex justify-between items-center">
+                            <div className="flex flex-col">
+                              <span className="font-bold text-blue-600 text-lg">
+                                ₹{(item.price * item.quantity).toFixed(2)}
+                              </span>
+                              {item.originalPrice && item.originalPrice > item.price && (
+                                <span className="text-xs text-gray-500 line-through">
+                                  ₹{item.originalPrice.toFixed(2)}
+                                </span>
+                              )}
+                            </div>
+                            
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => handleQuantityChange(item.productId, Math.max(1, item.quantity - 1))}
+                                disabled={item.quantity <= 1}
+                                className="h-8 w-8"
+                              >
+                                <Minus className="w-3 h-3" />
+                              </Button>
+                              
+                              <span className="w-8 text-center font-medium">
+                                {item.quantity}
+                              </span>
+                              
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => handleQuantityChange(item.productId, item.quantity + 1)}
+                                className="h-8 w-8"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
+                  ))}
                 </div>
               ))}
             </div>

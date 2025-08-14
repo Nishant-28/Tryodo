@@ -29,6 +29,7 @@ import { useToast } from '../hooks/use-toast';
 import { supabase } from '../lib/supabase';
 import { CommissionAPI } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import CommissionDebugger from '../components/CommissionDebugger';
 
 interface CommissionRule {
   id: string;
@@ -91,9 +92,23 @@ interface CommissionForm {
 }
 
 const AdminCommissionRules: React.FC = () => {
+  // Add immediate console log to verify component is loading
+  console.log('🔥 AdminCommissionRules component is loading...');
+  
+  // Also add an alert for immediate feedback
+  React.useEffect(() => {
+    alert('AdminCommissionRules component loaded!');
+  }, []);
+  
   const navigate = useNavigate();
   const { toast } = useToast();
   const { profile: currentProfile } = useAuth();
+  
+  // Test console log on component mount
+  useEffect(() => {
+    console.log('🔥 AdminCommissionRules component mounted!');
+    console.log('🔥 Current profile on mount:', currentProfile);
+  }, []);
   
   // State management
   const [commissionRules, setCommissionRules] = useState<CommissionRule[]>([]);
@@ -211,7 +226,14 @@ const AdminCommissionRules: React.FC = () => {
   };
 
   const handleCreateRule = async () => {
+    console.log('🚀 handleCreateRule called');
+    console.log('📝 Form data:', commissionForm);
+    console.log('👤 Current profile:', currentProfile);
+    
     if (!commissionForm.categoryId || !commissionForm.commissionPercentage) {
+      console.log('❌ Validation failed - missing required fields');
+      console.log('Category ID:', commissionForm.categoryId);
+      console.log('Commission Percentage:', commissionForm.commissionPercentage);
       toast({
         title: "Error",
         description: "Please fill in required fields",
@@ -221,6 +243,7 @@ const AdminCommissionRules: React.FC = () => {
     }
 
     if (!currentProfile?.id) {
+      console.log('❌ No current profile found');
       toast({
         title: "Error",
         description: "User profile not found",
@@ -242,8 +265,8 @@ const AdminCommissionRules: React.FC = () => {
         effectiveUntil: commissionForm.effectiveUntil || undefined,
         notes: commissionForm.notes,
         createdBy: currentProfile.id,
-        qualityId: commissionForm.qualityId || undefined,
-        smartphoneModelId: commissionForm.smartphoneModelId || undefined,
+        qualityId: (commissionForm.qualityId && commissionForm.qualityId !== 'any') ? commissionForm.qualityId : undefined,
+        smartphoneModelId: (commissionForm.smartphoneModelId && commissionForm.smartphoneModelId !== 'any') ? commissionForm.smartphoneModelId : undefined,
       });
 
       if (result.success) {
@@ -413,7 +436,7 @@ const AdminCommissionRules: React.FC = () => {
                     <SelectValue placeholder="Select quality category" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Any Quality</SelectItem>
+                    <SelectItem value="any">Any Quality</SelectItem>
                     {qualityCategories.map((quality) => (
                       <SelectItem key={quality.id} value={quality.id}>
                         {quality.name}
@@ -433,7 +456,7 @@ const AdminCommissionRules: React.FC = () => {
                     <SelectValue placeholder="Select smartphone model" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Any Model</SelectItem>
+                    <SelectItem value="any">Any Model</SelectItem>
                     {smartphoneModels.map((model) => (
                       <SelectItem key={model.id} value={model.id}>
                         {model.model_name}
@@ -511,9 +534,15 @@ const AdminCommissionRules: React.FC = () => {
               </div>
 
               <Button 
-                onClick={handleCreateRule} 
+                onClick={(e) => {
+                  console.log('🔥 Button clicked!', e);
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleCreateRule();
+                }} 
                 className="w-full"
                 disabled={createLoading}
+                type="button"
               >
                 {createLoading ? 'Saving...' : (editingRule ? 'Update Rule' : 'Create Rule')}
               </Button>
@@ -616,6 +645,42 @@ const AdminCommissionRules: React.FC = () => {
             </Select>
           </div>
         </CardHeader>
+      </Card>
+
+      {/* Debug Section - Remove this after fixing the issue */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Debug Commission System</CardTitle>
+          <CardDescription>
+            Use this to diagnose commission form submission issues
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <Button 
+                onClick={() => {
+                  console.log('🧪 Test button clicked!');
+                  console.log('Current form state:', commissionForm);
+                  console.log('Current profile:', currentProfile);
+                }}
+                variant="outline"
+              >
+                Test Console Log
+              </Button>
+              <Button 
+                onClick={() => {
+                  console.log('🧪 Testing handleCreateRule directly...');
+                  handleCreateRule();
+                }}
+                variant="outline"
+              >
+                Test Form Handler
+              </Button>
+            </div>
+            <CommissionDebugger />
+          </div>
+        </CardContent>
       </Card>
 
       {/* Commission Rules List */}

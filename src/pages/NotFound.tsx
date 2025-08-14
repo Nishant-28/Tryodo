@@ -1,4 +1,5 @@
 import { useLocation } from "react-router-dom";
+import { Button } from "../components/ui/button";
 
 const NotFound = () => {
   return (
@@ -6,9 +7,9 @@ const NotFound = () => {
       <div className="text-center">
         <h1 className="text-4xl font-bold mb-4">404</h1>
         <p className="text-xl text-gray-600 mb-4">Oops! Page not found</p>
-        <a href="/" className="text-blue-500 hover:text-blue-700 underline">
-          Return to Home
-        </a>
+        <Button className="mt-6 w-full md:w-auto" onClick={() => (window.location.href = '/')}>
+          Return to Home Page
+        </Button>
       </div>
     </div>
   );

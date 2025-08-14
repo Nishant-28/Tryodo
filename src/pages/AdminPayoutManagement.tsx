@@ -196,6 +196,56 @@ const AdminPayoutManagement: React.FC = () => {
     loadAnalytics();
   }, [filters]);
 
+  // New useEffect to populate recipient_name and recipient_email after payouts are loaded
+  useEffect(() => {
+    const enrichPayouts = async () => {
+      const enriched = await Promise.all(payouts.map(async (payout) => {
+        if (payout.recipient_name && payout.recipient_email) {
+          return payout; // Already enriched, no need to fetch again
+        }
+
+        let recipientName = 'Unknown';
+        let recipientEmail = 'N/A';
+        let recipientPhone = 'N/A';
+
+        if (payout.recipient_type === 'vendor') {
+          const { data, error } = await supabase
+            .from('vendors')
+            .select('business_name, business_email')
+            .eq('id', payout.recipient_id)
+            .single();
+          if (data) {
+            recipientName = data.business_name || 'Unknown Vendor';
+            recipientEmail = data.business_email || 'N/A';
+          }
+        } else if (payout.recipient_type === 'delivery_partner') {
+          const { data, error } = await supabase
+            .from('delivery_partners')
+            .select('profiles(full_name, email, phone)')
+            .eq('id', payout.recipient_id)
+            .single();
+          if (data && data.profiles) {
+            recipientName = data.profiles.full_name || 'Unknown Delivery Partner';
+            recipientEmail = data.profiles.email || 'N/A';
+            recipientPhone = data.profiles.phone || 'N/A';
+          }
+        }
+
+        return {
+          ...payout,
+          recipient_name: recipientName,
+          recipient_email: recipientEmail,
+          recipient_phone: recipientPhone,
+        };
+      }));
+      setPayouts(enriched);
+    };
+
+    if (payouts.length > 0) {
+      enrichPayouts();
+    }
+  }, [payouts.length, typeFilter]); // Trigger when payouts array changes size or typeFilter changes
+
   const loadPayouts = async () => {
     try {
       setLoading(true);
@@ -312,9 +362,9 @@ const AdminPayoutManagement: React.FC = () => {
         recipientId: payoutForm.recipientId,
         payoutAmount: parseFloat(payoutForm.payoutAmount),
         payoutMethod: payoutForm.payoutMethod,
-        periodStart: payoutForm.periodStart,
-        periodEnd: payoutForm.periodEnd,
-        scheduledDate: payoutForm.scheduledDate,
+        periodStart: new Date(payoutForm.periodStart).toISOString(), // Ensure ISO format
+        periodEnd: new Date(payoutForm.periodEnd).toISOString(),     // Ensure ISO format
+        scheduledDate: new Date(payoutForm.scheduledDate).toISOString(), // Ensure ISO format
         notes: payoutForm.notes,
         processedBy: currentProfile?.id || ''
       });

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Home, Search, ShoppingCart, User, Package, Truck, Activity } from 'lucide-react';
+import { Home, Search, ShoppingCart, User, Package, Truck, Activity, Store } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -55,17 +55,22 @@ const MobileBottomNav = ({ cartItems = 0, onCartClick }: MobileBottomNavProps) =
       onClick: onCartClick,
       badge: cartCount > 0 ? cartCount : undefined
     },
-    {
-      icon: Package,
-      label: 'Orders',
-      href: '/my-orders',
-      isActive: location.pathname === '/my-orders'
-    },
+    // {
+    //   icon: Package,
+    //   label: 'Orders',
+    //   href: '/my-orders',
+    //   isActive: location.pathname === '/my-orders'
+    // },
     {
       icon: User,
       label: 'Profile',
       href: '/profile',
       isActive: location.pathname === '/profile'
+    },{
+      icon: Store,
+      label: 'Market',
+      href: '/market',
+      isActive: location.pathname === '/market'
     }
   ];
 
@@ -91,6 +96,14 @@ const MobileBottomNav = ({ cartItems = 0, onCartClick }: MobileBottomNavProps) =
       label: 'Dashboard',
       href: '/delivery-partner-dashboard',
       isActive: location.pathname === '/delivery-partner-dashboard',
+      onClick: undefined,
+      badge: undefined
+    },
+    {
+      icon: Store,
+      label: 'Market',
+      href: '/market',
+      isActive: location.pathname === '/market',
       onClick: undefined,
       badge: undefined
     },

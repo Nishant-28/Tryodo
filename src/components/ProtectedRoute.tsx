@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { hasValidCachedSession, clearExpiredSession } from '@/lib/authUtils';
@@ -15,43 +15,62 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   allowedRoles = [], 
   redirectTo = '/login' 
 }) => {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, refreshSession } = useAuth();
   const location = useLocation();
   const [timeoutReached, setTimeoutReached] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+  const refreshAttempted = useRef(false);
 
-  // Shorter timeout for better UX on page reloads
+  // Extended timeout for better UX
   useEffect(() => {
-    // If we have a valid cached session, use shorter timeout
-    const timeoutDuration = hasValidCachedSession() ? 2000 : 3000;
+    // Use longer timeout and consider cached session
+    const timeoutDuration = hasValidCachedSession() ? 3000 : 5000;
     
     const timeout = setTimeout(() => {
-      if (loading) {
+      if (loading && !authChecked) {
         setTimeoutReached(true);
       }
     }, timeoutDuration);
 
     return () => clearTimeout(timeout);
-  }, [loading]);
+  }, [loading, authChecked]);
 
   // Reset timeout when loading state changes
   useEffect(() => {
     if (!loading) {
       setTimeoutReached(false);
+      setAuthChecked(true);
     }
   }, [loading]);
 
-  // Clean up expired sessions on mount
+  // Clean up expired sessions and try to refresh on mount
   useEffect(() => {
-    clearExpiredSession();
-  }, []);
+    const initializeAuth = async () => {
+      clearExpiredSession();
+      
+      // If we don't have a user but have a cached session, try refreshing
+      if (!user && hasValidCachedSession() && !refreshAttempted.current) {
+        refreshAttempted.current = true;
+        console.log('🔄 ProtectedRoute: Attempting session refresh...');
+        try {
+          await refreshSession();
+        } catch (error) {
+          console.error('❌ ProtectedRoute: Session refresh failed:', error);
+        }
+      }
+    };
+
+    initializeAuth();
+  }, [user, refreshSession]);
 
   // If we're still loading and haven't timed out, show spinner
-  if (loading && !timeoutReached) {
+  if (loading && !timeoutReached && !authChecked) {
     return <LoadingSpinner />;
   }
 
   // If we've timed out or loading is done but no user, redirect to login
-  if (timeoutReached || (!loading && !user)) {
+  if (timeoutReached || (authChecked && !loading && !user)) {
+    console.log('🚪 ProtectedRoute: Redirecting to login - timeout:', timeoutReached, 'authChecked:', authChecked, 'user:', !!user);
     return (
       <Navigate 
         to={redirectTo} 
@@ -62,7 +81,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   }
 
   // If user exists but no profile, show error
-  if (user && !profile) {
+  if (user && !profile && authChecked) {
+    console.log('⚠️ ProtectedRoute: User has no profile, redirecting to login');
     return (
       <Navigate 
         to={redirectTo} 
@@ -87,6 +107,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     
     const roleRedirect = roleRedirects[profile.role as keyof typeof roleRedirects] || '/';
     
+    console.log('🚫 ProtectedRoute: Role access denied, redirecting to:', roleRedirect);
     return (
       <Navigate 
         to={roleRedirect} 

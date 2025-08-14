@@ -111,8 +111,8 @@ const AddProduct = () => {
     quality_type_id: '',
     price: '',
     original_price: '',
-    warranty_months: '6',
-    stock_quantity: ''
+    warranty_months: '',
+    stock_quantity: '10'
   });
 
   // Bulk upload states

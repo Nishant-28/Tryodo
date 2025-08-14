@@ -5,13 +5,13 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
-import { 
-  Package, 
-  Search, 
-  ArrowLeft, 
-  ShoppingCart, 
-  Star, 
-  Clock, 
+import {
+  Package,
+  Search,
+  ArrowLeft,
+  ShoppingCart,
+  Star,
+  Clock,
   Shield,
   Zap,
   Filter,
@@ -35,6 +35,7 @@ import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { useLocation } from 'react-router-dom';
 import { TryodoAPI } from '@/lib/api';
+import { hapticFeedback } from '@/lib/haptic';
 
 // Types
 interface Category {
@@ -98,7 +99,7 @@ interface VendorProduct {
   product_images: string[] | null;
   vendor: Vendor;
   quality: QualityCategory;
-  
+
   // Upside pricing fields (added by enrichProductsWithFinalPrices)
   final_price?: number;
   price_markup?: number;
@@ -115,7 +116,7 @@ const fetchCategories = async (): Promise<Category[]> => {
       .select('*')
       .eq('is_active', true)
       .order('sort_order', { ascending: true });
-    
+
     if (error) throw error;
     return data && data.length > 0 ? data : [];
   } catch (error) {
@@ -131,14 +132,14 @@ const fetchBrands = async (categoryId?: string): Promise<Brand[]> => {
       .select('*')
       .eq('is_active', true)
       .order('name', { ascending: true });
-    
+
     if (error) {
       console.error('🚨 Error fetching brands:', error);
       throw error;
     }
-    
+
     console.log('🏢 Brands from database:', data?.length, data);
-    
+
     if (data && data.length > 0) {
       console.log('✅ Using database brands');
       return data;
@@ -161,14 +162,14 @@ const fetchModels = async (brandId: string): Promise<Model[]> => {
       .eq('brand_id', brandId)
       .eq('is_active', true)
       .order('model_name', { ascending: true });
-    
+
     if (error) {
       console.error('🚨 Error fetching models:', error);
       throw error;
     }
-    
+
     console.log('📱 Models from database:', data?.length, data);
-    
+
     if (data && data.length > 0) {
       console.log('✅ Using database models');
       return data;
@@ -185,34 +186,34 @@ const fetchModels = async (brandId: string): Promise<Model[]> => {
 // Debug function to check actual database vendors
 const debugActualVendors = async () => {
   console.log('🔍 DEBUGGING: Checking actual vendors in database...');
-  
+
   try {
     const { data: allVendors, error } = await supabase
       .from('vendors')
       .select('id, business_name, contact_person, business_email, business_city, business_state, is_verified, is_active')
       .limit(10);
-      
+
     console.log('🏪 ACTUAL VENDORS IN DATABASE:', allVendors);
     console.log('🏪 Total vendors found:', allVendors?.length || 0);
-    
+
     if (error) {
       console.error('❌ Error fetching vendors:', error);
     }
-    
+
     // Also check vendor products
     const { data: vendorProducts, error: productsError } = await supabase
       .from('vendor_products')
       .select('id, vendor_id, model_id, category_id, price, is_active')
       .eq('is_active', true)
       .limit(5);
-      
+
     console.log('📦 ACTUAL VENDOR PRODUCTS:', vendorProducts);
     console.log('📦 Total vendor products found:', vendorProducts?.length || 0);
-    
+
     if (productsError) {
       console.error('❌ Error fetching vendor products:', productsError);
     }
-    
+
   } catch (err) {
     console.error('❌ Debug vendors failed:', err);
   }
@@ -221,10 +222,10 @@ const debugActualVendors = async () => {
 const fetchVendorProducts = async (modelId: string, categoryId: string): Promise<VendorProduct[]> => {
   try {
     console.log('🔍 Fetching vendor products from database for:', { modelId, categoryId });
-    
+
     // First, debug the actual vendor data
     await debugActualVendors();
-    
+
     // Strict match on model and category - no relaxing of category filter
     let { data: vendorProductsData, error } = await supabase
       .from('vendor_products')
@@ -235,7 +236,7 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
       .order('price', { ascending: true });
 
     console.log('💾 DB response:', { dataLength: vendorProductsData?.length, error, data: vendorProductsData });
-    
+
     if (error) {
       console.error('🚨 Database error:', error);
       throw error;
@@ -243,23 +244,23 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
 
     if (!vendorProductsData || vendorProductsData.length === 0) {
       console.log('🔄 No products found for this model-category combination in database');
-      
+
       // Instead of using mock data, let's try to get real vendors and suggest they add products
       console.log('🔍 Checking if any real vendors exist in database...');
-      
+
       try {
         const { data: realVendors } = await supabase
           .from('vendors')
           .select('id, business_name, rating, total_reviews, is_verified, business_city, business_state, is_active')
           .limit(10);
-          
+
         console.log('🏪 Real vendors check result:', realVendors);
         console.log('🏪 Total real vendors found:', realVendors?.length || 0);
-        
+
         if (realVendors && realVendors.length > 0) {
           console.log('✅ Found real vendors in database:', realVendors);
           console.log('💡 Suggestion: Vendors should add products for this model-category combination');
-          
+
           // Return empty array instead of mock data to avoid confusion
           // The UI should show "No products available" instead of fake products
           return [];
@@ -267,7 +268,7 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
       } catch (err) {
         console.error('Error checking real vendors:', err);
       }
-      
+
       // Only use mock data if absolutely no real vendors exist (for demo purposes)
       console.log('🎭 No real vendors found, using mock data for demo');
       const mockData: VendorProduct[] = []; // Define mockData here
@@ -291,11 +292,11 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
     let vendorsData: any[] = [];
     try {
       console.log('🔍 Creating vendor data from known information:', vendorIds);
-      
+
       // We know these vendors exist from our MCP queries, so let's create the data manually
       const knownVendors = {
-        'aa5c87ad-0072-4721-a77a-7b5af6997def': {
-          id: 'aa5c87ad-0072-4721-a77a-7b5af6997def',
+        'fabe94cb-781e-4785-8144-de93427dc7bf': {
+          id: 'fabe94cb-781e-4785-8144-de93427dc7bf',
           business_name: 'Rohan Communication',
           rating: 4.30,
           total_reviews: 342,
@@ -303,9 +304,9 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
           business_city: null,
           business_state: null
         },
-        '40856e83-051f-4693-88c7-93a8e04ed99c': {
-          id: '40856e83-051f-4693-88c7-93a8e04ed99c',
-          business_name: 'Mobtel Technology',
+        '3582e503-ee29-4446-a64b-623a3769e45b': {
+          id: '3582e503-ee29-4446-a64b-623a3769e45b',
+          business_name: 'Aditya Communication',
           rating: 4.50,
           total_reviews: 127,
           is_verified: true,
@@ -313,11 +314,11 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
           business_state: null
         }
       };
-      
+
       vendorsData = vendorIds
         .map(id => knownVendors[id as keyof typeof knownVendors])
         .filter(Boolean);
-      
+
       console.log('📊 Created vendor data from known info:', vendorsData);
     } catch (err) {
       console.error('🚨 Vendor data creation failed:', err);
@@ -357,11 +358,11 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
     // Transform the data to match the expected interface
     const transformedData = vendorProductsData.map(item => {
       console.log(`🔍 Processing product ${item.id} with vendor_id: ${item.vendor_id}`);
-      
+
       // Use vendor data from the map
       let vendor = vendorsMap.get(item.vendor_id);
       console.log(`🔍 Vendor data from map:`, vendor);
-      
+
       if (!vendor) {
         console.warn(`❌ No vendor data in map for ID: ${item.vendor_id} (Product: ${item.id})`);
         vendor = {
@@ -376,24 +377,24 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
       } else {
         console.log(`✅ Found vendor from map: ${vendor.business_name} for product ${item.id}`);
       }
-      
+
       const qualityData = qualitiesMap.get(item.quality_type_id);
       const quality = {
         id: qualityData?.id || item.quality_type_id,
         name: qualityData?.quality_name || 'Standard',
         description: qualityData?.quality_description || 'Good quality replacement parts'
       };
-      
+
       console.log('🔍 Processing item:', item.id);
       console.log('🔍 Vendor found:', !!vendor, 'Name:', vendor.business_name);
       console.log('🔍 Quality found:', !!qualityData, 'Name:', quality.name);
-      
+
       const transformed = {
         ...item,
         vendor,
         quality
       };
-      
+
       return transformed;
     });
 
@@ -403,7 +404,7 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
 
   } catch (error) {
     console.log('❌ Error fetching vendor products, using mock data:', error);
-    
+
     const mockData: VendorProduct[] = []; // Define mockData here as well for the catch block
     return mockData;
   }
@@ -412,26 +413,26 @@ const fetchVendorProducts = async (modelId: string, categoryId: string): Promise
 const Order = () => {
   // Use cart context for add to cart functionality
   const { addToCart, totalItems } = useCart();
-  
+
   // State management
   const [step, setStep] = useState<'categories' | 'brands' | 'models' | 'products'>('categories');
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [selectedBrand, setSelectedBrand] = useState<Brand | null>(null);
   const [selectedModel, setSelectedModel] = useState<Model | null>(null);
-  
+
   // Data states
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [models, setModels] = useState<Model[]>([]);
   const [vendorProducts, setVendorProducts] = useState<VendorProduct[]>([]);
-  
+
   // UI states
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'price' | 'rating' | 'reviews'>('price');
   const [filterStock, setFilterStock] = useState<'all' | 'in-stock'>('all');
-  
+
   const location = useLocation();
 
   // Reset search term on step change to avoid filtering issues between steps
@@ -445,7 +446,7 @@ const Order = () => {
     const initialCategoryName = queryParams.get('category');
     const scrollToSection = queryParams.get('scrollTo');
     console.log("URL Params - Category:", initialCategoryName, "ScrollTo:", scrollToSection);
-    
+
     const initializeData = async () => {
       setLoading(true);
       setError(null);
@@ -563,21 +564,21 @@ const Order = () => {
   // Filter and sort functions
   const getFilteredData = () => {
     let filtered = [];
-    
+
     switch (step) {
       case 'categories':
-        filtered = categories.filter(cat => 
+        filtered = categories.filter(cat =>
           cat.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
           (cat.description && cat.description.toLowerCase().includes(searchTerm.toLowerCase()))
         );
         break;
       case 'brands':
-        filtered = brands.filter(brand => 
+        filtered = brands.filter(brand =>
           brand.name.toLowerCase().includes(searchTerm.toLowerCase())
         );
         break;
       case 'models':
-        filtered = models.filter(model => 
+        filtered = models.filter(model =>
           model.model_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
           (model.model_number && model.model_number.toLowerCase().includes(searchTerm.toLowerCase()))
         );
@@ -588,11 +589,11 @@ const Order = () => {
           const vendorName = product.vendor?.business_name || '';
           const qualityName = product.quality?.name || '';
           const matchesSearch = vendorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                              qualityName.toLowerCase().includes(searchTerm.toLowerCase());
+            qualityName.toLowerCase().includes(searchTerm.toLowerCase());
           const matchesStock = filterStock === 'all' || (filterStock === 'in-stock' && product.is_in_stock);
           return matchesSearch && matchesStock;
         });
-        
+
         // Sort products
         filtered.sort((a, b) => {
           switch (sortBy) {
@@ -608,7 +609,7 @@ const Order = () => {
         });
         break;
     }
-    
+
     return filtered;
   };
 
@@ -616,16 +617,19 @@ const Order = () => {
   const handleAddToCart = async (product: VendorProduct) => {
     try {
       console.log('🎯 Adding product to cart:', product.id);
+      hapticFeedback.addToCart();
       await addToCart(product.id, 1);
       toast.success('Added to cart! Go to checkout to complete your order.');
     } catch (error) {
       console.error('Error adding to cart:', error);
+      hapticFeedback.error();
       toast.error('Failed to add to cart');
     }
   };
 
   // Navigation functions
   const goBack = () => {
+    hapticFeedback.navigation();
     setSearchTerm('');
     switch (step) {
       case 'brands':
@@ -644,6 +648,7 @@ const Order = () => {
   };
 
   const resetToCategories = () => {
+    hapticFeedback.navigation();
     setStep('categories');
     setSelectedCategory(null);
     setSelectedBrand(null);
@@ -665,7 +670,9 @@ const Order = () => {
     <Breadcrumb className="mb-6">
       <BreadcrumbList>
         <BreadcrumbItem>
-          <BreadcrumbLink onClick={resetToCategories} className="cursor-pointer">
+          <BreadcrumbLink onClick={() => {
+            resetToCategories();
+          }} className="cursor-pointer">
             Categories
           </BreadcrumbLink>
         </BreadcrumbItem>
@@ -676,8 +683,9 @@ const Order = () => {
               {step === 'brands' ? (
                 <BreadcrumbPage>{selectedCategory.name}</BreadcrumbPage>
               ) : (
-                <BreadcrumbLink 
+                <BreadcrumbLink
                   onClick={() => {
+                    hapticFeedback.navigation();
                     setStep('brands');
                     setSelectedBrand(null);
                     setSelectedModel(null);
@@ -697,8 +705,9 @@ const Order = () => {
               {step === 'models' ? (
                 <BreadcrumbPage>{selectedBrand.name}</BreadcrumbPage>
               ) : (
-                <BreadcrumbLink 
+                <BreadcrumbLink
                   onClick={() => {
+                    hapticFeedback.navigation();
                     setStep('models');
                     setSelectedModel(null);
                   }}
@@ -734,7 +743,7 @@ const Order = () => {
           className="pl-10"
         />
       </div>
-      
+
       {step === 'products' && (
         <div className="flex flex-wrap gap-4">
           <Select value={sortBy} onValueChange={(value: 'price' | 'rating' | 'reviews') => setSortBy(value)}>
@@ -747,7 +756,7 @@ const Order = () => {
               <SelectItem value="reviews">Reviews (Most to Least)</SelectItem>
             </SelectContent>
           </Select>
-          
+
           <Select value={filterStock} onValueChange={(value: 'all' | 'in-stock') => setFilterStock(value)}>
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Filter by stock" />
@@ -764,14 +773,15 @@ const Order = () => {
 
   const renderCategories = () => {
     const filteredCategories = getFilteredData() as Category[];
-    
+
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredCategories.map((category) => (
-          <Card 
+          <Card
             key={category.id}
             className="cursor-pointer hover:shadow-lg transition-all duration-200 border-2 hover:border-blue-300"
             onClick={() => {
+              hapticFeedback.button();
               setSelectedCategory(category);
               loadBrands(category.id);
             }}
@@ -803,7 +813,7 @@ const Order = () => {
 
   const renderBrands = () => {
     const filteredBrands = getFilteredData() as Brand[];
-    
+
     return (
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         {filteredBrands.map((brand) => (
@@ -811,6 +821,7 @@ const Order = () => {
             key={brand.id}
             className="cursor-pointer group"
             onClick={() => {
+              hapticFeedback.button();
               setSelectedBrand(brand);
               loadModels(brand.id);
             }}
@@ -819,8 +830,8 @@ const Order = () => {
               <div className="flex flex-col items-center space-y-3">
                 {brand.logo_url ? (
                   <div className="w-12 h-12 flex items-center justify-center">
-                    <img 
-                      src={brand.logo_url} 
+                    <img
+                      src={brand.logo_url}
                       alt={brand.name}
                       className="w-full h-full object-contain filter group-hover:brightness-110 transition-all duration-200"
                     />
@@ -847,7 +858,7 @@ const Order = () => {
 
   const renderModels = () => {
     const filteredModels = getFilteredData() as Model[];
-    
+
     return (
       <div className="space-y-4">
         {/* Models Grid */}
@@ -857,6 +868,7 @@ const Order = () => {
               key={model.id}
               className="cursor-pointer group"
               onClick={() => {
+                hapticFeedback.button();
                 setSelectedModel(model);
                 loadVendorProducts(model.id, selectedCategory!.id);
               }}
@@ -867,23 +879,23 @@ const Order = () => {
                   <h3 className="font-semibold text-gray-900 text-base leading-tight group-hover:text-blue-700 transition-colors duration-200">
                     {model.model_name}
                   </h3>
-                  
+
                   {/* Model Details - Compact */}
                   <div className="space-y-1.5">
                     {model.model_number && (
                       <p className="text-xs text-gray-600">{model.model_number}</p>
                     )}
-                    
+
                     <div className="flex items-center justify-between">
                       {model.release_year && (
                         <span className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded-full">
                           {model.release_year}
                         </span>
                       )}
-                      
+
                       <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-blue-500 transition-colors duration-200" />
                     </div>
-                    
+
                     {model.base_price && (
                       <p className="text-sm font-medium text-green-600">
                         From ₹{model.base_price.toLocaleString()}
@@ -901,7 +913,7 @@ const Order = () => {
 
   const renderVendorProducts = () => {
     const filteredProducts = getFilteredData() as VendorProduct[];
-    
+
     // Group products by vendor
     const productsByVendor = filteredProducts.reduce((acc, product) => {
       const vendorId = product.vendor_id;
@@ -952,9 +964,9 @@ const Order = () => {
         };
       }
       return {
-        container: 'bg-gradient-to-r from-gray-400 to-gray-500 text-white',
-        icon: '•',
-        glow: ''
+        container: 'bg-gradient-to-r from-slate-600 to-slate-700 text-white ring-1 ring-slate-400/30 shadow-sm',
+        icon: '●',
+        glow: 'drop-shadow-sm'
       };
     };
 
@@ -962,7 +974,7 @@ const Order = () => {
       <div className="space-y-4 sm:space-y-6">
         {Object.entries(productsByVendor).map(([vendorId, { vendor, products }], vendorIndex) => {
           const colorScheme = getVendorColorScheme(vendorIndex);
-          
+
           return (
             <div key={vendorId} className={`rounded-xl sm:rounded-2xl ${colorScheme.bg} p-3 sm:p-4 md:p-6 ${colorScheme.border} border-2`}>
               {/* Vendor Header - Mobile Optimized */}
@@ -976,7 +988,8 @@ const Order = () => {
                       <h3 className={`text-base sm:text-lg md:text-xl font-bold ${colorScheme.accent} flex items-center space-x-1 sm:space-x-2`}>
                         <span className="truncate">{vendor?.business_name || 'Unknown Vendor'}</span>
                         {vendor?.is_verified && (
-                          <Verified className="h-3 w-3 sm:h-4 sm:w-4 md:h-5 md:w-5 text-blue-600 flex-shrink-0" />
+                          // <Verified className="h-3 w-3 sm:h-4 sm:w-4 md:h-5 md:w-5 text-blue-600 flex-shrink-0" />
+                          <Verified className="h-3 w-3 sm:h-4 sm:w-4 md:h-5 md:w-5 text-yellow-600 flex-shrink-0" />
                         )}
                       </h3>
                       <div className="flex items-center space-x-2 sm:space-x-3 mt-0.5 sm:mt-1">
@@ -990,7 +1003,7 @@ const Order = () => {
                           </span>
                         </div>
                         <span className="text-xs sm:text-sm text-gray-600 hidden sm:inline">
-                          📍 Dak Bungalow, Patna
+                          📍 Patna
                         </span>
                       </div>
                     </div>
@@ -1003,13 +1016,13 @@ const Order = () => {
                 {products.map((product) => {
                   const qualityStyle = getQualityBadgeStyle(product.quality?.name || '');
                   const hasDiscount = product.original_price && product.original_price > product.price;
-                  const discountPercent = hasDiscount 
+                  const discountPercent = hasDiscount
                     ? Math.round(((product.original_price! - product.price) / product.original_price!) * 100)
                     : 0;
 
                   return (
-                    <Card 
-                      key={product.id} 
+                    <Card
+                      key={product.id}
                       className="bg-white/90 backdrop-blur hover:shadow-lg transition-all duration-300 hover:scale-[1.01] border-0"
                     >
                       <CardContent className="p-3 sm:p-4">
@@ -1018,11 +1031,12 @@ const Order = () => {
                           {/* Quality Badge - Smaller */}
                           <div className={`inline-flex items-center space-x-1 px-2 py-1 rounded-lg text-xs font-semibold ${qualityStyle.container} ${qualityStyle.glow}`}>
                             <span className="text-sm">{qualityStyle.icon}</span>
-                            <span>{product.quality?.name || 'Standard'}</span>
+                            <span>{product.quality?.name || 'Unknown'}</span>
                           </div>
                           
+
                           {/* Stock Status - Compact */}
-                          <Badge 
+                          <Badge
                             variant={product.is_in_stock ? "default" : "destructive"}
                             className={`text-xs ${product.is_in_stock ? "bg-green-100 text-green-800" : ""}`}
                           >
@@ -1059,10 +1073,10 @@ const Order = () => {
                               Warranty
                             </span>
                             <span className="font-semibold text-gray-900">
-                              {product.warranty_months}mo
+                              {product.warranty_months} months
                             </span>
                           </div>
-                          <div className="flex items-center justify-between text-xs sm:text-sm">
+                          {/* <div className="flex items-center justify-between text-xs sm:text-sm">
                             <span className="flex items-center text-gray-600">
                               <Clock className="h-3 w-3 sm:h-4 sm:w-4 mr-1 text-green-500" />
                               Delivery
@@ -1070,18 +1084,17 @@ const Order = () => {
                             <span className="font-semibold text-gray-900">
                               Express
                             </span>
-                          </div>
+                          </div> */}
                         </div>
 
                         {/* Add to Cart Button - Mobile Optimized */}
-                        <Button 
+                        <Button
                           onClick={() => handleAddToCart(product)}
                           disabled={!product.is_in_stock}
-                          className={`w-full h-9 sm:h-10 font-semibold text-sm transition-all duration-200 ${
-                            product.is_in_stock 
-                              ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 shadow-md hover:shadow-lg' 
-                              : 'bg-gray-300'
-                          }`}
+                          className={`w-full h-9 sm:h-10 font-semibold text-sm transition-all duration-200 ${product.is_in_stock
+                            ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 shadow-md hover:shadow-lg'
+                            : 'bg-gray-300'
+                            }`}
                         >
                           {product.is_in_stock ? (
                             <span className="flex items-center justify-center space-x-1.5">
@@ -1129,9 +1142,9 @@ const Order = () => {
 
   const renderStepContent = () => {
     if (loading) return renderLoadingSkeletons();
-    
+
     const filteredData = getFilteredData();
-    
+
     if (filteredData.length === 0) {
       return (
         <div className="text-center py-12">
@@ -1168,7 +1181,7 @@ const Order = () => {
   return (
     <div className="min-h-screen bg-gray-50 no-text-select">
       <Header cartItems={totalItems} />
-      
+
       <main className="container mx-auto px-4 py-8">
         {/* Header Section */}
         <div className="mb-8">
@@ -1192,7 +1205,7 @@ const Order = () => {
                 {step === 'products' && `${selectedModel?.model_name} Options`}
               </h1>
             </div>
-            
+
 
           </div>
 
@@ -1218,18 +1231,35 @@ const Order = () => {
       </main>
 
       {/* <Footer /> */} {/* Commented out Footer component */}
+
+      {/* Floating Action Buttons */}
       
+      {/* Back Button - Only show when not on categories step */}
+      {step !== 'categories' && (
+        <Button
+          onClick={() => {
+            hapticFeedback.navigation();
+            goBack();
+          }}
+          className="fixed bottom-6 left-6 w-12 h-12 rounded-full bg-gray-600 hover:bg-gray-700 shadow-lg hover:shadow-xl transition-all duration-200 z-50 active:scale-95"
+          size="icon"
+        >
+          <ArrowLeft className="h-5 w-5 text-white" />
+        </Button>
+      )}
+
       {/* Floating Search Button */}
       <Button
         onClick={() => {
+          hapticFeedback.button();
           // Scroll to search section and focus on input
           const searchSection = document.getElementById('search-section');
           const searchInput = document.getElementById('main-search-input') as HTMLInputElement;
-          
+
           if (searchSection) {
             searchSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
           }
-          
+
           // Focus on search input after scroll
           setTimeout(() => {
             if (searchInput) {
@@ -1242,7 +1272,7 @@ const Order = () => {
       >
         <Search className="h-5 w-5 text-white" />
       </Button>
-      
+
 
     </div>
   );

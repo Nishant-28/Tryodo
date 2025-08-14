@@ -32,12 +32,19 @@ export const hasValidCachedSession = (): boolean => {
       return false;
     }
 
-    // Check if session is expired (with 1 minute buffer)
+    // Check if session is expired (with 2 minute buffer for better UX)
     const expiryTime = new Date(sessionData.expires_at * 1000);
     const now = new Date();
-    const buffer = 60 * 1000; // 1 minute in milliseconds
+    const buffer = 2 * 60 * 1000; // 2 minutes in milliseconds
     
-    return expiryTime.getTime() > (now.getTime() + buffer);
+    const isValid = expiryTime.getTime() > (now.getTime() + buffer);
+    
+    if (!isValid) {
+      console.log('🕐 Cached session expired, clearing...');
+      localStorage.removeItem(tokenKey);
+    }
+    
+    return isValid;
   } catch (error) {
     console.log('❌ Error checking cached session:', error);
     return false;
@@ -46,10 +53,27 @@ export const hasValidCachedSession = (): boolean => {
 
 export const clearExpiredSession = (): void => {
   try {
-    if (!hasValidCachedSession()) {
-      const tokenKey = getAuthTokenKey();
-      localStorage.removeItem(tokenKey);
-      console.log('🧹 Cleared expired session from localStorage');
+    const tokenKey = getAuthTokenKey();
+    const cachedSession = localStorage.getItem(tokenKey);
+    
+    if (cachedSession) {
+      try {
+        const sessionData = JSON.parse(cachedSession);
+        
+        if (sessionData?.expires_at) {
+          const expiryTime = new Date(sessionData.expires_at * 1000);
+          const now = new Date();
+          
+          if (expiryTime.getTime() <= now.getTime()) {
+            localStorage.removeItem(tokenKey);
+            console.log('🧹 Cleared expired session from localStorage');
+          }
+        }
+      } catch (parseError) {
+        // Invalid session data, remove it
+        localStorage.removeItem(tokenKey);
+        console.log('🧹 Cleared corrupted session data');
+      }
     }
   } catch (error) {
     console.log('❌ Error clearing expired session:', error);
@@ -82,6 +106,42 @@ export const getCachedUserInfo = (): { email?: string; role?: string } | null =>
   }
 };
 
+export const getSessionTimeRemaining = (): number => {
+  try {
+    const tokenKey = getAuthTokenKey();
+    const cachedSession = localStorage.getItem(tokenKey);
+    
+    if (!cachedSession) {
+      return 0;
+    }
+
+    const sessionData = JSON.parse(cachedSession);
+    
+    if (!sessionData?.expires_at) {
+      return 0;
+    }
+
+    const expiryTime = new Date(sessionData.expires_at * 1000);
+    const now = new Date();
+    
+    return Math.max(0, expiryTime.getTime() - now.getTime());
+  } catch (error) {
+    console.log('❌ Error getting session time remaining:', error);
+    return 0;
+  }
+};
+
+export const shouldRefreshSession = (): boolean => {
+  try {
+    const timeRemaining = getSessionTimeRemaining();
+    // Refresh if less than 10 minutes remaining
+    return timeRemaining > 0 && timeRemaining < (10 * 60 * 1000);
+  } catch (error) {
+    console.log('❌ Error checking if should refresh session:', error);
+    return false;
+  }
+};
+
 export const debugAuthStorage = (): void => {
   try {
     const tokenKey = getAuthTokenKey();
@@ -95,7 +155,8 @@ export const debugAuthStorage = (): void => {
           console.log('Auth Debug:', {
             hasSession: true,
             userEmail: sessionData?.user?.email,
-            isValid: hasValidCachedSession()
+            isValid: hasValidCachedSession(),
+            timeRemaining: Math.round(getSessionTimeRemaining() / 1000 / 60) + ' minutes'
           });
         }
       } catch {

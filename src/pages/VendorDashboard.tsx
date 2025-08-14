@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Package, TrendingUp, ShoppingCart, Users, Plus, Eye, Edit, Trash2,
@@ -28,6 +28,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
 import { Alert as AlertComponent, AlertDescription } from '@/components/ui/alert';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
+import CancelledOrdersSection from '@/components/CancelledOrdersSection';
 
 // Silence console.log in production build for this file
 if (import.meta.env && import.meta.env.PROD) {
@@ -320,12 +321,16 @@ const VendorDashboard = () => {
   });
   const [error, setError] = useState<string | null>(null);
   const [confirmedOrdersLoading, setConfirmedOrdersLoading] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [activeTab, setActiveTab] = useState<'pending' | 'confirmed' | 'delivered' | 'cancelled'>('pending');
+  const [loadedTabs, setLoadedTabs] = useState<{ [key: string]: boolean }>({ pending: true });
 
   // Financial data state
   // Wallet functionality removed
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loadingFinancials, setLoadingFinancials] = useState(false);
   const [dailyEarnings, setDailyEarnings] = useState<number>(0);
+  const [todaySales, setTodaySales] = useState<number>(0); // New state for Today's Sales
   const [loadingDailyEarnings, setLoadingDailyEarnings] = useState(false);
 
   // Add new state for products
@@ -339,16 +344,7 @@ const VendorDashboard = () => {
   const [categoryBreakdown, setCategoryBreakdown] = useState<any[]>([]);
   const [loadingChartData, setLoadingChartData] = useState(false);
 
-  // Real-time refresh interval (every 30 seconds)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!loading) {
-        refreshData();
-      }
-    }, 30000);
 
-    return () => clearInterval(interval);
-  }, [loading]);
 
   useEffect(() => {
     if (profile?.id) {
@@ -390,7 +386,6 @@ const VendorDashboard = () => {
         loadFinancialSummary(vendorData.id),
         loadPendingOrders(vendorData.id),
         loadConfirmedOrders(vendorData.id),
-        loadDeliveredOrders(vendorData.id),
         loadVendorProducts(vendorData.id),
         loadFinancialData(vendorData.id),
         loadEnhancedAnalytics(vendorData.id),
@@ -654,6 +649,84 @@ const VendorDashboard = () => {
     }
   };
 
+  // Auto-approval logic
+  const checkAndAutoApproveOrders = async (vendorId: string, pendingOrdersData: PendingOrder[]) => {
+    if (!vendor?.auto_approve_orders) return;
+
+    const now = new Date();
+    const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
+
+    // Check if we're within business hours (if required)
+    if (vendor.auto_approve_during_business_hours_only) {
+      const isWithinBusinessHours = currentTime >= vendor.business_hours_start &&
+        currentTime <= vendor.business_hours_end;
+      if (!isWithinBusinessHours) {
+        console.log('Auto-approval skipped: Outside business hours');
+        return;
+      }
+    }
+
+    const ordersToAutoApprove = pendingOrdersData.filter(order => {
+      // Check amount threshold if set
+      if (vendor.auto_approve_under_amount !== null &&
+        order.line_total > vendor.auto_approve_under_amount) {
+        return false;
+      }
+      return true;
+    });
+
+    if (ordersToAutoApprove.length === 0) return;
+
+    console.log(`Auto-approving ${ordersToAutoApprove.length} orders`);
+
+    // Auto-approve orders
+    for (const order of ordersToAutoApprove) {
+      try {
+        const { success, error } = await TryodoAPI.Order.updateOrderItemStatus(
+          order.order_item_id,
+          'confirmed'
+        );
+
+        if (success) {
+          console.log(`Auto-approved order: ${order.order_number}`);
+
+          // Try to create delivery assignment
+          try {
+            const customerPincode = order.delivery_address?.pincode ||
+              order.delivery_address?.postal_code ||
+              order.delivery_address?.zip_code;
+
+            if (customerPincode) {
+              const deliveryResult = await DeliveryAPI.Assignment.createAssignmentFromOrder(
+                order.order_item_id,
+                order.order_id,
+                vendorId,
+                customerPincode,
+                'normal'
+              );
+
+              if (deliveryResult.success) {
+                console.log(`Auto-assigned delivery for order: ${order.order_number}`);
+              }
+            }
+          } catch (deliveryError) {
+            console.error('Auto-delivery assignment failed:', deliveryError);
+          }
+        } else {
+          console.error(`Failed to auto-approve order ${order.order_number}:`, error);
+        }
+      } catch (error) {
+        console.error(`Error auto-approving order ${order.order_number}:`, error);
+      }
+    }
+
+    if (ordersToAutoApprove.length > 0) {
+      toast.success(`Auto-approved ${ordersToAutoApprove.length} order${ordersToAutoApprove.length > 1 ? 's' : ''}`);
+      // Refresh data to show updated orders
+      setTimeout(() => refreshData(), 1000);
+    }
+  };
+
   const loadPendingOrders = async (vendorId: string) => {
     try {
       // Query order_items directly instead of using vendor_pending_orders view
@@ -729,6 +802,11 @@ const VendorDashboard = () => {
       });
 
       setPendingOrders(transformedData);
+
+      // Check for auto-approval after setting pending orders
+      if (transformedData.length > 0 && vendor?.auto_approve_orders) {
+        setTimeout(() => checkAndAutoApproveOrders(vendorId, transformedData), 500);
+      }
     } catch (error) {
       console.error('Error loading pending orders:', error);
       setPendingOrders([]);
@@ -884,7 +962,7 @@ const VendorDashboard = () => {
         }
       }
 
-              const processed: ConfirmedOrder[] = data.map((item: any) => {
+      const processed: ConfirmedOrder[] = data.map((item: any) => {
         const order = item.orders;
         const customer = order?.customers || null;
         const profileInfo = customer?.profile_id ? profilesMap[customer.profile_id] : undefined;
@@ -978,7 +1056,7 @@ const VendorDashboard = () => {
       setConfirmedOrders(filteredProcessed);
     } catch (err: any) {
       console.error('Error loading confirmed orders:', err);
-      
+
       // Provide more specific error messages
       let errorMessage = 'Failed to load confirmed orders';
       if (err?.message) {
@@ -988,7 +1066,7 @@ const VendorDashboard = () => {
       } else if (typeof err === 'string') {
         errorMessage += `: ${err}`;
       }
-      
+
       toast.error(errorMessage);
       setConfirmedOrders([]);
     } finally {
@@ -1211,17 +1289,23 @@ const VendorDashboard = () => {
   const loadDailyEarnings = async (vendorId: string) => {
     try {
       setLoadingDailyEarnings(true);
-      const walletResponse = await WalletAPI.getVendorWalletData(vendorId);
-      
-      if (walletResponse.success && walletResponse.data) {
-        setDailyEarnings(walletResponse.data.today_earnings || 0);
+      const today = new Date().toISOString().split('T')[0];
+
+      const dailyAnalyticsResponse = await AnalyticsAPI.getVendorDayWiseAnalytics(vendorId, 1); // Get data for the last 1 day (today)
+
+      if (dailyAnalyticsResponse.success && dailyAnalyticsResponse.data && dailyAnalyticsResponse.data.length > 0) {
+        const todayData = dailyAnalyticsResponse.data.find(day => day.date === today);
+        setDailyEarnings(todayData?.net_earnings || 0);
+        setTodaySales(todayData?.net_sales || 0); // Set today's gross sales
       } else {
-        console.error('Failed to load daily earnings:', walletResponse.error);
+        console.error('Failed to load daily earnings:', dailyAnalyticsResponse.error);
         setDailyEarnings(0);
+        setTodaySales(0); // Set default value on error
       }
     } catch (error: any) {
       console.error('Error loading daily earnings:', error);
       setDailyEarnings(0);
+      setTodaySales(0); // Set default value on error
     } finally {
       setLoadingDailyEarnings(false);
     }
@@ -1329,7 +1413,7 @@ const VendorDashboard = () => {
 
     data.forEach(item => {
       const categoryName = item.vendor_products?.categories?.name ||
-        
+
         'Other';
 
       if (!categoryMap.has(categoryName)) {
@@ -1405,25 +1489,62 @@ const VendorDashboard = () => {
     }
   };
 
-  const refreshData = useCallback(async () => {
+  const refreshData = useCallback(async (opts?: { includeHeavy?: boolean; includeDelivered?: boolean }) => {
     if (!vendor) return;
+
+    const includeHeavy = opts?.includeHeavy ?? false;
+    const includeDelivered = opts?.includeDelivered ?? (activeTab === 'delivered');
 
     setRefreshing(true);
     try {
-      await Promise.all([
+      const promises: Promise<any>[] = [
         loadPendingOrders(vendor.id),
         loadConfirmedOrders(vendor.id),
-        loadDeliveredOrders(vendor.id),
-        loadAnalytics(vendor.id),
-        loadFinancialData(vendor.id),
-        loadVendorProducts(vendor.id),
-        loadEnhancedAnalytics(vendor.id),
-        loadDailyEarnings(vendor.id)
-      ]);
+      ];
+
+      if (includeDelivered) {
+        promises.push(loadDeliveredOrders(vendor.id));
+      }
+
+      if (includeHeavy) {
+        promises.push(
+          loadAnalytics(vendor.id),
+          loadFinancialData(vendor.id),
+          loadVendorProducts(vendor.id),
+          loadEnhancedAnalytics(vendor.id),
+          loadDailyEarnings(vendor.id)
+        );
+      }
+
+      await Promise.all(promises);
     } finally {
       setRefreshing(false);
     }
-  }, [vendor]);
+  }, [vendor, activeTab]);
+
+  const handleTabChange = (value: string) => {
+    const tab = value as 'pending' | 'confirmed' | 'delivered' | 'cancelled';
+    setActiveTab(tab);
+    setLoadedTabs(prev => (prev[tab] ? prev : { ...prev, [tab]: true }));
+
+    if (tab === 'delivered' && vendor?.id && !deliveredOrders.length) {
+      loadDeliveredOrders(vendor.id);
+    }
+    if (tab === 'confirmed' && vendor?.id && !confirmedOrders.length) {
+      loadConfirmedOrders(vendor.id);
+    }
+  };
+
+  // Real-time refresh interval (every 30 seconds), light refresh
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!loading) {
+        refreshData({ includeHeavy: false });
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [loading, refreshData]);
 
   // Real-time delivery status monitoring
   useEffect(() => {
@@ -1615,6 +1736,18 @@ const VendorDashboard = () => {
         .eq('id', vendor.id);
 
       if (error) throw error;
+
+      // Update vendor state to reflect the changes
+      setVendor(prev => prev ? {
+        ...prev,
+        auto_approve_orders: vendorSettings.auto_approve_orders,
+        order_confirmation_timeout_minutes: vendorSettings.order_confirmation_timeout_minutes,
+        auto_approve_under_amount: vendorSettings.auto_approve_under_amount,
+        business_hours_start: vendorSettings.business_hours_start,
+        business_hours_end: vendorSettings.business_hours_end,
+        auto_approve_during_business_hours_only: vendorSettings.auto_approve_during_business_hours_only
+      } : null);
+
       toast.success('Settings updated successfully!');
       refreshData();
       setShowSettingsDialog(false);
@@ -1809,7 +1942,8 @@ const VendorDashboard = () => {
     );
   };
 
-  const formatTimeAgo = (dateString: string) => {
+  const formatTimeAgo = (dateString?: string | null) => {
+    if (!dateString) return 'N/A';
     const date = new Date(dateString);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
@@ -1821,6 +1955,24 @@ const VendorDashboard = () => {
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
     return `${diffDays}d ago`;
+  };
+
+  // Formats a date-time string into a readable form like "10 Aug 2025, 3:05 PM"
+  const formatDateTime = (dateString?: string | null) => {
+    try {
+      if (!dateString) return 'N/A';
+      const date = new Date(dateString);
+      return date.toLocaleString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch {
+      return dateString as string;
+    }
   };
 
   // Slot-based utility functions for vendor dashboard
@@ -1882,7 +2034,7 @@ const VendorDashboard = () => {
     }
   };
 
-  const filteredOrders = pendingOrders.filter(order => {
+  const filteredOrders = useMemo(() => pendingOrders.filter(order => {
     const matchesSearch = (order.product_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.order_number.toLowerCase().includes(searchTerm.toLowerCase());
 
@@ -1891,7 +2043,7 @@ const VendorDashboard = () => {
     if (statusFilter === 'auto_approve') return matchesSearch && order.should_auto_approve;
 
     return matchesSearch;
-  });
+  }), [pendingOrders, searchTerm, statusFilter]);
 
   if (loading) {
     return <LoadingSpinner />;
@@ -1942,67 +2094,89 @@ const VendorDashboard = () => {
               <p className="text-gray-600 font-medium">Manage orders, track deliveries, and monitor performance</p>
             </div>
 
-            {/* Mobile-optimized action buttons */}
-            <div className="flex flex-col sm:flex-row gap-3">
-              {/* Mobile: Grid layout for better touch */}
-              <div className="grid grid-cols-2 sm:hidden gap-2">
-                <Button
-                  variant="outline"
-                  onClick={refreshData}
-                  className="flex-1 min-h-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
-                  disabled={refreshing}
-                >
-                  <div className="flex flex-col items-center gap-1">
-                    <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-                    <span className="text-xs">{refreshing ? 'Updating' : 'Refresh'}</span>
-                  </div>
-                </Button>
-
-                <Button
-                  onClick={() => navigate('/vendor/product-management')}
-                  className="flex-1 min-h-12 rounded-xl bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 transition-all duration-200"
-                >
-                  <div className="flex flex-col items-center gap-1">
-                    <BarChart3 className="h-4 w-4" />
-                    <span className="text-xs">Products</span>
-                  </div>
-                </Button>
-              </div>
-
-              {/* Desktop: Original layout */}
-              <div className="hidden sm:flex gap-3">
-                {/* Delivery Status Notifications */}
-                <div className="relative">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="relative min-h-12 min-w-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
-                  >
-                    <Bell className="h-4 w-4" />
-                    {confirmedOrders.filter(o => ['assigned_to_delivery', 'picked_up', 'out_for_delivery'].includes(o.current_status)).length > 0 && (
-                      <span className="absolute -top-1 -right-1 h-3 w-3 bg-gradient-to-r from-red-500 to-red-600 rounded-full animate-pulse shadow-soft"></span>
-                    )}
-                  </Button>
-                </div>
-
-                <Button
-                  variant="outline"
-                  onClick={refreshData}
-                  className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 font-medium"
-                  disabled={refreshing}
-                >
+            {/* Mobile: Grid layout for better touch */}
+            <div className="grid grid-cols-2 sm:hidden gap-2">
+              <Button
+                variant="outline"
+                onClick={() => refreshData({ includeHeavy: true })}
+                className="flex-1 min-h-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
+                disabled={refreshing}
+              >
+                <div className="flex flex-col items-center gap-1">
                   <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-                  <span>{refreshing ? 'Updating...' : 'Refresh'}</span>
-                </Button>
+                  <span className="text-xs">{refreshing ? 'Updating' : 'Refresh'}</span>
+                </div>
+              </Button>
 
-                <Button
-                  className="bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 flex items-center gap-2 min-h-12 px-6 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
-                  onClick={() => navigate('/vendor/product-management')}
-                >
+              <Button
+                onClick={() => setShowSettingsDialog(true)}
+                variant="outline"
+                className="flex-1 min-h-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <div className="flex items-center gap-1">
+                    <Settings className="h-4 w-4" />
+                    <div className={`w-2 h-2 rounded-full ${vendor?.auto_approve_orders ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                  </div>
+                  <span className="text-xs">Auto Accept</span>
+                </div>
+              </Button>
+
+              <Button
+                onClick={() => navigate('/vendor/product-management')}
+                className="flex-1 min-h-12 rounded-xl bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 transition-all duration-200 col-span-2"
+              >
+                <div className="flex items-center gap-2">
                   <BarChart3 className="h-4 w-4" />
-                  <span>Product Management</span>
+                  <span className="text-sm">Products</span>
+                </div>
+              </Button>
+            </div>
+
+            {/* Desktop: Original layout */}
+            <div className="hidden sm:flex gap-3">
+              {/* Delivery Status Notifications */}
+              <div className="relative">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="relative min-h-12 min-w-12 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200"
+                >
+                  <Bell className="h-4 w-4" />
+                  {confirmedOrders.filter(o => ['assigned_to_delivery', 'picked_up', 'out_for_delivery'].includes(o.current_status)).length > 0 && (
+                    <span className="absolute -top-1 -right-1 h-3 w-3 bg-gradient-to-r from-red-500 to-red-600 rounded-full animate-pulse shadow-soft"></span>
+                  )}
                 </Button>
               </div>
+
+              {/* Auto Accept Toggle Button */}
+              <Button
+                variant="outline"
+                onClick={() => setShowSettingsDialog(true)}
+                className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 font-medium"
+              >
+                <Settings className="h-4 w-4" />
+                <span>Auto Accept</span>
+                <div className={`w-2 h-2 rounded-full ${vendor?.auto_approve_orders ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => refreshData({ includeHeavy: true })}
+                className="flex items-center gap-2 min-h-12 px-4 rounded-xl border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 font-medium"
+                disabled={refreshing}
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                <span>{refreshing ? 'Updating...' : 'Refresh'}</span>
+              </Button>
+
+              <Button
+                className="bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 flex items-center gap-2 min-h-12 px-6 rounded-xl font-semibold shadow-soft hover:shadow-medium transform hover:scale-105 transition-all duration-200"
+                onClick={() => navigate('/vendor/product-management')}
+              >
+                <BarChart3 className="h-4 w-4" />
+                <span>Product Management</span>
+              </Button>
             </div>
           </div>
         </div>
@@ -2024,7 +2198,7 @@ const VendorDashboard = () => {
                 {/* Daily Earnings */}
                 <Card className="bg-gradient-to-br from-emerald-50 to-green-100 border-emerald-200">
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium text-emerald-800">Total Sales</CardTitle>
+                    <CardTitle className="text-sm font-medium text-emerald-800">Today's Sales</CardTitle>
                     <Calendar className="h-4 w-4 text-emerald-600" />
                   </CardHeader>
                   <CardContent>
@@ -2032,10 +2206,10 @@ const VendorDashboard = () => {
                       {loadingDailyEarnings ? (
                         <div className="animate-pulse bg-emerald-200 h-6 w-16 rounded"></div>
                       ) : (
-                        `₹${dailyEarnings.toLocaleString('en-IN')}`
+                        `₹${todaySales.toLocaleString('en-IN')}`
                       )}
                     </div>
-                    <p className="text-xs text-emerald-600 mt-1">Today's Sales</p>
+                    <p className="text-xs text-emerald-600 mt-1">Gross sales today</p>
                   </CardContent>
                 </Card>
 
@@ -2061,9 +2235,13 @@ const VendorDashboard = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-blue-700">
-                      ₹{(financialSummary?.net_earnings || 0).toLocaleString('en-IN')}
+                      {loadingDailyEarnings ? (
+                        <div className="animate-pulse bg-blue-200 h-6 w-16 rounded"></div>
+                      ) : (
+                        `₹${dailyEarnings.toLocaleString('en-IN')}`
+                      )}
                     </div>
-                    <p className="text-xs text-blue-600 mt-1">After commission</p>
+                    <p className="text-xs text-blue-600 mt-1">After Commissions</p>
                   </CardContent>
                 </Card>
 
@@ -2122,7 +2300,7 @@ const VendorDashboard = () => {
                     <p className="text-xs text-pink-600 mt-1">Active listings</p>
                   </CardContent>
                 </Card>
-              </div> 
+              </div>
 
               {/* Quick Actions */}
               <div className="mt-6 flex flex-wrap gap-3">
@@ -2132,6 +2310,20 @@ const VendorDashboard = () => {
                 >
                   <BarChart3 className="h-4 w-4 mr-2" />
                   View Analytics
+                </Button>
+                <Button
+                  onClick={() => navigate('/vendor/market-products')}
+                  className="bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white"
+                >
+                  <Package className="h-4 w-4 mr-2" />
+                  Browse Marketplace
+                </Button>
+                <Button
+                  onClick={() => navigate('/vendor/market-products/my-products')}
+                  className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white"
+                >
+                  <Settings className="h-4 w-4 mr-2" />
+                  Manage My Products
                 </Button>
                 {/* <Button
                   variant="outline"
@@ -2147,7 +2339,7 @@ const VendorDashboard = () => {
         </div>
 
         {/* Mobile-first tabs with improved layout */}
-        <Tabs defaultValue="pending" className="w-full">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
           {/* Mobile-first tabs with improved layout */}
           <div className="block sm:hidden mb-4">
             <TabsList className="flex flex-wrap gap-1 p-1 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl shadow-soft h-auto">
@@ -2157,7 +2349,7 @@ const VendorDashboard = () => {
               >
                 <div className="flex flex-col items-center gap-1">
                   <AlertTriangle className="h-3 w-3" />
-                  <span>Pending ({analytics.pendingOrders})</span>
+                  <span>Pending ({pendingOrders.length})</span>
                 </div>
               </TabsTrigger>
               <TabsTrigger
@@ -2172,7 +2364,6 @@ const VendorDashboard = () => {
               </TabsTrigger>
               <TabsTrigger
                 value="delivered"
-                onClick={() => refreshData()}
                 className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
               >
                 <div className="flex flex-col items-center gap-1">
@@ -2180,20 +2371,32 @@ const VendorDashboard = () => {
                   <span>Delivered </span>
                 </div>
               </TabsTrigger>
+              <TabsTrigger
+                value="cancelled"
+                className="flex-1 min-w-0 data-[state=active]:bg-gradient-to-r data-[state=active]:from-red-500 data-[state=active]:to-red-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200 text-xs px-2 py-2 h-auto"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <XCircle className="h-3 w-3" />
+                  <span>Cancelled</span>
+                </div>
+              </TabsTrigger>
             </TabsList>
           </div>
 
           {/* Desktop tabs */}
           <div className="hidden sm:block">
-            <TabsList className="grid w-full grid-cols-3 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
+            <TabsList className="grid w-full grid-cols-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-1 shadow-soft">
               <TabsTrigger value="pending" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
-                Pending ({analytics.pendingOrders})
+                Pending ({pendingOrders.length})
               </TabsTrigger>
               <TabsTrigger value="confirmed" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Confirmed ({confirmedOrders.length})
               </TabsTrigger>
-              <TabsTrigger value="delivered" onClick={() => refreshData()} className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+              <TabsTrigger value="delivered" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
                 Delivered ({deliveredOrders.length})
+              </TabsTrigger>
+              <TabsTrigger value="cancelled" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-red-500 data-[state=active]:to-red-600 data-[state=active]:text-white rounded-lg font-medium transition-all duration-200">
+                Cancelled
               </TabsTrigger>
             </TabsList>
           </div>
@@ -2203,48 +2406,47 @@ const VendorDashboard = () => {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
               <Card className="bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200 shadow-soft hover:shadow-medium transition-all duration-200">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-semibold text-orange-800">Pending Orders</CardTitle>
+                  <CardTitle className="text-sm font-semibold text-orange-800">Pending Products</CardTitle>
                   <AlertTriangle className="h-5 w-5 text-orange-600" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl lg:text-3xl font-bold text-orange-700">{analytics.pendingOrders}</div>
+                  <div className="text-2xl lg:text-3xl font-bold text-orange-700">{pendingOrders.length}</div>
                   <p className="text-xs text-orange-600 font-medium mt-1">
                     Require immediate attention
                   </p>
                 </CardContent>
               </Card>
 
-              {/* <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200 shadow-soft hover:shadow-medium transition-all duration-200">
+              <Card
+                className={`shadow-soft hover:shadow-medium transition-all duration-200 cursor-pointer ${vendor?.auto_approve_orders
+                    ? 'bg-gradient-to-br from-green-50 to-emerald-100 border-green-200'
+                    : 'bg-gradient-to-br from-gray-50 to-gray-100 border-gray-200'
+                  }`}
+                onClick={() => setShowSettingsDialog(true)}
+              >
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-semibold text-green-800">Response Rate</CardTitle>
-                  <Target className="h-5 w-5 text-green-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl lg:text-3xl font-bold text-green-700">{analytics.responseRate.toFixed(1)}%</div>
-                  <p className="text-xs text-green-600 font-medium mt-1">
-                    Last 30 days
-                  </p>
-                </CardContent>
-              </Card> */}
-
-              {/* <Card className="bg-gradient-to-br from-blue-50 to-purple-50 border-blue-200 shadow-soft hover:shadow-medium transition-all duration-200">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-semibold text-blue-800">Auto-Approval</CardTitle>
+                  <CardTitle className={`text-sm font-semibold ${vendor?.auto_approve_orders ? 'text-green-800' : 'text-gray-800'
+                    }`}>
+                    Auto Accept
+                  </CardTitle>
                   {vendor?.auto_approve_orders ? (
-                    <PlayCircle className="h-5 w-5 text-blue-600" />
+                    <PlayCircle className="h-5 w-5 text-green-600" />
                   ) : (
                     <PauseCircle className="h-5 w-5 text-gray-500" />
                   )}
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl lg:text-3xl font-bold text-blue-700">
+                  <div className={`text-2xl lg:text-3xl font-bold ${vendor?.auto_approve_orders ? 'text-green-700' : 'text-gray-700'
+                    }`}>
                     {vendor?.auto_approve_orders ? 'ON' : 'OFF'}
                   </div>
-                  <p className="text-xs text-blue-600 font-medium mt-1">
-                    {vendor?.auto_approve_orders ? 'Auto-approving orders' : 'Manual approval required'}
+                  <p className={`text-xs font-medium mt-1 ${vendor?.auto_approve_orders ? 'text-green-600' : 'text-gray-600'
+                    }`}>
+                    {vendor?.auto_approve_orders ? 'Auto-accepting orders' : 'Manual approval required'}
                   </p>
+                  <p className="text-xs text-blue-600 mt-1 opacity-75">Click to configure</p>
                 </CardContent>
-              </Card> */}
+              </Card>
 
               <Card className="bg-gradient-to-br from-purple-50 to-blue-50 border-purple-200 shadow-soft hover:shadow-medium transition-all duration-200">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -2252,7 +2454,7 @@ const VendorDashboard = () => {
                   <CheckCircle className="h-5 w-5 text-purple-600" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl lg:text-3xl font-bold text-purple-700">{analytics.deliveredOrders}</div>
+                  <div className="text-2xl lg:text-3xl font-bold text-purple-700">{deliveredOrders.length}</div>
                   <p className="text-xs text-purple-600 font-medium mt-1">
                     Successfully completed
                   </p>
@@ -2313,7 +2515,7 @@ const VendorDashboard = () => {
                       <Button 
                         size="sm" 
                         variant="outline"
-                        onClick={refreshData}
+                        onClick={() => refreshData({ includeHeavy: true })}
                         disabled={refreshing}
                         className="flex-1"
                       >
@@ -2804,20 +3006,20 @@ const VendorDashboard = () => {
                                             {getSlotStatusBadge(order)}
                                             {getDeliveryStatusBadge(order)}
                                           </div>
-                                                                                      <div className="text-xs text-gray-600 mt-1">
-                                              <div className="font-semibold text-gray-800">{order.product_name} × {order.quantity}</div>
-                                              {order.product_description && (
-                                                <div className="text-xs text-gray-600 mt-1 font-medium">{order.product_description}</div>
-                                              )}
-                                              {order.quality_type_name && (
-                                                <div className="mt-1.5">
-                                                  <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 font-bold text-xs px-2 py-1 rounded-full border border-blue-200">
-                                                    <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
-                                                    Quality: {order.quality_type_name}
-                                                  </span>
-                                                </div>
-                                              )}
-                                            </div>
+                                          <div className="text-xs text-gray-600 mt-1">
+                                            <div className="font-semibold text-gray-800">{order.product_name} × {order.quantity}</div>
+                                            {order.product_description && (
+                                              <div className="text-xs text-gray-600 mt-1 font-medium">{order.product_description}</div>
+                                            )}
+                                            {order.quality_type_name && (
+                                              <div className="mt-1.5">
+                                                <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 font-bold text-xs px-2 py-1 rounded-full border border-blue-200">
+                                                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+                                                  Quality: {order.quality_type_name}
+                                                </span>
+                                              </div>
+                                            )}
+                                          </div>
                                           {/* Slot Priority Message */}
                                           {getSlotPriorityMessage(order.slot_start_time, order.delivery_date) && (
                                             <div className="mt-1">
@@ -2907,7 +3109,7 @@ const VendorDashboard = () => {
                               )}
                               <p className="text-sm text-gray-500 mt-2">Order #{order.order_number}</p>
                               <p className="text-sm text-gray-500">
-                                Delivered: {formatTimeAgo(order.created_at)}
+                                Delivered on: {formatDateTime(order.delivered_at || order.updated_at || order.created_at)} • {formatTimeAgo(order.delivered_at || order.updated_at || order.created_at)}
                               </p>
                             </div>
                             <div className="text-right">
@@ -2922,8 +3124,169 @@ const VendorDashboard = () => {
               </CardContent>
             </Card>
           </TabsContent>
+
+          <TabsContent value="cancelled" className="space-y-6">
+            <CancelledOrdersSection
+              vendorId={vendor?.id || ''}
+              refreshTrigger={refreshTrigger}
+            />
+          </TabsContent>
         </Tabs>
       </main>
+
+      {/* Settings Dialog */}
+      <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="h-5 w-5" />
+              Vendor Settings
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-6">
+            {/* Auto Accept Orders */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <Label className="text-base font-medium">Auto Accept Orders</Label>
+                  <p className="text-sm text-gray-600">
+                    Automatically accept all incoming orders when this is enabled
+                  </p>
+                </div>
+                <Switch
+                  checked={vendorSettings.auto_approve_orders}
+                  onCheckedChange={(checked) =>
+                    setVendorSettings(prev => ({ ...prev, auto_approve_orders: checked }))
+                  }
+                />
+              </div>
+
+              {/* Status indicator */}
+              <div className={`rounded-lg p-3 border ${vendorSettings.auto_approve_orders
+                ? 'bg-green-50 border-green-200'
+                : 'bg-gray-50 border-gray-200'
+                }`}>
+                <div className="flex items-center gap-2">
+                  <div className={`w-3 h-3 rounded-full ${vendorSettings.auto_approve_orders ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                  <span className="text-sm font-medium">
+                    {vendorSettings.auto_approve_orders ? 'Auto Accept is ON' : 'Auto Accept is OFF'}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-600 mt-1">
+                  {vendorSettings.auto_approve_orders
+                    ? 'All new orders will be automatically accepted and moved to processing.'
+                    : 'You will need to manually accept each order.'
+                  }
+                </p>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Order Confirmation Timeout */}
+            <div className="space-y-2">
+              <Label htmlFor="timeout">Order Confirmation Timeout (minutes)</Label>
+              <Input
+                id="timeout"
+                type="number"
+                min="5"
+                max="60"
+                value={vendorSettings.order_confirmation_timeout_minutes}
+                onChange={(e) =>
+                  setVendorSettings(prev => ({
+                    ...prev,
+                    order_confirmation_timeout_minutes: parseInt(e.target.value) || 15
+                  }))
+                }
+              />
+              <p className="text-xs text-gray-600">
+                Time limit for manually confirming orders (5-60 minutes)
+              </p>
+            </div>
+
+            {/* Business Hours */}
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="start-time">Business Start</Label>
+                  <Input
+                    id="start-time"
+                    type="time"
+                    value={vendorSettings.business_hours_start}
+                    onChange={(e) =>
+                      setVendorSettings(prev => ({ ...prev, business_hours_start: e.target.value }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="end-time">Business End</Label>
+                  <Input
+                    id="end-time"
+                    type="time"
+                    value={vendorSettings.business_hours_end}
+                    onChange={(e) =>
+                      setVendorSettings(prev => ({ ...prev, business_hours_end: e.target.value }))
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium">Auto Accept During Business Hours Only</Label>
+                  <p className="text-xs text-gray-600">
+                    Only auto-accept orders during your business hours
+                  </p>
+                </div>
+                <Switch
+                  checked={vendorSettings.auto_approve_during_business_hours_only}
+                  onCheckedChange={(checked) =>
+                    setVendorSettings(prev => ({ ...prev, auto_approve_during_business_hours_only: checked }))
+                  }
+                />
+              </div>
+            </div>
+
+            {/* Auto Approve Under Amount */}
+            <div className="space-y-2">
+              <Label htmlFor="auto-amount">Auto Accept for Orders Under Amount (₹)</Label>
+              <Input
+                id="auto-amount"
+                type="number"
+                min="0"
+                placeholder="Leave empty for all amounts"
+                value={vendorSettings.auto_approve_under_amount || ''}
+                onChange={(e) =>
+                  setVendorSettings(prev => ({
+                    ...prev,
+                    auto_approve_under_amount: e.target.value ? parseFloat(e.target.value) : null
+                  }))
+                }
+              />
+              <p className="text-xs text-gray-600">
+                Only auto-accept orders below this amount. Leave empty to auto-accept all orders.
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 pt-4">
+              <Button
+                variant="outline"
+                onClick={() => setShowSettingsDialog(false)}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={updateVendorSettings}
+                className="flex-1 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
+              >
+                Save Settings
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

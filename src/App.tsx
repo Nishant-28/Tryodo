@@ -22,13 +22,28 @@ import VendorProfile from "./pages/VendorProfile";
 import AddProduct from "./pages/AddProduct";
 import VendorProductManagement from "./pages/VendorProductManagement";
 import VendorAnalytics from "./pages/VendorAnalytics";
+import VendorMarketProducts from "./pages/VendorMarketProducts";
+import VendorProductRequest from "./pages/VendorProductRequest";
+import VendorMarketProductManagement from "./pages/VendorMarketProductManagement";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminModelsManagement from "./pages/AdminModelsManagement";
 import AdminCategoriesManagement from "./pages/AdminCategoriesManagement";
 import AdminQualitiesManagement from "./pages/AdminQualitiesManagement";
+import AdminMarketCategories from "./pages/AdminMarketCategories";
+import AdminMarketBrands from "./pages/AdminMarketBrands";
+import AdminMarketProducts from "./pages/AdminMarketProducts";
+import AdminVendorRequests from "./pages/AdminVendorRequests";
+import AdminMarketplaceAnalytics from "./pages/AdminMarketplaceAnalytics";
+import AdminAddMarketProduct from "./pages/AdminAddMarketProduct";
+import AdminEditMarketProduct from "./pages/AdminEditMarketProduct";
+import AdminMarketProductDetail from "./pages/AdminMarketProductDetail";
+import MarketPage from "./pages/MarketPage";
+import MarketProductDetail from "./pages/MarketProductDetail";
 
 import AdminCommissionRules from "./pages/AdminCommissionRules";
+import AdminManageCommissions from "./pages/AdminManageCommissions";
 import AdminVendorManagement from "./pages/AdminVendorManagement";
+import AdminCustomerManagement from "./pages/AdminCustomerManagement";
 
 import AdminPayoutManagement from "./pages/AdminPayoutManagement";
 import AdminSectorManagement from "./pages/AdminSectorManagement";
@@ -44,7 +59,8 @@ import MyOrders from "./pages/MyOrders";
 import DeliveryPartnerDashboard from "./pages/DeliveryPartnerDashboard";
 import NetworkStatusIndicator from "@/components/NetworkStatusIndicator";
 import { Cart } from "@/components/customer/Cart";
-import DeliverySlotDashboard from "./pages/DeliverySlotDashboard";
+import NotificationProvider from "@/components/NotificationProvider";
+import SessionDebugger from "@/components/SessionDebugger";
 
 const queryClient = new QueryClient();
 
@@ -92,17 +108,18 @@ const App = () => (
     <TooltipProvider>
       <AuthProvider>
         <CartProvider>
-        <BrowserRouter
-          future={{
-            v7_startTransition: true,
-            v7_relativeSplatPath: true,
-          }}
-        >
-          <PWAWrapper>
-            <div className="flex flex-col min-h-screen">
-              <Toaster position="top-center" richColors />
-              <PWAInstallPrompt />
-              <NetworkStatusIndicator />
+          <NotificationProvider>
+            <BrowserRouter
+              future={{
+                v7_startTransition: true,
+                v7_relativeSplatPath: true,
+              }}
+            >
+              <PWAWrapper>
+                <div className="flex flex-col min-h-screen">
+                  <Toaster position="top-center" richColors />
+                  <PWAInstallPrompt />
+                  <NetworkStatusIndicator />
               
               <Routes>
                 {/* Public routes */}
@@ -160,6 +177,41 @@ const App = () => (
                     </MobileCustomerLayout>
                   </ProtectedRoute>
                 } />
+                <Route path="/market" element={
+                  <ProtectedRoute allowedRoles={['customer']}>
+                    <MobileCustomerLayout>
+                      <MarketPage />
+                    </MobileCustomerLayout>
+                  </ProtectedRoute>
+                } />
+                <Route path="/market/product/:slug" element={
+                  <ProtectedRoute allowedRoles={['customer']}>
+                    <MobileCustomerLayout>
+                      <MarketProductDetail />
+                    </MobileCustomerLayout>
+                  </ProtectedRoute>
+                } />
+                <Route path="/market/category/:slug" element={
+                  <ProtectedRoute allowedRoles={['customer']}>
+                    <MobileCustomerLayout>
+                      <MarketPage />
+                    </MobileCustomerLayout>
+                  </ProtectedRoute>
+                } />
+                <Route path="/market/brand/:slug" element={
+                  <ProtectedRoute allowedRoles={['customer']}>
+                    <MobileCustomerLayout>
+                      <MarketPage />
+                    </MobileCustomerLayout>
+                  </ProtectedRoute>
+                } />
+                <Route path="/market/search" element={
+                  <ProtectedRoute allowedRoles={['customer']}>
+                    <MobileCustomerLayout>
+                      <MarketPage />
+                    </MobileCustomerLayout>
+                  </ProtectedRoute>
+                } />
 
                 {/* Vendor-only routes */}
                 <Route path="/vendor-dashboard" element={<ProtectedRoute allowedRoles={['vendor']}><VendorDashboard /></ProtectedRoute>} />
@@ -167,14 +219,29 @@ const App = () => (
                 <Route path="/vendor/analytics" element={<ProtectedRoute allowedRoles={['vendor']}><VendorAnalytics /></ProtectedRoute>} />
                 <Route path="/vendor/add-product" element={<ProtectedRoute allowedRoles={['vendor']}><AddProduct /></ProtectedRoute>} />
                 <Route path="/vendor/product-management" element={<ProtectedRoute allowedRoles={['vendor']}><VendorProductManagement /></ProtectedRoute>} />
+                <Route path="/vendor/market-products" element={<ProtectedRoute allowedRoles={['vendor']}><VendorMarketProducts /></ProtectedRoute>} />
+                <Route path="/vendor/market-products/request/:productId" element={<ProtectedRoute allowedRoles={['vendor']}><VendorProductRequest /></ProtectedRoute>} />
+                <Route path="/vendor/market-products/my-products" element={<ProtectedRoute allowedRoles={['vendor']}><VendorMarketProductManagement /></ProtectedRoute>} />
+                <Route path="/vendor/market-products/requests" element={<ProtectedRoute allowedRoles={['vendor']}><VendorMarketProductManagement /></ProtectedRoute>} />
+                <Route path="/vendor/market-products/manage" element={<ProtectedRoute allowedRoles={['vendor']}><VendorMarketProductManagement /></ProtectedRoute>} />
 
                 {/* Admin-only routes */}
                 <Route path="/admin-dashboard" element={<ProtectedRoute allowedRoles={['admin']}><AdminDashboard /></ProtectedRoute>} />
                 <Route path="/admin/models" element={<ProtectedRoute allowedRoles={['admin']}><AdminModelsManagement /></ProtectedRoute>} />
                 <Route path="/admin/categories" element={<ProtectedRoute allowedRoles={['admin']}><AdminCategoriesManagement /></ProtectedRoute>} />
                 <Route path="/admin/qualities" element={<ProtectedRoute allowedRoles={['admin']}><AdminQualitiesManagement /></ProtectedRoute>} />
+                <Route path="/admin/market/categories" element={<ProtectedRoute allowedRoles={['admin']}><AdminMarketCategories /></ProtectedRoute>} />
+                <Route path="/admin/market/brands" element={<ProtectedRoute allowedRoles={['admin']}><AdminMarketBrands /></ProtectedRoute>} />
+                <Route path="/admin/market/products" element={<ProtectedRoute allowedRoles={['admin']}><AdminMarketProducts /></ProtectedRoute>} />
+                <Route path="/admin/market/products/add" element={<ProtectedRoute allowedRoles={['admin']}><AdminAddMarketProduct /></ProtectedRoute>} />
+                <Route path="/admin/market/products/:id/edit" element={<ProtectedRoute allowedRoles={['admin']}><AdminEditMarketProduct /></ProtectedRoute>} />
+                <Route path="/admin/market/products/:id" element={<ProtectedRoute allowedRoles={['admin']}><AdminMarketProductDetail /></ProtectedRoute>} />
+                <Route path="/admin/market/vendor-requests" element={<ProtectedRoute allowedRoles={['admin']}><AdminVendorRequests /></ProtectedRoute>} />
+                <Route path="/admin/market/analytics" element={<ProtectedRoute allowedRoles={['admin']}><AdminMarketplaceAnalytics /></ProtectedRoute>} />
                 <Route path="/admin/vendor-management" element={<ProtectedRoute allowedRoles={['admin']}><AdminVendorManagement /></ProtectedRoute>} />
+                <Route path="/admin/customer-management" element={<ProtectedRoute allowedRoles={['admin']}><AdminCustomerManagement /></ProtectedRoute>} />
                 <Route path="/admin/commission-rules" element={<ProtectedRoute allowedRoles={['admin']}><AdminCommissionRules /></ProtectedRoute>} />
+                <Route path="/admin/manage-commissions" element={<ProtectedRoute allowedRoles={['admin']}><AdminManageCommissions /></ProtectedRoute>} />
 
                 <Route path="/admin/payouts" element={<ProtectedRoute allowedRoles={['admin']}><AdminPayoutManagement /></ProtectedRoute>} />
                 <Route path="/admin/sectors" element={<ProtectedRoute allowedRoles={['admin']}><AdminSectorManagement /></ProtectedRoute>} />
@@ -183,14 +250,15 @@ const App = () => (
 
                 {/* Delivery Partner routes */}
                 <Route path="/delivery-partner-dashboard" element={<ProtectedRoute allowedRoles={['delivery_partner']}><DeliveryPartnerDashboard /></ProtectedRoute>} />
-                <Route path="/delivery-slot-dashboard" element={<ProtectedRoute allowedRoles={['delivery_partner']}><DeliverySlotDashboard /></ProtectedRoute>} />
 
                 {/* Catch-all route */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </div>
+            <SessionDebugger />
           </PWAWrapper>
         </BrowserRouter>
+          </NotificationProvider>
         </CartProvider>
       </AuthProvider>
     </TooltipProvider>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, Search, Trash2, Edit, Smartphone, AlertTriangle, Upload, FileText, Download, Check, X, BarChart3, TrendingUp, Calendar, Activity } from 'lucide-react';
+import { ArrowLeft, Plus, Search, Trash2, Edit, Smartphone, AlertTriangle, Upload, FileText, Download, Check, X, BarChart3, TrendingUp, Calendar, Activity, PieChart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,7 +14,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLe
 import { useToast } from '@/components/ui/use-toast';
 import Header from '@/components/Header';
 import { supabase } from '@/lib/supabase';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, PieChart, Pie, Cell, LineChart, Line, Area, AreaChart } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, PieChart as RePieChart, Pie, Cell, LineChart, Line, Area, AreaChart } from 'recharts';
 
 interface Brand {
   id: string;
@@ -284,11 +284,13 @@ const AdminModelsManagement = () => {
         description: errors.join('\n'),
         variant: "destructive",
       });
+      console.log("Validation errors:", errors); // Added for debugging
       return;
     }
 
     try {
       setLoading(true);
+      console.log("Attempting to add model with data:", newModel); // Added for debugging
       
       const modelData = {
         brand_id: newModel.brand_id,
@@ -330,13 +332,16 @@ const AdminModelsManagement = () => {
         release_year: ''
       });
       setIsAddDialogOpen(false);
+      console.log("Model added successfully. Dialog closed, form reset."); // Added for debugging
 
     } catch (error: any) {
-      console.error('Error adding model:', error);
+      console.error('Error adding model:', error); // Existing, but confirming its presence
       let errorMessage = "Failed to add model. Please try again.";
       
       if (error.code === '23505') {
         errorMessage = "A model with this name already exists for this brand.";
+      } else if (error.message) {
+        errorMessage = `Failed to add model: ${error.message}`; // More specific error
       }
       
       toast({
@@ -346,6 +351,7 @@ const AdminModelsManagement = () => {
       });
     } finally {
       setLoading(false);
+      console.log("Loading state set to false."); // Added for debugging
     }
   };
 
@@ -625,6 +631,25 @@ const AdminModelsManagement = () => {
     }
   };
 
+  const handleEditModel = async (model: Model) => {
+    // For now, let's open a dialog or set state to populate a form for editing
+    // You would likely have an `isEditDialogOpen` state and `editingModel` state
+    console.log('Editing model:', model);
+    toast({
+      title: "Edit Model",
+      description: `Prepare to edit model: ${model.model_number || model.model_name}`,
+    });
+    // In a full implementation, you'd set a state like setEditingModel(model) and setIsEditDialogOpen(true);
+  };
+
+  const handleSaveEdit = async (modelId: string) => {
+    // TODO: Implement save edit functionality
+    toast({
+      title: "Coming Soon!",
+      description: `Save edit for model ID ${modelId} is under development.`,
+    });
+  };
+
   if (initialLoading) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -727,6 +752,32 @@ const AdminModelsManagement = () => {
                   </div>
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-gray-600 text-sm">Newest Model</p>
+                      <p className="text-xl font-bold text-gray-900 line-clamp-1">{analyticsData.newestModel?.model_number || 'N/A'}</p>
+                      <p className="text-xs text-gray-500">{analyticsData.newestModel?.brand_name || ''} {analyticsData.newestModel?.release_year ? `(${analyticsData.newestModel.release_year})` : ''}</p>
+                    </div>
+                    <Calendar className="h-10 w-10 text-indigo-600" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-gray-600 text-sm">Oldest Model</p>
+                      <p className="text-xl font-bold text-gray-900 line-clamp-1">{analyticsData.oldestModel?.model_number || 'N/A'}</p>
+                      <p className="text-xs text-gray-500">{analyticsData.oldestModel?.brand_name || ''} {analyticsData.oldestModel?.release_year ? `(${analyticsData.oldestModel.release_year})` : ''}</p>
+                    </div>
+                    <Calendar className="h-10 w-10 text-rose-600" />
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
             {/* Quick Actions */}
@@ -752,6 +803,39 @@ const AdminModelsManagement = () => {
                     View Analytics
                   </Button>
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Recent Activity</CardTitle>
+                <CardDescription>Latest actions and updates on phone models</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {models.length > 0 ? (
+                  <div className="space-y-4">
+                    {models.slice(0, 5).map(model => (
+                      <div key={model.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-md">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                            <Activity className="h-4 w-4 text-blue-500" />
+                            {model.model_number || model.model_name} added ({model.brand_name})
+                          </p>
+                          <p className="text-xs text-gray-500 ml-6">
+                            {new Date(model.created_at).toLocaleString()}
+                          </p>
+                        </div>
+                        <Badge variant={model.is_active ? 'default' : 'secondary'}>
+                          {model.is_active ? 'Active' : 'Inactive'}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-4 text-gray-500">
+                    No recent activity.
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -803,7 +887,7 @@ const AdminModelsManagement = () => {
                 <CardContent>
                   <ChartContainer config={{}}>
                     <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
+                      <RePieChart>
                         <Pie
                           data={analyticsData.statusData}
                           cx="50%"
@@ -821,7 +905,7 @@ const AdminModelsManagement = () => {
                           content={<ChartTooltipContent />}
                         />
                         <ChartLegend content={<ChartLegendContent />} />
-                      </PieChart>
+                      </RePieChart>
                     </ResponsiveContainer>
                   </ChartContainer>
                 </CardContent>
@@ -874,46 +958,48 @@ const AdminModelsManagement = () => {
                   </ChartContainer>
                 </CardContent>
               </Card>
+
+              {/* Brand Market Share Chart */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <PieChart className="h-5 w-5" />
+                    Brand Market Share
+                  </CardTitle>
+                  <CardDescription>Percentage distribution of models by brand</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ChartContainer config={{}}>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <RePieChart>
+                        <Pie
+                          data={analyticsData.brandMarketShare}
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={120}
+                          fill="#8884d8"
+                          dataKey="total"
+                          nameKey="name"
+                          label={({ name, percentage }) => `${name} (${percentage}%)`}
+                          labelLine={false}
+                        >
+                          {analyticsData.brandMarketShare.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <ChartTooltip 
+                          content={<ChartTooltipContent formatter={(value: number, name: string) => [`${value} models`, name]} />}
+                        />
+                        <ChartLegend content={<ChartLegendContent />} />
+                      </RePieChart>
+                    </ResponsiveContainer>
+                  </ChartContainer>
+                </CardContent>
+              </Card>
             </div>
 
             {/* Brand Market Share Table */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Brand Market Share</CardTitle>
-                <CardDescription>Detailed breakdown of models by brand with percentages</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Brand</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Models</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Active</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Inactive</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Market Share</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {analyticsData.brandMarketShare.map((brand, index) => (
-                        <tr key={brand.name} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center">
-                              <div className={`w-3 h-3 rounded-full mr-3`} style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }}></div>
-                              <span className="text-sm font-medium text-gray-900">{brand.name}</span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{brand.total}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600">{brand.active}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600">{brand.inactive}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{brand.percentage}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
+            {/* Removing the existing Brand Market Share Table as it's replaced by the chart */}
           </TabsContent>
 
           <TabsContent value="manage" className="space-y-6">
@@ -1018,23 +1104,24 @@ const AdminModelsManagement = () => {
                   </div>
                   
                   {!csvUploaded ? (
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-6">
-                      <div className="text-center">
-                        <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                        <h3 className="text-lg font-medium text-gray-900 mb-2">Upload CSV File</h3>
-                        <p className="text-gray-500 mb-4">
-                          Choose a CSV file with phone models data
-                        </p>
-                        <input
+                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 relative group">
+                      <input
                           ref={fileInputRef}
                           type="file"
                           accept=".csv"
                           onChange={handleCSVUpload}
-                          className="hidden"
+                          className="absolute inset-0 opacity-0 cursor-pointer"
                         />
+                      <div className="text-center flex flex-col items-center justify-center p-4">
+                        <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4 group-hover:text-blue-500 transition-colors" />
+                        <h3 className="text-lg font-medium text-gray-900 mb-2">Drag & Drop or Click to Upload CSV</h3>
+                        <p className="text-gray-500 mb-4">
+                          Supports CSV files with model data (e.g., brand, model_name, full_model_name, release_year)
+                        </p>
                         <Button
                           onClick={() => fileInputRef.current?.click()}
                           disabled={csvLoading}
+                          className="pointer-events-none" // Prevent button from intercepting click from input
                         >
                           {csvLoading ? (
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
@@ -1247,6 +1334,39 @@ const AdminModelsManagement = () => {
                             >
                               {model.is_active ? 'Deactivate' : 'Activate'}
                             </Button>
+                            
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleEditModel(model)}
+                                  disabled={loading}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle className="flex items-center gap-2">
+                                    <AlertTriangle className="h-5 w-5 text-blue-500" />
+                                    Edit Model
+                                  </AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Edit the details of "{model.model_number || model.model_name}"
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    onClick={() => handleSaveEdit(model.id)}
+                                    className="bg-blue-600 hover:bg-blue-700"
+                                  >
+                                    Save Changes
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
                             
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
